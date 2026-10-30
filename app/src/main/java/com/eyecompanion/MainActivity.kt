@@ -97,10 +97,14 @@ class MainActivity : Activity() {
     private fun findOrDownloadLlm(): File {
         val ext = getExternalFilesDir(null)
         ext?.listFiles()?.firstOrNull { it.name.endsWith(".gguf") && it.length() > 0 }?.let { return it }
-        val dest = File(filesDir, "brain.gguf")
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mem = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        val small = Build.SUPPORTED_64_BIT_ABIS.isEmpty() || mem.totalMem < 3_500_000_000L
+        val dest = File(filesDir, if (small) "brain-small.gguf" else "brain.gguf")
         if (!dest.exists()) {
-            status("Downloading my brain (about 800 MB, one time only)…")
-            Downloads.fetch(Downloads.LLM_URL, dest) { p ->
+            status(if (small) "Downloading my brain (about 400 MB, one time only)…"
+                   else "Downloading my brain (about 800 MB, one time only)…")
+            Downloads.fetch(if (small) Downloads.SMALL_LLM_URL else Downloads.LLM_URL, dest) { p ->
                 status(if (p >= 0) "Downloading my brain… ${(p * 100).toInt()}%" else "Downloading my brain…")
             }
         }
@@ -279,10 +283,20 @@ class MainActivity : Activity() {
         if (hasFocus) hideSystemBars()
     }
 
+    @Suppress("DEPRECATION")
     private fun hideSystemBars() {
-        window.insetsController?.let {
-            it.hide(WindowInsets.Type.systemBars())
-            it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.insetsController?.let {
+                it.hide(WindowInsets.Type.systemBars())
+                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            window.decorView.systemUiVisibility = (android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
         }
     }
 

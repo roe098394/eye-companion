@@ -13,6 +13,9 @@ import java.util.zip.ZipInputStream
 object Downloads {
     const val LLM_URL =
         "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+    /** Smaller, faster brain for older or 32-bit tablets. */
+    const val SMALL_LLM_URL =
+        "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
     const val VOSK_URL =
         "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
 

@@ -18,10 +18,7 @@ set(BUILD_SHARED_LIBS    OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE          OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP          OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_KLEIDIAI    OFF CACHE BOOL "" FORCE)
-if(ANDROID_ABI STREQUAL "arm64-v8a")
-    # Snapdragon 750G (Cortex-A77/A55) supports dotprod + fp16
-    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
-endif()
+# Baseline ARM build so it runs on older tablets too (no dotprod/fp16 required)
 
 FetchContent_Declare(
     llama
