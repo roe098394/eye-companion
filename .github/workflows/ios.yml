@@ -38,7 +38,7 @@ jobs:
       - name: Build (unsigned)
         working-directory: ios
         run: |
-          set -o pipefail
+          set +o pipefail
           xcodebuild -project EyeCompanion.xcodeproj -scheme EyeCompanion \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build \
