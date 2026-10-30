@@ -19,6 +19,10 @@ set(GGML_NATIVE          OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP          OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_KLEIDIAI    OFF CACHE BOOL "" FORCE)
 # Baseline ARM build so it runs on older tablets too (no dotprod/fp16 required)
+if(ANDROID_ABI STREQUAL "armeabi-v7a")
+    # llamafile's fast matmul needs fp16 NEON, which 32-bit ARM builds lack
+    set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
+endif()
 
 FetchContent_Declare(
     llama
