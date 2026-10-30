@@ -1,0 +1,72 @@
+name: Build iPhone app
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  LLAMA_TAG: b12017
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Get llama.cpp framework
+        run: |
+          curl -sSL -o llama.zip "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-xcframework.zip"
+          unzip -q llama.zip -d llama_unzipped
+          FW=$(find llama_unzipped -type d -name "llama.xcframework" | head -1)
+          mkdir -p ios/Frameworks
+          mv "$FW" ios/Frameworks/llama.xcframework
+          ls ios/Frameworks/llama.xcframework
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: |
+          brew install xcodegen
+          sed -i '' "s/CURRENT_PROJECT_VERSION: \"1\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" project.yml
+          xcodegen generate
+
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project EyeCompanion.xcodeproj -scheme EyeCompanion \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build > build.log 2>&1 || true
+          grep -E "BUILD (SUCCEEDED|FAILED)" build.log || true
+          # surface compiler errors as annotations so they're readable from the run summary
+          grep -E "error:" build.log | sed -E 's#^.*/(Sources/[^:]+:[0-9]+):[0-9]+: error: #\1 #' | sort -u | head -20 | while read -r l; do echo "::error::$l"; done
+          test -d build/Build/Products/Release-iphoneos/EyeCompanion.app
+
+      - name: Package .ipa
+        working-directory: ios
+        run: |
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/EyeCompanion.app Payload/
+          zip -qry ../EyeCompanion.ipa Payload
+
+      - name: Save build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios/build.log
+
+      - name: Publish as a release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ios-build-${{ github.run_number }}
+          name: iPhone build ${{ github.run_number }}
+          files: EyeCompanion.ipa
+          make_latest: false
