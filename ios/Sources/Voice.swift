@@ -68,7 +68,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     static func cleanForSpeech(_ s: String) -> String {
         var out = s.replacingOccurrences(of: "[*#_`~>|]", with: " ", options: .regularExpression)
-        out = String(out.unicodeScalars.filter { !($0.properties.isEmojiPresentation || $0.properties.isExtendedPictographic) }
+        out = String(out.unicodeScalars.filter { !($0.properties.isEmojiPresentation || ($0.properties.isEmoji && $0.value > 0x238C)) }
                         .map(Character.init))
         return out.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
