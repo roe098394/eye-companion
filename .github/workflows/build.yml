@@ -32,7 +32,11 @@ jobs:
       - name: Build APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace
+          if ! ./gradlew assembleRelease > gradle.log 2>&1; then
+            MSG=$( (grep -E "error:|error -|FAILED|What went wrong|e: " gradle.log | sort -u | head -25; echo ----; grep -A8 "What went wrong" gradle.log | head -20) | cut -c1-300 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Build log::$MSG"
+            exit 1
+          fi
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk EyeCompanion.apk
