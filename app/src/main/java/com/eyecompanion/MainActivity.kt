@@ -291,6 +291,7 @@ class MainActivity : Activity() {
             startMode = prefs.getInt("micMode", 0),
         ).also { it.start() }
 
+        watchForPluggedInMics()
         eyes.subCaption = ""
         setPhase(if (prefs.getBoolean("asleep", false)) Phase.ASLEEP else Phase.LISTENING)
         if (phase == Phase.LISTENING) eyes.caption = "Hi! I'm listening."
@@ -332,6 +333,42 @@ class MainActivity : Activity() {
         voice?.shutUp()
         currentReply.clear()
         setPhase(Phase.LISTENING)
+    }
+
+    private var micWatcher: android.media.AudioDeviceCallback? = null
+
+    /** When a USB/wired mic is plugged in or out, reopen the ears so they use it straight away. */
+    private fun watchForPluggedInMics() {
+        if (micWatcher != null) return
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val isMic = { d: android.media.AudioDeviceInfo -> d.isSource && d.type != android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC &&
+            d.type != android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO && d.type != android.media.AudioDeviceInfo.TYPE_TELEPHONY }
+        micWatcher = object : android.media.AudioDeviceCallback() {
+            var first = true
+            override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>) {
+                if (first) { first = false; return }      // initial list on registration
+                if (added.any(isMic)) restartEars("Plugged-in mic found — using it.")
+            }
+            override fun onAudioDevicesRemoved(removed: Array<out android.media.AudioDeviceInfo>) {
+                if (removed.any(isMic)) restartEars("Mic unplugged — back to my own.")
+            }
+        }
+        am.registerAudioDeviceCallback(micWatcher, main)
+    }
+
+    private fun restartEars(msg: String) {
+        val model = voskModel ?: return
+        ears?.stop()
+        ears = Ears(
+            this, model,
+            onPartial = { p -> main.post { partial(p) } },
+            onHeard = { text -> main.post { heard(text) } },
+            onLevel = { l -> eyes.level = l },
+            onError = { m -> main.post { eyes.caption = m } },
+            startMode = 0,
+        ).also { it.start() }
+        setPhase(phase)
+        eyes.caption = msg
     }
 
     private fun heard(text: String) {

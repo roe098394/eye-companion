@@ -76,8 +76,12 @@ class Ears(
     @SuppressLint("MissingPermission")
     private fun openMic(from: Int): Opened? {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val builtIn = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
-            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+        val inputs = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
+        // A plugged-in USB or wired mic wins; otherwise the tablet's own mic.
+        // (Bluetooth mics are skipped on purpose: using one drops the speaker to call quality.)
+        val builtIn = inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_USB_DEVICE || it.type == AudioDeviceInfo.TYPE_USB_HEADSET }
+            ?: inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET }
+            ?: inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
         for (i in from until setups.size) {
             val m = setups[i]
             val minBuf = AudioRecord.getMinBufferSize(m.rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -86,8 +90,8 @@ class Ears(
                 AudioRecord(m.source, m.rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf * 2, m.rate))
             } catch (e: Exception) { null } ?: continue
             if (rec.state != AudioRecord.STATE_INITIALIZED) { rec.release(); continue }
-            // Pin to the built-in mic so a Bluetooth speaker stays in high-quality mode.
-            if (m.pinBuiltIn) builtIn?.let { rec.setPreferredDevice(it) }
+            // Pin to a wired/built-in mic so a Bluetooth speaker stays in high-quality mode.
+            if (m.pinBuiltIn || builtIn?.type != AudioDeviceInfo.TYPE_BUILTIN_MIC) builtIn?.let { rec.setPreferredDevice(it) }
             try { rec.startRecording() } catch (e: Exception) { rec.release(); continue }
             if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) { rec.release(); continue }
             try {
