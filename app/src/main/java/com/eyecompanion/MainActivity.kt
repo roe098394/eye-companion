@@ -30,6 +30,13 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("companion", Context.MODE_PRIVATE) }
 
     private var brain: Brain? = null
+    /** Optional bigger brain on a PC (Ollama) on the same Wi-Fi. */
+    private val pc by lazy {
+        PcBrain { systemPrompt() }.apply {
+            host = prefs.getString("pcHost", null)
+            model = prefs.getString("pcModel", null)
+        }
+    }
     private var ears: Ears? = null
     private var voice: Voice? = null
     private var voskModel: Model? = null
@@ -331,7 +338,7 @@ class MainActivity : Activity() {
     /** Stop thinking/talking immediately and go back to listening. */
     private fun interrupt() {
         replyId++
-        brain?.stop()
+        brain?.stop(); pc.stop()
         voice?.shutUp()
         currentReply.clear()
         setPhase(Phase.LISTENING)
@@ -385,7 +392,7 @@ class MainActivity : Activity() {
         }
         val lower = text.lowercase()
         if (lower in GO_TO_SLEEP) { goToSleep(); return }
-        if (lower in FORGET) { brain?.forget(); speakLine("Okay, fresh start."); return }
+        if (lower in FORGET) { forgetAll(); speakLine("Okay, fresh start."); return }
         quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
 
         setPhase(Phase.THINKING)
@@ -396,23 +403,107 @@ class MainActivity : Activity() {
         val id = ++replyId
         currentReply.clear()
         v.beginReply()
-        brain?.ask(text,
-            onToken = { piece ->
-                main.post {
-                    if (id != replyId) return@post        // an old, interrupted reply
-                    v.feed(piece)
-                    currentReply.append(piece)
-                    eyes.caption = currentReply.toString().trim()
-                }
-                id == replyId                              // false tells the brain to stop
-            },
-            onDone = { full ->
-                main.post {
-                    if (id != replyId) return@post
-                    if (full.isBlank()) eyes.caption = ""
-                    v.endReply()
-                }
+        val onToken = { piece: String ->
+            main.post {
+                if (id != replyId) return@post        // an old, interrupted reply
+                v.feed(piece)
+                currentReply.append(piece)
+                eyes.caption = currentReply.toString().trim()
+            }
+            id == replyId                              // false tells the brain to stop
+        }
+        val onDone = { full: String ->
+            main.post {
+                if (id != replyId) return@post
+                if (full.isBlank()) eyes.caption = ""
+                v.endReply()
+            }
+            Unit
+        }
+        if (pc.worthTrying) {
+            pc.ask(text, onToken, onDone, onUnavailable = {
+                // PC is off or out of range: the tablet's own brain answers instead
+                main.post { if (id == replyId) eyes.subCaption = "You: $text" }
+                brain?.ask(text, onToken, onDone) ?: onDone("")
             })
+            eyes.subCaption = "You: $text  · PC brain"
+        } else {
+            brain?.ask(text, onToken, onDone)
+        }
+    }
+
+    private fun forgetAll() { brain?.forget(); pc.forget() }
+
+    /** Find or set up the PC brain. */
+    private fun setupPcBrain() {
+        val current = pc.host
+        val status = if (current == null) "Not set up." else "Using ${pc.model ?: "a model"} on $current."
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("PC brain")
+            .setMessage("$status\n\nYour PC needs Ollama running with a model installed (see the guide on GitHub). " +
+                "At home I'll think with the PC; away from it I'll use my own brain.")
+            .setPositiveButton("Search my Wi-Fi") { _, _ -> searchForPc() }
+            .setNeutralButton("Type address") { _, _ -> typePcAddress() }
+            .setNegativeButton(if (current == null) "Cancel" else "Turn off") { _, _ ->
+                if (current != null) {
+                    pc.host = null; pc.model = null
+                    prefs.edit().remove("pcHost").remove("pcModel").apply()
+                    speakLine("Okay, just my own brain now.")
+                }
+            }
+            .show()
+    }
+
+    private fun searchForPc() {
+        eyes.caption = "Looking for your PC on the Wi-Fi…"
+        eyes.mood = EyesView.Mood.THINK
+        thread(name = "find-pc") {
+            val found = PcBrain.findPc()
+            main.post { if (found == null) pcNotFound() else usePc(found) }
+        }
+    }
+
+    private fun typePcAddress() {
+        val input = android.widget.EditText(this).apply {
+            hint = "e.g. 192.168.1.20"
+            setText(pc.host ?: "")
+            inputType = android.text.InputType.TYPE_CLASS_PHONE
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("PC's IP address")
+            .setView(input)
+            .setPositiveButton("Connect") { _, _ ->
+                val h = input.text.toString().trim()
+                if (h.isNotEmpty()) {
+                    eyes.caption = "Checking $h…"
+                    thread { val ok = PcBrain.listModels(h) != null; main.post { if (ok) usePc(h) else pcNotFound() } }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun usePc(h: String) {
+        thread {
+            val m = PcBrain.pickModel(h)
+            main.post {
+                if (m == null) {
+                    setPhase(phase)
+                    eyes.caption = "Found Ollama on $h but no model is installed. On the PC run: ollama pull llama3.2:3b"
+                    return@post
+                }
+                pc.host = h; pc.model = m
+                prefs.edit().putString("pcHost", h).putString("pcModel", m).apply()
+                applyMode()
+                speakLine("Connected to your PC's brain. I'm using $m.")
+            }
+        }
+    }
+
+    private fun pcNotFound() {
+        setPhase(phase)
+        eyes.caption = "Couldn't find the PC. Check Ollama is running, OLLAMA_HOST is set to 0.0.0.0, " +
+            "the firewall allows it, and both are on the same Wi-Fi."
     }
 
     /** Things a small offline brain can't know, answered from the tablet itself. */
@@ -445,6 +536,8 @@ class MainActivity : Activity() {
         eyes.carMode = car
         brain?.maxReplyTokens = if (car) 60 else Brain.MAX_REPLY_TOKENS
         brain?.maxTurns = if (car) 4 else Brain.MAX_TURNS
+        pc.maxReplyTokens = if (car) 70 else 220
+        pc.maxTurns = if (car) 6 else 12
         voice?.setStyle(pitch = if (car) 0.92f else 1.15f, rate = if (car) 1.1f else 1.05f)
         applyNightDimming()
     }
@@ -470,7 +563,7 @@ class MainActivity : Activity() {
             .setPositiveButton("Save") { _, _ ->
                 val n = input.text.toString().trim().take(20).ifEmpty { "Pip" }
                 prefs.edit().putString("name", n).apply()
-                brain?.forget()
+                forgetAll()
                 speakLine("Okay, I'm $n now.")
             }
             .setNegativeButton("Cancel", null)
@@ -504,7 +597,7 @@ class MainActivity : Activity() {
     }
 
     private fun goToSleep() {
-        voice?.shutUp(); brain?.stop()
+        voice?.shutUp(); brain?.stop(); pc.stop()
         prefs.edit().putBoolean("asleep", true).apply()
         eyes.caption = ""; eyes.subCaption = ""
         setPhase(Phase.ASLEEP)
@@ -566,6 +659,7 @@ class MainActivity : Activity() {
             "Open Android settings",
             if (carMode) "Car mode: ON (tap for home mode)" else "Car mode: off (tap to turn on)",
             "Change my name…",
+            if (pc.host != null) "PC brain: ON (${pc.model ?: pc.host})" else "Use my PC's brain (much smarter)…",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -573,7 +667,7 @@ class MainActivity : Activity() {
                 when (which) {
                     0 -> if (phase == Phase.ASLEEP) wakeUp() else if (phase != Phase.SETUP) goToSleep()
                     1 -> { eyes.showCaptions = !eyes.showCaptions; prefs.edit().putBoolean("captions", eyes.showCaptions).apply() }
-                    2 -> brain?.forget()
+                    2 -> forgetAll()
                     3 -> { voiceInterrupt = !voiceInterrupt; setPhase(phase) }
                     4 -> chooseBrain()
                     5 -> micTest()
@@ -589,10 +683,11 @@ class MainActivity : Activity() {
                     11 -> {
                         prefs.edit().putBoolean("carMode", !carMode).apply()
                         applyMode()
-                        brain?.forget()
+                        forgetAll()
                         speakLine(if (carMode) "Car mode on. Drive safely." else "Back to home mode.")
                     }
                     12 -> renameCompanion()
+                    13 -> setupPcBrain()
                 }
             }
             .show()
