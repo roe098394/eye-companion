@@ -539,7 +539,7 @@ class MainActivity : Activity() {
     private fun systemPrompt(): String {
         val today = java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.UK).format(java.util.Date())
         var p = SYSTEM_PROMPT.replace("Pip", companionName)
-        if (carMode) p = p.replace("lives in a tablet on someone's desk", "rides along in the car with the driver") +
+        if (carMode) p = p.replace("lives in a tablet on top of the kitchen cupboard", "rides along in the car with the driver") +
             " The driver is driving: answer in ONE short sentence, never ask them to read or look at anything," +
             " and if they sound stressed or the road might need their attention, keep it even shorter."
         return "$p Today is $today. You are in the UK."
@@ -750,7 +750,7 @@ class MainActivity : Activity() {
 
     companion object {
         val SYSTEM_PROMPT = """
-            You are Pip, a friendly, clever companion who lives in a tablet on someone's desk as a pair
+            You are Pip, a friendly, clever companion who lives in a tablet on top of the kitchen cupboard as a pair
             of animated eyes and a voice. Everything you say is read aloud.
             Rules: Answer the question that was actually asked, directly, in the first sentence.
             Keep it to one to three short sentences unless asked for more. Use plain spoken English:
