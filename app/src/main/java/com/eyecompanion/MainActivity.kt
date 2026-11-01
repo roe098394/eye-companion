@@ -83,12 +83,22 @@ class MainActivity : Activity() {
                 val vosk = findOrDownloadVosk()
 
                 status("Waking up…")
-                LibVosk.setLogLevel(LogLevel.WARNINGS)
-                voskModel = Model(vosk.absolutePath)
-
+                // Brain first: it needs the biggest single block of memory.
                 val b = Brain(llm.absolutePath) { systemPrompt() }
                 brain = b
                 b.load { ok ->
+                    if (ok) {
+                        try {
+                            LibVosk.setLogLevel(LogLevel.WARNINGS)
+                            voskModel = Model(vosk.absolutePath)
+                        } catch (e: Throwable) {
+                            // big ears didn't fit: drop to the small speech model next time
+                            prefs.edit().putBoolean("smallEars", true).apply()
+                            status("My ears were too big for this tablet. Long-press → Retry setup.")
+                            setupStarted = false
+                            return@load
+                        }
+                    }
                     main.post {
                         if (!ok) { brainFailed(llm); return@post }
                         prefs.edit().remove("brainRetried").apply()
@@ -140,13 +150,25 @@ class MainActivity : Activity() {
         return dest
     }
 
+    /** Big speech model only on roomy 64-bit tablets; older ones keep the small, light one. */
+    private fun chosenEars(): Downloads.EarsChoice {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mem = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem
+        val roomy = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() && mem >= 3_500_000_000L
+        return if (roomy && !prefs.getBoolean("smallEars", false)) Downloads.EARS_BIG else Downloads.EARS_SMALL
+    }
+
     private fun findOrDownloadVosk(): File {
-        val root = File(filesDir, Downloads.VOSK_DIR)
+        val ears = chosenEars()
+        val root = File(filesDir, ears.dir)
         Downloads.findVoskModel(root)?.let { return it }
-        File(filesDir, "vosk").deleteRecursively()          // old small model
+        // remove the other speech model to save space
+        listOf(Downloads.EARS_BIG, Downloads.EARS_SMALL).filter { it.dir != ears.dir }
+            .forEach { File(filesDir, it.dir).deleteRecursively() }
         val zip = File(filesDir, "vosk.zip")
-        status("Downloading better ears (about ${Downloads.VOSK_MB} MB)…")
-        Downloads.fetch(Downloads.VOSK_URL, zip) { p ->
+        zip.delete(); File(filesDir, "vosk.zip.part").delete()
+        status("Downloading my ears (about ${ears.sizeMb} MB)…")
+        Downloads.fetch(ears.url, zip) { p ->
             status(if (p >= 0) "Downloading my ears… ${(p * 100).toInt()}%" else "Downloading my ears…")
         }
         status("Unpacking…")
@@ -161,8 +183,10 @@ class MainActivity : Activity() {
         val current = chosenBrain()
         val custom = file.parentFile != filesDir
         if (custom) { status("Couldn't load your own .gguf file. Remove it from the app folder, then Retry setup."); return }
+        // Only re-download if the file looks the wrong size; otherwise it's simply too big for the tablet.
+        val sizeOk = kotlin.math.abs(file.length() / 1_000_000 - current.sizeMb) < current.sizeMb / 12
         file.delete()
-        val retried = prefs.getBoolean("brainRetried", false)
+        val retried = prefs.getBoolean("brainRetried", false) || sizeOk
         val idx = Downloads.BRAINS.indexOf(current)
         when {
             !retried -> {

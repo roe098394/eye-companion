@@ -26,11 +26,10 @@ object Downloads {
             "brain-large.gguf", 1120),
     )
 
-    /** Big-vocabulary speech model: much better at hearing you correctly than the tiny one. */
-    const val VOSK_URL =
-        "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
-    const val VOSK_DIR = "vosk-lgraph"
-    const val VOSK_MB = 128
+    /** Speech models: the big one hears far better but needs a roomier tablet. */
+    data class EarsChoice(val url: String, val dir: String, val sizeMb: Int)
+    val EARS_BIG = EarsChoice("https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip", "vosk-lgraph", 128)
+    val EARS_SMALL = EarsChoice("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip", "vosk", 40)
 
     /** progress: 0..1, or -1 if unknown size */
     fun fetch(url: String, dest: File, progress: (Float) -> Unit) {
