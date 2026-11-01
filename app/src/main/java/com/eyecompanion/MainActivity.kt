@@ -35,6 +35,7 @@ class MainActivity : Activity() {
         PcBrain { systemPrompt() }.apply {
             host = prefs.getString("pcHost", null)
             model = null   // re-checked on first question, so a better model on the PC is picked up automatically
+            onHostChanged = { h -> prefs.edit().putString("pcHost", h).apply() }
         }
     }
     private var ears: Ears? = null
@@ -311,6 +312,7 @@ class MainActivity : Activity() {
 
         watchForPluggedInMics()
         applyMode()
+        pc.checkOnStart()
         eyes.subCaption = ""
         setPhase(if (prefs.getBoolean("asleep", false)) Phase.ASLEEP else Phase.LISTENING)
         if (phase == Phase.LISTENING) eyes.caption = if (carMode) "Ready when you are." else "Hi! I'm listening."

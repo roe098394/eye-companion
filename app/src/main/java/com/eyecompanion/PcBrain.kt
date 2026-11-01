@@ -28,6 +28,37 @@ class PcBrain(private val systemPrompt: () -> String) {
     private val history = ArrayList<Pair<String, String>>()
     @Volatile private var stopRequested = false
     @Volatile private var lastFailure = 0L
+    @Volatile private var lastSearch = 0L
+    @Volatile private var searching = false
+
+    /** Called (on a background thread) when the PC turns up at a new address, so it can be saved. */
+    var onHostChanged: (String) -> Unit = {}
+
+    /**
+     * The saved address didn't answer. The router may have given the PC a new one, so look round
+     * the Wi-Fi in the background (at most every 3 minutes) and switch to it if found.
+     */
+    fun searchAgainInBackground() {
+        val now = System.currentTimeMillis()
+        if (host == null || searching || now - lastSearch < 180_000) return
+        searching = true
+        lastSearch = now
+        Thread({
+            try {
+                val found = findPc()
+                if (found != null) {
+                    if (found != host) { host = found; model = null; onHostChanged(found) }
+                    lastFailure = 0L          // try it straight away next time
+                }
+            } finally { searching = false }
+        }, "pc-search").start()
+    }
+
+    /** Quick check at start-up: if the saved address is silent, start a search. */
+    fun checkOnStart() {
+        val h = host ?: return
+        Thread({ if (listModels(h, 1500) == null) { lastFailure = System.currentTimeMillis(); searchAgainInBackground() } }, "pc-check").start()
+    }
 
     /** Skip the PC for a minute after it couldn't be reached (e.g. out in the car). */
     val worthTrying get() = host != null && System.currentTimeMillis() - lastFailure > 60_000
@@ -89,6 +120,7 @@ class PcBrain(private val systemPrompt: () -> String) {
             if (reply.isEmpty()) {
                 history.removeAt(history.lastIndex)
                 lastFailure = System.currentTimeMillis()
+                searchAgainInBackground()
                 onUnavailable(e.message ?: "PC not reachable")
                 return@execute
             }
