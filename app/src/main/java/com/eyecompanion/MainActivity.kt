@@ -66,6 +66,7 @@ class MainActivity : Activity() {
         voice?.shutUp(); voice?.shutdown(); voice = null
         brain?.release(); brain = null
         setupStarted = true
+        phase = Phase.SETUP
         eyes.mood = EyesView.Mood.LOADING
         thread(name = "setup") {
             try {
