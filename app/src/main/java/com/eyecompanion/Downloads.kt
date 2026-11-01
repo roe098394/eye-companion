@@ -15,7 +15,7 @@ object Downloads {
     data class BrainChoice(val key: String, val label: String, val url: String, val file: String, val sizeMb: Int)
 
     val BRAINS = listOf(
-        BrainChoice("fast", "Fast (Qwen 0.5B) – quick but simple", 
+        BrainChoice("fast", "Fast (Qwen 0.5B) – quick but simple",
             "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
             "brain-small.gguf", 490),
         BrainChoice("smart", "Smarter (Llama 3.2 1B) – good balance",
@@ -30,6 +30,15 @@ object Downloads {
     data class EarsChoice(val url: String, val dir: String, val sizeMb: Int)
     val EARS_BIG = EarsChoice("https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip", "vosk-lgraph", 128)
     val EARS_SMALL = EarsChoice("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip", "vosk", 40)
+
+    /** Small model that recognises *who* is speaking. */
+    const val SPEAKER_URL = "https://alphacephei.com/vosk/models/vosk-model-spk-0.4.zip"
+    const val SPEAKER_DIR = "vosk-spk"
+
+    fun findSpeakerModel(root: File): File? {
+        if (File(root, "final.ext.raw").exists()) return root
+        return root.listFiles()?.filter { it.isDirectory }?.firstNotNullOfOrNull { findSpeakerModel(it) }
+    }
 
     /** progress: 0..1, or -1 if unknown size */
     fun fetch(url: String, dest: File, progress: (Float) -> Unit) {

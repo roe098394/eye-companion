@@ -49,6 +49,15 @@ class MainActivity : Activity() {
     private var ears: Ears? = null
     private var voice: Voice? = null
     private var voskModel: Model? = null
+    private var speakerModel: org.vosk.SpeakerModel? = null
+    private val voices by lazy { Voices(prefs) }
+    /** A new voice we've just asked "who's this?" — waiting for their name. */
+    private class Intro(val print: FloatArray?, val question: String, val at: Long)
+    private var pendingIntro: Intro? = null
+    private var lastAskedWho = 0L
+    private var voiceNames: Boolean
+        get() = prefs.getBoolean("voiceNames", true)
+        set(v) { prefs.edit().putBoolean("voiceNames", v).apply() }
 
     private enum class Phase { SETUP, ASLEEP, LISTENING, THINKING, TALKING }
     private var phase = Phase.SETUP
@@ -114,6 +123,8 @@ class MainActivity : Activity() {
                         try {
                             LibVosk.setLogLevel(LogLevel.WARNINGS)
                             voskModel = Model(vosk.absolutePath)
+                            speakerModel = try { findOrDownloadSpeakerModel()?.let { org.vosk.SpeakerModel(it.absolutePath) } }
+                                           catch (_: Throwable) { null }   // optional: just won't know voices
                         } catch (e: Throwable) {
                             // big ears didn't fit: drop to the small speech model next time
                             prefs.edit().putBoolean("smallEars", true).apply()
@@ -182,6 +193,20 @@ class MainActivity : Activity() {
         return if (roomy && !prefs.getBoolean("smallEars", false)) Downloads.EARS_BIG else Downloads.EARS_SMALL
     }
 
+    /** The small "who's speaking" model (13 MB). Optional — returns null if it can't be had. */
+    private fun findOrDownloadSpeakerModel(): File? = try {
+        val root = File(filesDir, Downloads.SPEAKER_DIR)
+        Downloads.findSpeakerModel(root) ?: run {
+            val zip = File(filesDir, "spk.zip")
+            status("Learning to recognise voices (13 MB)…")
+            Downloads.fetch(Downloads.SPEAKER_URL, zip) { }
+            root.deleteRecursively()
+            Downloads.unzip(zip, root)
+            zip.delete()
+            Downloads.findSpeakerModel(root)
+        }
+    } catch (_: Exception) { null }
+
     private fun findOrDownloadVosk(): File {
         val ears = chosenEars()
         val root = File(filesDir, ears.dir)
@@ -249,7 +274,8 @@ class MainActivity : Activity() {
         val e = Ears(
             this, model,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text, conf -> main.post { heard(text, conf) } },
+            onHeard = { text, conf, print -> main.post { heard(text, conf, print) } },
+            speakerModel = speakerModel,
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post { eyes.caption = msg } },
             startMode = next,
@@ -301,18 +327,19 @@ class MainActivity : Activity() {
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
             if (phase == Phase.TALKING || phase == Phase.THINKING) {
-                deafUntil = System.currentTimeMillis() + 1800
+                deafUntil = System.currentTimeMillis() + 1000
                 ears?.paused = true
                 main.postDelayed({
                     if (phase == Phase.TALKING || phase == Phase.THINKING) setPhase(Phase.LISTENING)
-                }, 1800)
+                }, 1000)
             }
         } }
 
         ears = Ears(
             this, voskModel!!,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text, conf -> main.post { heard(text, conf) } },
+            onHeard = { text, conf, print -> main.post { heard(text, conf, print) } },
+            speakerModel = speakerModel,
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post { eyes.caption = msg } },
             startMode = prefs.getInt("micMode", 0),
@@ -392,7 +419,8 @@ class MainActivity : Activity() {
         ears = Ears(
             this, model,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text, conf -> main.post { heard(text, conf) } },
+            onHeard = { text, conf, print -> main.post { heard(text, conf, print) } },
+            speakerModel = speakerModel,
             onLevel = { l -> eyes.level = l },
             onError = { m -> main.post { eyes.caption = m } },
             startMode = 0,
@@ -401,7 +429,8 @@ class MainActivity : Activity() {
         eyes.caption = msg
     }
 
-    private fun heard(text: String, conf: Float = 1f) {
+    private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null) {
+        var text = rawText
         if (phase == Phase.LISTENING) {
             if (System.currentTimeMillis() < deafUntil) return   // tail end of its own voice
             if (conf < 0.6f) return                              // not sure what was said: stay quiet
@@ -420,9 +449,45 @@ class MainActivity : Activity() {
         if (lower in FORGET) { forgetAll(); speakLine("Okay, fresh start."); return }
         quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
 
+        // --- who's talking? ---
+        val now = System.currentTimeMillis()
+        var speaker: String? = null
+        var firstMeeting = false
+        val intro = pendingIntro?.takeIf { now - it.at < 25_000 }
+        pendingIntro = null
+        if (intro != null) {
+            val name = Voices.parseName(text)
+            if (name != null) {
+                intro.print?.let { voices.remember(name, it) }
+                print?.let { voices.remember(name, it) }
+                speaker = name; firstMeeting = true
+                text = intro.question                       // now answer what they first asked
+            }
+        }
+        if (speaker == null && print != null && voiceNames && speakerModel != null) {
+            val match = voices.identify(print)
+            if (match != null) {
+                speaker = match.first
+                if (match.second > 0.7f) voices.remember(match.first, print)   // keep their voice print fresh
+            } else if (now - lastAskedWho > 120_000) {
+                lastAskedWho = now
+                pendingIntro = Intro(print, text, now)
+                eyes.subCaption = "You: $text"
+                speakLine(if (voices.names.isEmpty()) "Hold up, I don't know your voice yet. Who am I talking to?"
+                          else "Wait, I don't recognise that voice. Who's this?")
+                return
+            }
+        }
+
+        val shown = if (speaker != null) "$speaker: $text" else "You: $text"
+        text = when {
+            firstMeeting -> "[$speaker, meeting you for the first time] $text"
+            speaker != null -> "[$speaker] $text"
+            else -> text
+        }
         setPhase(Phase.THINKING)
         ears?.reset()
-        eyes.subCaption = "You: $text"
+        eyes.subCaption = shown
         eyes.caption = ""
         val v = voice ?: return
         val id = ++replyId
@@ -447,19 +512,19 @@ class MainActivity : Activity() {
         }
         // Cleverest available first: online, then the PC, then the tablet's own brain.
         val askTablet = {
-            main.post { if (id == replyId) eyes.subCaption = "You: $text" }
+            main.post { if (id == replyId) eyes.subCaption = shown }
             brain?.ask(text, onToken, onDone) ?: onDone("")
             Unit
         }
         val askPc = {
             if (pc.worthTrying) {
-                main.post { if (id == replyId) eyes.subCaption = "You: $text  · PC brain" }
+                main.post { if (id == replyId) eyes.subCaption = "$shown  · PC brain" }
                 pc.ask(text, onToken, onDone, onUnavailable = { askTablet() })
             } else askTablet()
             Unit
         }
         if (online.worthTrying) {
-            eyes.subCaption = "You: $text  · online brain"
+            eyes.subCaption = "$shown  · online brain"
             online.ask(text, onToken, onDone, onUnavailable = {
                 main.post { if (online.lastProblem.isNotEmpty()) eyes.subCaption = online.lastProblem }
                 askPc()
@@ -595,7 +660,9 @@ class MainActivity : Activity() {
         if (carMode) p = p.replace("lives in a tablet on top of the kitchen cupboard", "rides along in the car with the driver") +
             " The driver is driving: answer in ONE short sentence, never ask them to read or look at anything," +
             " and if they sound stressed or the road might need their attention, keep it even shorter."
-        return "$p Today is $today. You are in the UK."
+        val known = try { voices.names } catch (_: Exception) { emptyList() }
+        val people = if (known.isEmpty()) "" else " People you know by voice: ${known.joinToString(", ")}."
+        return "$p Today is $today. You are in the UK.$people"
     }
 
     /** Apply car mode (or home mode) to the eyes, voice, brain and screen. */
@@ -731,6 +798,9 @@ class MainActivity : Activity() {
             "Change my name…",
             if (pc.host != null) "PC brain: ON (${pc.model ?: pc.host})" else "Use my PC's brain (much smarter)…",
             if (online.enabled) "Online brain: ON" else "Online brain (cleverest, needs internet)…",
+            if (voiceNames) "Recognise voices: ON" + (if (voices.names.isEmpty()) "" else " (knows ${voices.names.joinToString(", ")})")
+                else "Recognise voices: OFF",
+            "Forget everyone's voices",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -760,6 +830,11 @@ class MainActivity : Activity() {
                     12 -> renameCompanion()
                     13 -> setupPcBrain()
                     14 -> setupOnlineBrain()
+                    15 -> {
+                        voiceNames = !voiceNames
+                        speakLine(if (voiceNames) "Right, I'll keep track of who's who." else "Fine, you're all strangers to me now.")
+                    }
+                    16 -> { voices.forgetAll(); pendingIntro = null; speakLine("Done. I don't know anyone's voice any more.") }
                 }
             }
             .show()
@@ -807,14 +882,19 @@ class MainActivity : Activity() {
 
     companion object {
         val SYSTEM_PROMPT = """
-            You are Pip, a friendly, clever companion who lives in a tablet on top of the kitchen cupboard as a pair
-            of animated eyes and a voice. Everything you say is read aloud.
+            You are Pip, a companion who lives in a tablet on top of the kitchen cupboard as a pair of
+            animated eyes and a voice. Everything you say is read aloud.
+            Personality: fiery, quick-witted and cheeky, with plenty of attitude and banter. You tease
+            people playfully, have strong opinions and aren't afraid to say so, and you're secretly
+            very fond of everyone in the house. Never cruel, never swear, and drop the attitude if
+            someone sounds upset or needs real help.
             Rules: Answer the question that was actually asked, directly, in the first sentence.
-            Keep it to one to three short sentences unless asked for more. Use plain spoken English:
-            no lists, markdown, emoji or stage directions. If the question is unclear or sounds misheard,
-            ask a short clarifying question instead of guessing. If you're not sure of a fact, say so.
-            Be warm and a bit playful, and remember what was said earlier in the conversation.
-            You have no internet access.
+            Keep it to one to three short sentences unless asked for more. Plain spoken English:
+            no lists, markdown, emoji or stage directions. If the question is unclear or sounds
+            misheard, say so with some sass and ask again. If you're not sure of a fact, admit it.
+            Messages may start with the speaker's name in square brackets, like [Mark]. Use their
+            name now and then and remember what each person told you. If it says they're meeting
+            you for the first time, give them a cheeky welcome first.
         """.trimIndent().replace("\n", " ")
 
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")

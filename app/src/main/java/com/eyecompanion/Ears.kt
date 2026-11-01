@@ -20,13 +20,19 @@ class Ears(
     private val context: Context,
     private val model: Model,
     private val onPartial: (String) -> Unit,
-    /** text, and average word confidence 0..1 */
-    private val onHeard: (String, Float) -> Unit,
+    /** text, average word confidence 0..1, and a voice print (null if too short or no speaker model) */
+    private val onHeard: (String, Float, FloatArray?) -> Unit,
     private val onLevel: (Float) -> Unit,
     private val onError: (String) -> Unit = {},
     /** Which way of opening the mic to try first (0 = automatic best). */
     private val startMode: Int = 0,
+    /** Optional: recognises who is speaking. */
+    private val speakerModel: org.vosk.SpeakerModel? = null,
 ) {
+    private fun newRecognizer(rate: Int) =
+        (if (speakerModel != null) Recognizer(model, rate.toFloat(), speakerModel) else Recognizer(model, rate.toFloat()))
+            .apply { setWords(true) }
+
     /** For the on-screen mic test. */
     @Volatile var currentMode = -1
         private set
@@ -120,9 +126,10 @@ class Ears(
             return
         }
         currentMode = mic.index
-        var recognizer = Recognizer(model, mic.rate.toFloat()).apply { setWords(true) }
+        var recognizer = newRecognizer(mic.rate)
         var buf = ShortArray(mic.rate / 10) // 100 ms
         var lastPartial = ""
+        var partialSince = 0L
         var failedReads = 0
         var openedAt = System.currentTimeMillis()
         var loudest = 0
@@ -157,7 +164,7 @@ class Ears(
                     mic = next
                     currentMode = next.index
                     recognizer.close()
-                    recognizer = Recognizer(model, next.rate.toFloat()).apply { setWords(true) }
+                    recognizer = newRecognizer(next.rate)
                     buf = ShortArray(next.rate / 10)
                     openedAt = System.currentTimeMillis(); loudest = 0
                     continue
@@ -178,18 +185,32 @@ class Ears(
                 for (i in 0 until n) sum += buf[i] * buf[i].toDouble()
                 onLevel((sqrt(sum / n) / 2000.0).coerceIn(0.0, 1.0).toFloat())
 
-                if (recognizer.acceptWaveForm(buf, n)) {
-                    val res = JSONObject(recognizer.result)
+                val finished = recognizer.acceptWaveForm(buf, n)
+                var resultJson: String? = if (finished) recognizer.result else null
+                if (!finished) {
+                    val p = JSONObject(recognizer.partialResult).optString("partial").trim()
+                    if (p != lastPartial) {
+                        lastPartial = p; partialSince = System.currentTimeMillis()
+                        if (p.isNotEmpty()) lastHeardText = p
+                        onPartial(p)
+                    } else if (p.isNotEmpty() && System.currentTimeMillis() - partialSince > SETTLE_MS) {
+                        // words have stopped changing: don't wait for the model's own (slower) end-of-speech
+                        resultJson = recognizer.finalResult
+                        recognizer.reset()
+                    }
+                }
+                if (resultJson != null) {
+                    val res = JSONObject(resultJson)
                     val text = res.optString("text").trim()
                     val words = res.optJSONArray("result")
                     val conf = if (words == null || words.length() == 0) 1f
                         else (0 until words.length()).map { words.getJSONObject(it).optDouble("conf", 1.0) }.average().toFloat()
+                    val spk = res.optJSONArray("spk")
+                    val print = if (spk != null && res.optInt("spk_frames", 0) >= Voices.MIN_FRAMES)
+                        FloatArray(spk.length()) { spk.getDouble(it).toFloat() } else null
                     if (text.isNotEmpty()) lastHeardText = text
                     lastPartial = ""
-                    if (isRealSpeech(text)) onHeard(text, conf)
-                } else {
-                    val p = JSONObject(recognizer.partialResult).optString("partial").trim()
-                    if (p != lastPartial) { lastPartial = p; if (p.isNotEmpty()) lastHeardText = p; onPartial(p) }
+                    if (isRealSpeech(text)) onHeard(text, conf, print)
                 }
             }
         } finally {
@@ -208,6 +229,8 @@ class Ears(
     }
 
     companion object {
+        /** how long the words must stay unchanged before Pip decides you've finished */
+        const val SETTLE_MS = 700L
         private val NOISE_WORDS = setOf("the", "a", "huh", "uh", "um", "hmm", "oh", "ah", "and", "but", "i", "it", "yeah")
     }
 }

@@ -87,6 +87,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             // reasoning models spend some tokens thinking first, so leave room for that
             .put("max_completion_tokens", maxReplyTokens + 600)
         if (model.startsWith("openai/gpt-oss")) body.put("reasoning_effort", "low").put("include_reasoning", false)
+        else if (model.startsWith("qwen/")) body.put("reasoning_effort", "none").put("reasoning_format", "hidden")
 
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -122,7 +123,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
 
     companion object {
         const val ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
-        /** cleverest first; if the free daily limit is hit, move down the list */
-        val MODELS = listOf("openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile")
+        /** quickest first; if the free daily limit is hit, move down the list */
+        val MODELS = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")
     }
 }
