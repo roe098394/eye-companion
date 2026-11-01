@@ -38,6 +38,14 @@ class MainActivity : Activity() {
     private var phase = Phase.SETUP
     private var setupStarted = false
 
+    /** Bumped on every new question or interruption, so callbacks from an old reply are ignored. */
+    @Volatile private var replyId = 0
+    /** What Pip is currently saying, used to tell its own voice apart from yours. */
+    private val currentReply = StringBuilder()
+    private var voiceInterrupt: Boolean
+        get() = prefs.getBoolean("voiceInterrupt", true)
+        set(v) { prefs.edit().putBoolean("voiceInterrupt", v).apply() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -65,6 +73,7 @@ class MainActivity : Activity() {
         ears?.stop(); ears = null
         voice?.shutUp(); voice?.shutdown(); voice = null
         brain?.release(); brain = null
+        replyId++
         setupStarted = true
         phase = Phase.SETUP
         eyes.mood = EyesView.Mood.LOADING
@@ -141,10 +150,7 @@ class MainActivity : Activity() {
 
         ears = Ears(
             this, voskModel!!,
-            onPartial = { p -> main.post { if (phase == Phase.LISTENING) {
-                eyes.mood = if (p.isNotEmpty()) EyesView.Mood.LISTEN else EyesView.Mood.IDLE
-                if (p.isNotEmpty()) eyes.caption = p
-            } } },
+            onPartial = { p -> main.post { partial(p) } },
             onHeard = { text -> main.post { heard(text) } },
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post { eyes.caption = msg } },
@@ -155,25 +161,79 @@ class MainActivity : Activity() {
         if (phase == Phase.LISTENING) eyes.caption = "Hi! I'm listening."
     }
 
+    private fun partial(p: String) {
+        when (phase) {
+            Phase.LISTENING -> {
+                eyes.mood = if (p.isNotEmpty()) EyesView.Mood.LISTEN else EyesView.Mood.IDLE
+                if (p.isNotEmpty()) eyes.caption = p
+            }
+            // You started talking over Pip: stop straight away and listen.
+            Phase.THINKING, Phase.TALKING ->
+                if (voiceInterrupt && isYouNotPip(p)) {
+                    interrupt()
+                    eyes.mood = EyesView.Mood.LISTEN
+                    eyes.caption = p
+                }
+            else -> {}
+        }
+    }
+
+    /**
+     * The mic also picks up Pip's own voice from the speaker. Only treat speech as yours if it
+     * has at least two words and most of them aren't words Pip is saying right now.
+     */
+    private fun isYouNotPip(text: String): Boolean {
+        val words = text.lowercase().split(Regex("\\W+")).filter { it.isNotBlank() }
+        if (words.size < 2) return false
+        val pipWords = currentReply.toString().lowercase().split(Regex("\\W+")).toHashSet()
+        val mine = words.count { it !in pipWords }
+        return mine >= 2 && mine.toFloat() / words.size >= 0.5f
+    }
+
+    /** Stop thinking/talking immediately and go back to listening. */
+    private fun interrupt() {
+        replyId++
+        brain?.stop()
+        voice?.shutUp()
+        currentReply.clear()
+        setPhase(Phase.LISTENING)
+    }
+
     private fun heard(text: String) {
-        if (phase != Phase.LISTENING) return
+        when (phase) {
+            Phase.LISTENING -> {}
+            Phase.THINKING, Phase.TALKING -> {
+                // A whole sentence arrived while Pip was busy: if it's you, answer it instead.
+                if (!voiceInterrupt || !isYouNotPip(text)) return
+                interrupt()
+            }
+            else -> return
+        }
         val lower = text.lowercase()
         if (lower in GO_TO_SLEEP) { goToSleep(); return }
         if (lower in FORGET) { brain?.forget(); speakLine("Okay, fresh start."); return }
 
         setPhase(Phase.THINKING)
+        ears?.reset()
         eyes.subCaption = "You: $text"
         eyes.caption = ""
         val v = voice ?: return
+        val id = ++replyId
+        currentReply.clear()
         v.beginReply()
-        val reply = StringBuilder()
         brain?.ask(text,
             onToken = { piece ->
-                v.feed(piece)
-                main.post { reply.append(piece); eyes.caption = reply.toString().trim() }
+                main.post {
+                    if (id != replyId) return@post        // an old, interrupted reply
+                    v.feed(piece)
+                    currentReply.append(piece)
+                    eyes.caption = currentReply.toString().trim()
+                }
+                id == replyId                              // false tells the brain to stop
             },
             onDone = { full ->
                 main.post {
+                    if (id != replyId) return@post
                     if (full.isBlank()) eyes.caption = ""
                     v.endReply()
                 }
@@ -182,14 +242,21 @@ class MainActivity : Activity() {
 
     private fun speakLine(text: String) {
         setPhase(Phase.THINKING)
+        replyId++
+        currentReply.clear(); currentReply.append(text)
         eyes.caption = text
         voice?.apply { beginReply(); feed(text); endReply() }
     }
 
     private fun setPhase(p: Phase) {
         phase = p
-        ears?.paused = p != Phase.LISTENING
-        if (p != Phase.TALKING) eyes.level = 0f
+        // Keep listening while thinking/talking so you can interrupt by voice.
+        ears?.paused = when (p) {
+            Phase.LISTENING -> false
+            Phase.THINKING, Phase.TALKING -> !voiceInterrupt
+            else -> true
+        }
+        if (p == Phase.LISTENING) currentReply.clear()
         eyes.mood = when (p) {
             Phase.SETUP -> EyesView.Mood.LOADING
             Phase.ASLEEP -> EyesView.Mood.SLEEP
@@ -232,9 +299,7 @@ class MainActivity : Activity() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 when (phase) {
                     Phase.ASLEEP -> wakeUp()
-                    Phase.TALKING, Phase.THINKING -> {   // interrupt
-                        brain?.stop(); voice?.shutUp(); setPhase(Phase.LISTENING)
-                    }
+                    Phase.TALKING, Phase.THINKING -> interrupt()
                     Phase.LISTENING -> eyes.mood = EyesView.Mood.HAPPY
                     Phase.SETUP -> {}
                 }
@@ -254,6 +319,7 @@ class MainActivity : Activity() {
             if (phase == Phase.ASLEEP) "Wake up" else "Go to sleep",
             if (eyes.showCaptions) "Hide captions" else "Show captions",
             "Forget our conversation",
+            if (voiceInterrupt) "Stop voice interrupting (if I keep cutting myself off)" else "Let me interrupt by voice",
             "Retry setup",
             "Bluetooth settings",
             "Choose Home app (to exit companion mode)",
@@ -266,10 +332,11 @@ class MainActivity : Activity() {
                     0 -> if (phase == Phase.ASLEEP) wakeUp() else if (phase != Phase.SETUP) goToSleep()
                     1 -> { eyes.showCaptions = !eyes.showCaptions; prefs.edit().putBoolean("captions", eyes.showCaptions).apply() }
                     2 -> brain?.forget()
-                    3 -> startSetup()
-                    4 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                    5 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
-                    6 -> startActivity(Intent(Settings.ACTION_SETTINGS))
+                    3 -> { voiceInterrupt = !voiceInterrupt; setPhase(phase) }
+                    4 -> startSetup()
+                    5 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                    6 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+                    7 -> startActivity(Intent(Settings.ACTION_SETTINGS))
                 }
             }
             .show()

@@ -37,6 +37,9 @@ class Ears(
         thread = Thread({ loop() }, "ears").apply { start() }
     }
 
+    /** Forget any half-heard audio (e.g. Pip's own voice) and start a fresh utterance. */
+    fun reset() { needReset = true }
+
     fun stop() {
         running = false
         thread?.join(1000)
@@ -64,6 +67,13 @@ class Ears(
             builtIn?.let { rec.setPreferredDevice(it) }
             try { rec.startRecording() } catch (e: Exception) { rec.release(); continue }
             if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) { rec.release(); continue }
+            // Helps the mic ignore Pip's own voice coming out of the speaker, where supported.
+            try {
+                if (android.media.audiofx.AcousticEchoCanceler.isAvailable())
+                    android.media.audiofx.AcousticEchoCanceler.create(rec.audioSessionId)?.enabled = true
+                if (android.media.audiofx.NoiseSuppressor.isAvailable())
+                    android.media.audiofx.NoiseSuppressor.create(rec.audioSessionId)?.enabled = true
+            } catch (_: Exception) {}
             return rec
         }
         return null

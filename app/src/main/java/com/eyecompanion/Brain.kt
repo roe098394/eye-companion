@@ -27,8 +27,8 @@ class Brain(private val modelPath: String, private val systemPrompt: String) {
         onDone(handle != 0L)
     }
 
-    /** Ask something; tokens stream to onToken, then onDone fires with the whole reply. */
-    fun ask(userText: String, onToken: (String) -> Unit, onDone: (String) -> Unit) = worker.execute {
+    /** onToken returns false to stop this reply early. */
+    fun ask(userText: String, onToken: (String) -> Boolean, onDone: (String) -> Unit) = worker.execute {
         stopRequested = false
         history.add("user" to userText)
         trimHistory()
@@ -37,8 +37,7 @@ class Brain(private val modelPath: String, private val systemPrompt: String) {
         val reply = StringBuilder()
         val ok = handle != 0L && nativeChat(handle, roles, texts, MAX_REPLY_TOKENS) { piece ->
             reply.append(piece)
-            onToken(piece)
-            !stopRequested
+            onToken(piece) && !stopRequested
         }
         val text = reply.toString().trim()
         if (ok && text.isNotEmpty()) history.add("assistant" to text)
