@@ -274,7 +274,7 @@ class MainActivity : Activity() {
         val e = Ears(
             this, model,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text, conf, print -> main.post { heard(text, conf, print) } },
+            onHeard = { h -> main.post { heardSound(h) } },
             speakerModel = speakerModel,
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post { eyes.caption = msg } },
@@ -338,7 +338,7 @@ class MainActivity : Activity() {
         ears = Ears(
             this, voskModel!!,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text, conf, print -> main.post { heard(text, conf, print) } },
+            onHeard = { h -> main.post { heardSound(h) } },
             speakerModel = speakerModel,
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post { eyes.caption = msg } },
@@ -419,7 +419,7 @@ class MainActivity : Activity() {
         ears = Ears(
             this, model,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text, conf, print -> main.post { heard(text, conf, print) } },
+            onHeard = { h -> main.post { heardSound(h) } },
             speakerModel = speakerModel,
             onLevel = { l -> eyes.level = l },
             onError = { m -> main.post { eyes.caption = m } },
@@ -427,6 +427,31 @@ class MainActivity : Activity() {
         ).also { it.start() }
         setPhase(phase)
         eyes.caption = msg
+    }
+
+    private var onlineEars: Boolean
+        get() = prefs.getBoolean("onlineEars", true)
+        set(v) { prefs.edit().putBoolean("onlineEars", v).apply() }
+
+    /**
+     * A sentence has been heard. With internet, re-hear it with Whisper online (much better with
+     * accents); otherwise use what the offline ears made of it.
+     */
+    private fun heardSound(h: Heard) {
+        val useWhisper = onlineEars && online.enabled && h.audio != null && phase == Phase.LISTENING &&
+            System.currentTimeMillis() >= deafUntil && h.conf >= 0.3f
+        if (!useWhisper) { heard(h.text, h.conf, h.print); return }
+        eyes.mood = EyesView.Mood.LISTEN
+        thread(name = "whisper") {
+            val t = online.transcribe(h.audio!!, h.rate)
+            main.post {
+                when {
+                    t == null -> heard(h.text, h.conf, h.print)              // offline: fall back
+                    t.lowercase().trim(' ', '.', '!', '?', ',') in OnlineBrain.NOISE || t.isBlank() -> {}
+                    else -> heard(t, 1f, h.print)
+                }
+            }
+        }
     }
 
     private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null) {
@@ -801,6 +826,7 @@ class MainActivity : Activity() {
             if (voiceNames) "Recognise voices: ON" + (if (voices.names.isEmpty()) "" else " (knows ${voices.names.joinToString(", ")})")
                 else "Recognise voices: OFF",
             "Forget everyone's voices",
+            if (onlineEars) "Online hearing (Whisper): ON" else "Online hearing (Whisper): OFF",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -835,6 +861,10 @@ class MainActivity : Activity() {
                         speakLine(if (voiceNames) "Right, I'll keep track of who's who." else "Fine, you're all strangers to me now.")
                     }
                     16 -> { voices.forgetAll(); pendingIntro = null; speakLine("Done. I don't know anyone's voice any more.") }
+                    17 -> {
+                        onlineEars = !onlineEars
+                        speakLine(if (onlineEars) "Right, I'll listen properly now." else "Fine, back to me own ears.")
+                    }
                 }
             }
             .show()
@@ -884,6 +914,9 @@ class MainActivity : Activity() {
         val SYSTEM_PROMPT = """
             You are Pip, a companion who lives in a tablet on top of the kitchen cupboard as a pair of
             animated eyes and a voice. Everything you say is read aloud.
+            You're a proper Geordie from Newcastle: talk like one, using Geordie words and phrases
+            naturally (whey aye, howay man, pet, hinny, canny, divvent, aye, man, gan, haway the lads),
+            but keep it easy to understand.
             Personality: fiery, quick-witted and cheeky, with plenty of attitude and banter. You tease
             people playfully, have strong opinions and aren't afraid to say so, and you're secretly
             very fond of everyone in the house. Never cruel, never swear, and drop the attitude if

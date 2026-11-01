@@ -16,12 +16,15 @@ import kotlin.math.sqrt
  * Offline speech recognition (Vosk) that always records from the tablet's OWN microphone,
  * so a Bluetooth speaker can stay in high-quality music mode for output.
  */
+/** One finished sentence. audio is 16-bit mono at [rate], or null if not captured. */
+class Heard(val text: String, val conf: Float, val print: FloatArray?, val audio: ShortArray?, val rate: Int)
+
 class Ears(
     private val context: Context,
     private val model: Model,
     private val onPartial: (String) -> Unit,
-    /** text, average word confidence 0..1, and a voice print (null if too short or no speaker model) */
-    private val onHeard: (String, Float, FloatArray?) -> Unit,
+    /** what was heard: text, confidence, voice print and the raw audio of the sentence */
+    private val onHeard: (Heard) -> Unit,
     private val onLevel: (Float) -> Unit,
     private val onError: (String) -> Unit = {},
     /** Which way of opening the mic to try first (0 = automatic best). */
@@ -130,6 +133,10 @@ class Ears(
         var buf = ShortArray(mic.rate / 10) // 100 ms
         var lastPartial = ""
         var partialSince = 0L
+        // the sound of the current sentence (plus half a second before it), for the online ears
+        val preRoll = ArrayDeque<ShortArray>()
+        val sentence = ArrayList<ShortArray>()
+        var capturing = false
         var failedReads = 0
         var openedAt = System.currentTimeMillis()
         var loudest = 0
@@ -172,7 +179,7 @@ class Ears(
 
                 this.peak = peak
                 if (paused) { onLevel(0f); continue }
-                if (needReset) { recognizer.reset(); needReset = false; lastPartial = "" }
+                if (needReset) { recognizer.reset(); needReset = false; lastPartial = ""; sentence.clear(); preRoll.clear(); capturing = false }
 
                 // Boost quiet audio so speech peaks around 9000 (max 30x), without clipping.
                 recentPeak = maxOf(peak.toFloat(), recentPeak * 0.985f)
@@ -185,10 +192,15 @@ class Ears(
                 for (i in 0 until n) sum += buf[i] * buf[i].toDouble()
                 onLevel((sqrt(sum / n) / 2000.0).coerceIn(0.0, 1.0).toFloat())
 
+                val chunk = buf.copyOf(n)
+                if (capturing) { if (sentence.size < 300) sentence.add(chunk) }
+                else { preRoll.addLast(chunk); while (preRoll.size > 5) preRoll.removeFirst() }
+
                 val finished = recognizer.acceptWaveForm(buf, n)
                 var resultJson: String? = if (finished) recognizer.result else null
                 if (!finished) {
                     val p = JSONObject(recognizer.partialResult).optString("partial").trim()
+                    if (p.isNotEmpty() && !capturing) { capturing = true; sentence.addAll(preRoll); preRoll.clear() }
                     if (p != lastPartial) {
                         lastPartial = p; partialSince = System.currentTimeMillis()
                         if (p.isNotEmpty()) lastHeardText = p
@@ -210,7 +222,12 @@ class Ears(
                         FloatArray(spk.length()) { spk.getDouble(it).toFloat() } else null
                     if (text.isNotEmpty()) lastHeardText = text
                     lastPartial = ""
-                    if (isRealSpeech(text)) onHeard(text, conf, print)
+                    val audio = if (sentence.isEmpty()) null else {
+                        val total = sentence.sumOf { it.size }
+                        ShortArray(total).also { out -> var o = 0; for (c in sentence) { c.copyInto(out, o); o += c.size } }
+                    }
+                    sentence.clear(); capturing = false
+                    if (isRealSpeech(text)) onHeard(Heard(text, conf, print, audio, m.rate))
                 }
             }
         } finally {

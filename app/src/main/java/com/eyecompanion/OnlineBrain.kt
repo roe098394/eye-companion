@@ -121,7 +121,64 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         conn.disconnect()
     }
 
+    /**
+     * Turn a recorded sentence into text with Whisper on Groq: far better than the offline
+     * ears with British (and Geordie) accents. Returns null if it couldn't (no internet etc.).
+     */
+    fun transcribe(audio: ShortArray, rate: Int): String? {
+        if (!enabled) return null
+        // 48 kHz → 16 kHz keeps the upload small and quick
+        val (pcm, outRate) = if (rate == 48000) ShortArray(audio.size / 3) { i ->
+            ((audio[i * 3] + audio[i * 3 + 1] + audio[i * 3 + 2]) / 3).toShort() } to 16000 else audio to rate
+        val wav = wav(pcm, outRate)
+        for (model in listOf("whisper-large-v3-turbo", "whisper-large-v3")) {
+            try {
+                val boundary = "----pip" + System.nanoTime()
+                val conn = (URL(STT_ENDPOINT).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"; doOutput = true
+                    connectTimeout = 4000; readTimeout = 15_000
+                    setRequestProperty("Authorization", "Bearer $apiKey")
+                    setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                }
+                conn.outputStream.use { out ->
+                    fun field(name: String, value: String) = out.write(
+                        "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n".toByteArray())
+                    field("model", model)
+                    field("language", "en")
+                    field("response_format", "json")
+                    field("temperature", "0")
+                    field("prompt", "Pip, a cheeky companion in a kitchen in the North East of England. Geordie and British English.")
+                    out.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n".toByteArray())
+                    out.write(wav)
+                    out.write("\r\n--$boundary--\r\n".toByteArray())
+                }
+                when (conn.responseCode) {
+                    200 -> {}
+                    429, 404, 400 -> { conn.disconnect(); continue }    // try the other model
+                    else -> { conn.disconnect(); return null }
+                }
+                val text = JSONObject(conn.inputStream.bufferedReader().use { it.readText() }).optString("text").trim()
+                conn.disconnect()
+                return text
+            } catch (_: Exception) { return null }
+        }
+        return null
+    }
+
+    private fun wav(pcm: ShortArray, rate: Int): ByteArray {
+        val data = pcm.size * 2
+        val b = java.nio.ByteBuffer.allocate(44 + data).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        b.put("RIFF".toByteArray()).putInt(36 + data).put("WAVE".toByteArray())
+        b.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2).putShort(2).putShort(16)
+        b.put("data".toByteArray()).putInt(data)
+        pcm.forEach { b.putShort(it) }
+        return b.array()
+    }
+
     companion object {
+        const val STT_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
+        /** Whisper sometimes "hears" these in background noise. */
+        val NOISE = setOf("thank you", "thanks", "thank you for watching", "thanks for watching", "you", "bye", "okay", "uh", "um")
         const val ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
         /** quickest first; if the free daily limit is hit, move down the list */
         val MODELS = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")
