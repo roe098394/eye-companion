@@ -47,52 +47,63 @@ class Ears(
     }
 
     /** Try the best mic sources in turn; older tablets don't all support VOICE_RECOGNITION. */
+    /** Ways to open the mic, best first. Some tablets (e.g. Huawei) give silence on the first ones. */
+    private data class MicSetup(val source: Int, val effects: Boolean, val pinBuiltIn: Boolean)
+    private val setups = listOf(
+        MicSetup(MediaRecorder.AudioSource.VOICE_RECOGNITION, effects = true, pinBuiltIn = true),
+        MicSetup(MediaRecorder.AudioSource.MIC, effects = false, pinBuiltIn = true),
+        MicSetup(MediaRecorder.AudioSource.MIC, effects = false, pinBuiltIn = false),
+        MicSetup(MediaRecorder.AudioSource.VOICE_RECOGNITION, effects = false, pinBuiltIn = false),
+        MicSetup(MediaRecorder.AudioSource.DEFAULT, effects = false, pinBuiltIn = false),
+        MicSetup(MediaRecorder.AudioSource.CAMCORDER, effects = false, pinBuiltIn = false),
+    )
+
     @SuppressLint("MissingPermission")
-    private fun openMic(rate: Int): AudioRecord? {
+    private fun openMic(rate: Int, from: Int): Pair<AudioRecord, Int>? {
         val minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minBuf <= 0) return null
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val builtIn = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
             .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
-        for (source in intArrayOf(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            MediaRecorder.AudioSource.MIC,
-            MediaRecorder.AudioSource.DEFAULT,
-        )) {
+        for (i in from until setups.size) {
+            val m = setups[i]
             val rec = try {
-                AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf * 2, rate))
+                AudioRecord(m.source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf * 2, rate))
             } catch (e: Exception) { null } ?: continue
             if (rec.state != AudioRecord.STATE_INITIALIZED) { rec.release(); continue }
             // Pin to the built-in mic so a Bluetooth speaker stays in high-quality mode.
-            builtIn?.let { rec.setPreferredDevice(it) }
+            if (m.pinBuiltIn) builtIn?.let { rec.setPreferredDevice(it) }
             try { rec.startRecording() } catch (e: Exception) { rec.release(); continue }
             if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) { rec.release(); continue }
-            // Helps the mic ignore Pip's own voice coming out of the speaker, where supported.
-            try {
+            if (m.effects) try {
+                // Helps the mic ignore Pip's own voice coming out of the speaker, where supported.
                 if (android.media.audiofx.AcousticEchoCanceler.isAvailable())
                     android.media.audiofx.AcousticEchoCanceler.create(rec.audioSessionId)?.enabled = true
                 if (android.media.audiofx.NoiseSuppressor.isAvailable())
                     android.media.audiofx.NoiseSuppressor.create(rec.audioSessionId)?.enabled = true
             } catch (_: Exception) {}
-            return rec
+            return rec to i
         }
         return null
     }
 
     private fun loop() {
         val rate = 16000
-        val rec = openMic(rate)
-        if (rec == null) {
-            onError("I can't open the microphone. Close other apps using it, check the mic permission, then long-press → Retry setup.")
+        var setupIndex = 0
+        var opened = openMic(rate, setupIndex)
+        if (opened == null) {
+            onError("I can't open the microphone. Check Pip has microphone permission in Settings → Apps, then long-press → Retry setup.")
             running = false
             return
         }
+        var rec = opened.first
+        setupIndex = opened.second
         val recognizer = Recognizer(model, rate.toFloat())
         val buf = ShortArray(rate / 10) // 100 ms
         var lastPartial = ""
         var failedReads = 0
-        var silentSince = System.currentTimeMillis()
-        var warnedSilent = false
+        var quietSince = System.currentTimeMillis()
+        var everHeard = false
         try {
             while (running) {
                 val n = rec.read(buf, 0, buf.size)
@@ -106,11 +117,22 @@ class Ears(
                 var sum = 0.0
                 var peak = 0
                 for (i in 0 until n) { val v = buf[i].toInt(); sum += v * v.toDouble(); if (kotlin.math.abs(v) > peak) peak = kotlin.math.abs(v) }
-                // A mic that only ever returns zeros is blocked (another app, or a privacy switch).
-                if (peak > 0) { silentSince = System.currentTimeMillis(); warnedSilent = false }
-                else if (!warnedSilent && System.currentTimeMillis() - silentSince > 8000) {
-                    warnedSilent = true
-                    onError("My microphone is giving me total silence. Is another app using it?")
+
+                // A working mic always picks up a little room noise. Dead silence means this way of
+                // opening it doesn't work on this tablet, so try the next one.
+                if (peak > 8) { quietSince = System.currentTimeMillis(); everHeard = true }
+                else if (!everHeard && System.currentTimeMillis() - quietSince > 4000) {
+                    try { rec.stop() } catch (_: Exception) {}
+                    rec.release()
+                    opened = openMic(rate, setupIndex + 1)
+                    if (opened == null) {
+                        onError("My microphone only gives me silence. Check the mic permission and that no other app is using it.")
+                        break
+                    }
+                    rec = opened.first
+                    setupIndex = opened.second
+                    quietSince = System.currentTimeMillis()
+                    continue
                 }
 
                 if (paused) { onLevel(0f); continue }
