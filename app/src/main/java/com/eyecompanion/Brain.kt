@@ -10,7 +10,7 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
         fun onToken(text: String): Boolean
     }
 
-    private external fun nativeLoad(path: String, nCtx: Int, nThreads: Int): Long
+    private external fun nativeLoad(path: String, nCtx: Int, nThreads: Int, useMmap: Boolean): Long
     private external fun nativeChat(
         handle: Long, roles: Array<String>, contents: Array<String>,
         maxTokens: Int, listener: TokenListener
@@ -23,7 +23,8 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
     @Volatile private var stopRequested = false
 
     fun load(onDone: (Boolean) -> Unit) = worker.execute {
-        handle = nativeLoad(modelPath, CONTEXT, THREADS)
+        handle = nativeLoad(modelPath, CONTEXT, THREADS, true)
+        if (handle == 0L) handle = nativeLoad(modelPath, CONTEXT, THREADS, false)
         onDone(handle != 0L)
     }
 

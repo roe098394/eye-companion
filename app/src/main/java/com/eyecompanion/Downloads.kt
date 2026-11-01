@@ -60,6 +60,7 @@ object Downloads {
             if (already > 0) setRequestProperty("Range", "bytes=$already-")
         }
         val code = conn.responseCode
+        if (code == 416 && already > 0) { conn.disconnect(); return }   // nothing left to fetch
         val resuming = code == 206
         if (code != 200 && code != 206) throw RuntimeException("HTTP $code for $url")
         val start = if (resuming) already else 0L
@@ -84,6 +85,8 @@ object Downloads {
             }
         }
         conn.disconnect()
+        // A connection that drops early can look like a normal end of file: check the size.
+        if (total > 0 && part.length() < total) throw java.io.IOException("download cut off, resuming")
     }
 
     fun unzip(zip: File, intoDir: File) {

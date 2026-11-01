@@ -90,7 +90,8 @@ class MainActivity : Activity() {
                 brain = b
                 b.load { ok ->
                     main.post {
-                        if (!ok) { status("Couldn't load the brain file. Long-press for options."); return@post }
+                        if (!ok) { brainFailed(llm); return@post }
+                        prefs.edit().remove("brainRetried").apply()
                         voice = Voice(this) { ttsOk ->
                             main.post {
                                 if (!ttsOk) status("No text-to-speech voice found. Install Google Speech Services.")
@@ -113,6 +114,7 @@ class MainActivity : Activity() {
         val mem = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem
         val key = when {
             mem >= 5_500_000_000L && Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() -> "smartest"
+            Build.SUPPORTED_64_BIT_ABIS.isEmpty() -> "fast"     // 32-bit tablets can't fit bigger brains
             mem >= 2_300_000_000L -> "smart"
             else -> "fast"
         }
@@ -154,6 +156,30 @@ class MainActivity : Activity() {
         return Downloads.findVoskModel(root) ?: throw IllegalStateException("speech model missing")
     }
 
+    /** The brain wouldn't start: try a fresh download once, then fall back to a smaller brain. */
+    private fun brainFailed(file: File) {
+        val current = chosenBrain()
+        val custom = file.parentFile != filesDir
+        if (custom) { status("Couldn't load your own .gguf file. Remove it from the app folder, then Retry setup."); return }
+        file.delete()
+        val retried = prefs.getBoolean("brainRetried", false)
+        val idx = Downloads.BRAINS.indexOf(current)
+        when {
+            !retried -> {
+                prefs.edit().putBoolean("brainRetried", true).apply()
+                status("My brain file was damaged. Downloading it again…")
+            }
+            idx > 0 -> {
+                val smaller = Downloads.BRAINS[idx - 1]
+                prefs.edit().putString("brain", smaller.key).remove("brainRetried").apply()
+                status("That brain is too big for this tablet. Switching to ${smaller.label.substringBefore(" (")}…")
+            }
+            else -> { status("I couldn't load even my smallest brain. Long-press → Retry setup."); return }
+        }
+        setupStarted = false
+        main.postDelayed({ startSetup() }, 2500)
+    }
+
     private fun chooseBrain() {
         val current = chosenBrain().key
         val labels = Downloads.BRAINS.map { (if (it.key == current) "✓ " else "") + it.label + " · ${it.sizeMb} MB" }.toTypedArray()
@@ -162,7 +188,7 @@ class MainActivity : Activity() {
             .setItems(labels) { _, which ->
                 val pick = Downloads.BRAINS[which]
                 if (pick.key != current) {
-                    prefs.edit().putString("brain", pick.key).apply()
+                    prefs.edit().putString("brain", pick.key).remove("brainRetried").apply()
                     setupStarted = false
                     startSetup()
                 }

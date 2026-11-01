@@ -82,7 +82,7 @@ bool decodeTokens(Session *s, std::vector<llama_token> &toks, size_t from) {
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_eyecompanion_Brain_nativeLoad(JNIEnv *env, jobject, jstring jpath, jint nCtx, jint nThreads) {
+Java_com_eyecompanion_Brain_nativeLoad(JNIEnv *env, jobject, jstring jpath, jint nCtx, jint nThreads, jboolean useMmap) {
     if (!g_backend_ready) {
         llama_backend_init();
         g_backend_ready = true;
@@ -91,6 +91,7 @@ Java_com_eyecompanion_Brain_nativeLoad(JNIEnv *env, jobject, jstring jpath, jint
 
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = 0;
+    mp.load_mode = useMmap == JNI_TRUE ? LLAMA_LOAD_MODE_MMAP : LLAMA_LOAD_MODE_NONE;
     llama_model *model = llama_model_load_from_file(path.c_str(), mp);
     if (!model) {
         LOGE("could not load model %s", path.c_str());
