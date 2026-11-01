@@ -14,6 +14,8 @@ android {
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+        // Online brain key, from the GROQ_API_KEY secret on GitHub (never stored in the code)
+        buildConfigField("String", "GROQ_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")
 
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         externalNativeBuild {
@@ -49,6 +51,8 @@ android {
             version = "3.31.6"
         }
     }
+
+    buildFeatures { buildConfig = true }
 
     lint {
         checkReleaseBuilds = false

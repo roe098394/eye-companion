@@ -30,6 +30,14 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("companion", Context.MODE_PRIVATE) }
 
     private var brain: Brain? = null
+    /** Optional clever brain online (Groq). Key from the menu, or built in from the GitHub secret. */
+    private val online by lazy {
+        OnlineBrain { systemPrompt() }.apply {
+            apiKey = prefs.getString("onlineKey", null)?.takeIf { it.isNotBlank() } ?: BuildConfig.GROQ_KEY
+            if (prefs.getBoolean("onlineOff", false)) apiKey = ""
+        }
+    }
+
     /** Optional bigger brain on a PC (Ollama) on the same Wi-Fi. */
     private val pc by lazy {
         PcBrain { systemPrompt() }.apply {
@@ -351,7 +359,7 @@ class MainActivity : Activity() {
     /** Stop thinking/talking immediately and go back to listening. */
     private fun interrupt() {
         replyId++
-        brain?.stop(); pc.stop()
+        brain?.stop(); pc.stop(); online.stop()
         voice?.shutUp()
         currentReply.clear()
         setPhase(Phase.LISTENING)
@@ -437,19 +445,62 @@ class MainActivity : Activity() {
             }
             Unit
         }
-        if (pc.worthTrying) {
-            pc.ask(text, onToken, onDone, onUnavailable = {
-                // PC is off or out of range: the tablet's own brain answers instead
-                main.post { if (id == replyId) eyes.subCaption = "You: $text" }
-                brain?.ask(text, onToken, onDone) ?: onDone("")
-            })
-            eyes.subCaption = "You: $text  · PC brain"
-        } else {
-            brain?.ask(text, onToken, onDone)
+        // Cleverest available first: online, then the PC, then the tablet's own brain.
+        val askTablet = {
+            main.post { if (id == replyId) eyes.subCaption = "You: $text" }
+            brain?.ask(text, onToken, onDone) ?: onDone("")
+            Unit
         }
+        val askPc = {
+            if (pc.worthTrying) {
+                main.post { if (id == replyId) eyes.subCaption = "You: $text  · PC brain" }
+                pc.ask(text, onToken, onDone, onUnavailable = { askTablet() })
+            } else askTablet()
+            Unit
+        }
+        if (online.worthTrying) {
+            eyes.subCaption = "You: $text  · online brain"
+            online.ask(text, onToken, onDone, onUnavailable = {
+                main.post { if (online.lastProblem.isNotEmpty()) eyes.subCaption = online.lastProblem }
+                askPc()
+            })
+        } else askPc()
     }
 
-    private fun forgetAll() { brain?.forget(); pc.forget() }
+    private fun forgetAll() { brain?.forget(); pc.forget(); online.forget() }
+
+    private fun setupOnlineBrain() {
+        val builtIn = BuildConfig.GROQ_KEY.isNotBlank()
+        val status = when {
+            online.enabled -> "ON, using ${online.modelName}."
+            builtIn || prefs.getString("onlineKey", null) != null -> "Turned off."
+            else -> "No key yet."
+        }
+        val input = android.widget.EditText(this).apply {
+            hint = if (builtIn) "Key already built in (leave blank)" else "Paste your Groq key (gsk_…)"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Online brain (Groq)")
+            .setMessage("$status\n\nThe cleverest option. Needs internet; your questions are sent to Groq. " +
+                "Without internet I use the PC brain or my own.")
+            .setView(input)
+            .setPositiveButton("Turn on") { _, _ ->
+                val k = input.text.toString().trim()
+                if (k.isNotEmpty()) prefs.edit().putString("onlineKey", k).apply()
+                prefs.edit().putBoolean("onlineOff", false).apply()
+                online.apiKey = k.ifEmpty { prefs.getString("onlineKey", null) ?: BuildConfig.GROQ_KEY }
+                applyMode(); forgetAll()
+                speakLine(if (online.enabled) "Online brain on." else "I need a key for that.")
+            }
+            .setNegativeButton("Turn off") { _, _ ->
+                prefs.edit().putBoolean("onlineOff", true).apply()
+                online.apiKey = ""
+                speakLine("Online brain off.")
+            }
+            .setNeutralButton("Cancel", null)
+            .show()
+    }
 
     /** Find or set up the PC brain. */
     private fun setupPcBrain() {
@@ -555,6 +606,8 @@ class MainActivity : Activity() {
         brain?.maxTurns = if (car) 4 else Brain.MAX_TURNS
         pc.maxReplyTokens = if (car) 70 else 220
         pc.maxTurns = if (car) 6 else 12
+        online.maxReplyTokens = if (car) 70 else 220
+        online.maxTurns = if (car) 6 else 12
         voice?.setStyle(pitch = if (car) 0.92f else 1.15f, rate = if (car) 1.1f else 1.05f)
         applyNightDimming()
     }
@@ -614,7 +667,7 @@ class MainActivity : Activity() {
     }
 
     private fun goToSleep() {
-        voice?.shutUp(); brain?.stop(); pc.stop()
+        voice?.shutUp(); brain?.stop(); pc.stop(); online.stop()
         prefs.edit().putBoolean("asleep", true).apply()
         eyes.caption = ""; eyes.subCaption = ""
         setPhase(Phase.ASLEEP)
@@ -677,6 +730,7 @@ class MainActivity : Activity() {
             if (carMode) "Car mode: ON (tap for home mode)" else "Car mode: off (tap to turn on)",
             "Change my name…",
             if (pc.host != null) "PC brain: ON (${pc.model ?: pc.host})" else "Use my PC's brain (much smarter)…",
+            if (online.enabled) "Online brain: ON" else "Online brain (cleverest, needs internet)…",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -705,6 +759,7 @@ class MainActivity : Activity() {
                     }
                     12 -> renameCompanion()
                     13 -> setupPcBrain()
+                    14 -> setupOnlineBrain()
                 }
             }
             .show()
