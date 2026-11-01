@@ -243,9 +243,10 @@ class MainActivity : Activity() {
         val tick = object : Runnable {
             override fun run() {
                 if (ears !== e) return
-                val bars = (e.peak / 1000).coerceIn(0, 20)
+                // log scale so even a very quiet mic shows something
+                val bars = (kotlin.math.ln(e.peak + 1.0) / kotlin.math.ln(32768.0) * 20).toInt().coerceIn(0, 20)
                 eyes.subCaption = "Mic mode ${e.currentMode + 1}/${e.modeCount}  " +
-                    "level " + "▮".repeat(bars) + "·".repeat(20 - bars) +
+                    "level " + "▮".repeat(bars) + "·".repeat(20 - bars) + " (${e.peak})" +
                     "  heard: " + e.lastHeardText.take(30)
                 if (System.currentTimeMillis() < until) main.postDelayed(this, 200)
                 else eyes.subCaption = ""
