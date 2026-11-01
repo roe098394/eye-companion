@@ -3,7 +3,7 @@ package com.eyecompanion
 import java.util.concurrent.Executors
 
 /** The offline language model (llama.cpp), plus a short rolling memory of the conversation. */
-class Brain(private val modelPath: String, private val systemPrompt: String) {
+class Brain(private val modelPath: String, private val systemPrompt: () -> String) {
 
     fun interface TokenListener {
         /** Return false to stop generating. */
@@ -33,7 +33,7 @@ class Brain(private val modelPath: String, private val systemPrompt: String) {
         history.add("user" to userText)
         trimHistory()
         val roles = arrayOf("system") + history.map { it.first }
-        val texts = arrayOf(systemPrompt) + history.map { it.second }
+        val texts = arrayOf(systemPrompt()) + history.map { it.second }
         val reply = StringBuilder()
         val ok = handle != 0L && nativeChat(handle, roles, texts, MAX_REPLY_TOKENS) { piece ->
             reply.append(piece)

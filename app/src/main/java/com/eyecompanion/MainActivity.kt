@@ -86,7 +86,7 @@ class MainActivity : Activity() {
                 LibVosk.setLogLevel(LogLevel.WARNINGS)
                 voskModel = Model(vosk.absolutePath)
 
-                val b = Brain(llm.absolutePath, SYSTEM_PROMPT)
+                val b = Brain(llm.absolutePath) { systemPrompt() }
                 brain = b
                 b.load { ok ->
                     main.post {
@@ -106,18 +106,32 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Use a .gguf you copied into the app's folder, else download the default model. */
+    /** The brain the user picked, or a sensible one for this tablet's memory. */
+    private fun chosenBrain(): Downloads.BrainChoice {
+        prefs.getString("brain", null)?.let { k -> Downloads.BRAINS.firstOrNull { it.key == k }?.let { return it } }
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mem = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem
+        val key = when {
+            mem >= 5_500_000_000L && Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() -> "smartest"
+            mem >= 2_300_000_000L -> "smart"
+            else -> "fast"
+        }
+        return Downloads.BRAINS.first { it.key == key }
+    }
+
+    /** Use a .gguf you copied into the app's folder, else download the chosen brain. */
     private fun findOrDownloadLlm(): File {
         val ext = getExternalFilesDir(null)
         ext?.listFiles()?.firstOrNull { it.name.endsWith(".gguf") && it.length() > 0 }?.let { return it }
-        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        val mem = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
-        val small = Build.SUPPORTED_64_BIT_ABIS.isEmpty() || mem.totalMem < 3_500_000_000L
-        val dest = File(filesDir, if (small) "brain-small.gguf" else "brain.gguf")
+        val choice = chosenBrain()
+        val dest = File(filesDir, choice.file)
         if (!dest.exists()) {
-            status(if (small) "Downloading my brain (about 400 MB, one time only)…"
-                   else "Downloading my brain (about 800 MB, one time only)…")
-            Downloads.fetch(if (small) Downloads.SMALL_LLM_URL else Downloads.LLM_URL, dest) { p ->
+            // free space taken by other brains
+            Downloads.BRAINS.filter { it.file != choice.file }.forEach {
+                File(filesDir, it.file).delete(); File(filesDir, it.file + ".part").delete()
+            }
+            status("Downloading my brain (about ${choice.sizeMb} MB, one time only)…")
+            Downloads.fetch(choice.url, dest) { p ->
                 status(if (p >= 0) "Downloading my brain… ${(p * 100).toInt()}%" else "Downloading my brain…")
             }
         }
@@ -125,17 +139,35 @@ class MainActivity : Activity() {
     }
 
     private fun findOrDownloadVosk(): File {
-        val root = File(filesDir, "vosk")
+        val root = File(filesDir, Downloads.VOSK_DIR)
         Downloads.findVoskModel(root)?.let { return it }
+        File(filesDir, "vosk").deleteRecursively()          // old small model
         val zip = File(filesDir, "vosk.zip")
-        status("Downloading my ears (about 40 MB)…")
+        status("Downloading better ears (about ${Downloads.VOSK_MB} MB)…")
         Downloads.fetch(Downloads.VOSK_URL, zip) { p ->
             status(if (p >= 0) "Downloading my ears… ${(p * 100).toInt()}%" else "Downloading my ears…")
         }
         status("Unpacking…")
+        root.deleteRecursively()
         Downloads.unzip(zip, root)
         zip.delete()
         return Downloads.findVoskModel(root) ?: throw IllegalStateException("speech model missing")
+    }
+
+    private fun chooseBrain() {
+        val current = chosenBrain().key
+        val labels = Downloads.BRAINS.map { (if (it.key == current) "✓ " else "") + it.label + " · ${it.sizeMb} MB" }.toTypedArray()
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Choose Pip's brain")
+            .setItems(labels) { _, which ->
+                val pick = Downloads.BRAINS[which]
+                if (pick.key != current) {
+                    prefs.edit().putString("brain", pick.key).apply()
+                    setupStarted = false
+                    startSetup()
+                }
+            }
+            .show()
     }
 
     private fun status(text: String) = main.post { eyes.caption = text }
@@ -212,6 +244,7 @@ class MainActivity : Activity() {
         val lower = text.lowercase()
         if (lower in GO_TO_SLEEP) { goToSleep(); return }
         if (lower in FORGET) { brain?.forget(); speakLine("Okay, fresh start."); return }
+        quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
 
         setPhase(Phase.THINKING)
         ears?.reset()
@@ -238,6 +271,23 @@ class MainActivity : Activity() {
                     v.endReply()
                 }
             })
+    }
+
+    /** Things a small offline brain can't know, answered from the tablet itself. */
+    private fun quickAnswer(q: String): String? {
+        val now = java.util.Calendar.getInstance()
+        val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.UK).format(now.time)
+        val date = java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.UK).format(now.time)
+        return when {
+            Regex("\\b(what('?s| is) the time|what time is it|tell me the time)\\b").containsMatchIn(q) -> "It's $time."
+            Regex("\\b(what('?s| is) (the )?date|what day is it|today'?s date|what('?s| is) today)\\b").containsMatchIn(q) -> "It's $date."
+            else -> null
+        }
+    }
+
+    private fun systemPrompt(): String {
+        val today = java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.UK).format(java.util.Date())
+        return "$SYSTEM_PROMPT Today is $today. You are in the UK."
     }
 
     private fun speakLine(text: String) {
@@ -320,6 +370,7 @@ class MainActivity : Activity() {
             if (eyes.showCaptions) "Hide captions" else "Show captions",
             "Forget our conversation",
             if (voiceInterrupt) "Stop voice interrupting (if I keep cutting myself off)" else "Let me interrupt by voice",
+            "Change brain (smarter or faster)…",
             "Retry setup",
             "Bluetooth settings",
             "Choose Home app (to exit companion mode)",
@@ -333,10 +384,11 @@ class MainActivity : Activity() {
                     1 -> { eyes.showCaptions = !eyes.showCaptions; prefs.edit().putBoolean("captions", eyes.showCaptions).apply() }
                     2 -> brain?.forget()
                     3 -> { voiceInterrupt = !voiceInterrupt; setPhase(phase) }
-                    4 -> startSetup()
-                    5 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                    6 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
-                    7 -> startActivity(Intent(Settings.ACTION_SETTINGS))
+                    4 -> chooseBrain()
+                    5 -> { setupStarted = false; startSetup() }
+                    6 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                    7 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+                    8 -> startActivity(Intent(Settings.ACTION_SETTINGS))
                 }
             }
             .show()
@@ -384,11 +436,14 @@ class MainActivity : Activity() {
 
     companion object {
         val SYSTEM_PROMPT = """
-            You are Pip, a small, cheerful desktop companion who lives in a tablet on someone's desk.
-            You only exist as a pair of animated eyes and a voice. Everything you say is spoken aloud,
-            so reply in one or two short, natural sentences. Never use lists, markdown, emoji or
-            stage directions. Be warm, curious and a little playful. If you don't know something,
-            say so briefly. You have no internet access.
+            You are Pip, a friendly, clever companion who lives in a tablet on someone's desk as a pair
+            of animated eyes and a voice. Everything you say is read aloud.
+            Rules: Answer the question that was actually asked, directly, in the first sentence.
+            Keep it to one to three short sentences unless asked for more. Use plain spoken English:
+            no lists, markdown, emoji or stage directions. If the question is unclear or sounds misheard,
+            ask a short clarifying question instead of guessing. If you're not sure of a fact, say so.
+            Be warm and a bit playful, and remember what was said earlier in the conversation.
+            You have no internet access.
         """.trimIndent().replace("\n", " ")
 
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")

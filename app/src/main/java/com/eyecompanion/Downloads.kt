@@ -11,13 +11,26 @@ import java.util.zip.ZipInputStream
  * Downloads resume if interrupted.
  */
 object Downloads {
-    const val LLM_URL =
-        "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
-    /** Smaller, faster brain for older or 32-bit tablets. */
-    const val SMALL_LLM_URL =
-        "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+    /** The brains Pip can use, from quickest to cleverest. */
+    data class BrainChoice(val key: String, val label: String, val url: String, val file: String, val sizeMb: Int)
+
+    val BRAINS = listOf(
+        BrainChoice("fast", "Fast (Qwen 0.5B) – quick but simple", 
+            "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+            "brain-small.gguf", 490),
+        BrainChoice("smart", "Smarter (Llama 3.2 1B) – good balance",
+            "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+            "brain.gguf", 810),
+        BrainChoice("smartest", "Smartest (Qwen 1.5B) – cleverest, slowest",
+            "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+            "brain-large.gguf", 1120),
+    )
+
+    /** Big-vocabulary speech model: much better at hearing you correctly than the tiny one. */
     const val VOSK_URL =
-        "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+        "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
+    const val VOSK_DIR = "vosk-lgraph"
+    const val VOSK_MB = 128
 
     /** progress: 0..1, or -1 if unknown size */
     fun fetch(url: String, dest: File, progress: (Float) -> Unit) {

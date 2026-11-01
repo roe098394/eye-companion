@@ -119,10 +119,10 @@ Java_com_eyecompanion_Brain_nativeLoad(JNIEnv *env, jobject, jstring jpath, jint
     llama_sampler_chain_params sp = llama_sampler_chain_default_params();
     s->sampler = llama_sampler_chain_init(sp);
     llama_sampler_chain_add(s->sampler, llama_sampler_init_penalties(
-            llama_vocab_n_tokens(s->vocab), 64, 1.1f, 0.0f, 0.0f));
+            llama_vocab_n_tokens(s->vocab), 64, 1.08f, 0.0f, 0.0f));
     llama_sampler_chain_add(s->sampler, llama_sampler_init_top_p(0.9f, 1));
     llama_sampler_chain_add(s->sampler, llama_sampler_init_min_p(0.05f, 1));
-    llama_sampler_chain_add(s->sampler, llama_sampler_init_temp(0.7f));
+    llama_sampler_chain_add(s->sampler, llama_sampler_init_temp(0.5f));
     llama_sampler_chain_add(s->sampler, llama_sampler_init_dist((uint32_t) time(nullptr)));
 
     LOGI("model loaded, ctx=%u", llama_n_ctx(ctx));
