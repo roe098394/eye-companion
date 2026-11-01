@@ -60,6 +60,7 @@ class PcBrain(private val systemPrompt: () -> String) {
                 .put("messages", msgs)
                 .put("stream", true)
                 .put("keep_alive", "60m")
+                .put("think", false)          // answer straight away, no long hidden "thinking"
                 .put("options", JSONObject().put("num_predict", maxReplyTokens).put("temperature", 0.6))
             val conn = (URL("http://$h:$PORT/api/chat").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -119,7 +120,9 @@ class PcBrain(private val systemPrompt: () -> String) {
         /** Prefer a good conversational model if several are installed. */
         fun pickModel(host: String): String? {
             val models = listModels(host) ?: return null
-            val preferred = listOf("llama3.2:3b", "qwen2.5:7b", "llama3.1:8b", "gemma3:4b", "qwen2.5:3b", "phi3:mini")
+            // best first: the app always uses the cleverest model installed on the PC
+            val preferred = listOf("qwen3.5:9b", "qwen3:8b", "gemma4:e4b", "qwen3.5:4b", "qwen2.5:7b", "llama3.1:8b",
+                "gemma3:4b", "phi4-mini", "llama3.2:3b", "qwen2.5:3b", "phi3:mini")
             return preferred.firstOrNull { p -> models.any { it == p || it.startsWith("$p-") } }
                 ?.let { p -> models.first { it == p || it.startsWith("$p-") } }
                 ?: models.firstOrNull { !it.contains("embed") }

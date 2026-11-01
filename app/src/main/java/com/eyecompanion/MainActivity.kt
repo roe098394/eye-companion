@@ -34,7 +34,7 @@ class MainActivity : Activity() {
     private val pc by lazy {
         PcBrain { systemPrompt() }.apply {
             host = prefs.getString("pcHost", null)
-            model = prefs.getString("pcModel", null)
+            model = null   // re-checked on first question, so a better model on the PC is picked up automatically
         }
     }
     private var ears: Ears? = null
