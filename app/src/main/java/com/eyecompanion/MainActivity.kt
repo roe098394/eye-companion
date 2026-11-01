@@ -217,6 +217,44 @@ class MainActivity : Activity() {
         main.postDelayed({ startSetup() }, 2500)
     }
 
+    /**
+     * Switch to the next way of opening the mic and show a live meter for 30 seconds,
+     * so you can see whether the tablet is actually hearing you.
+     */
+    private fun micTest() {
+        val model = voskModel ?: run { eyes.caption = "I'm not set up yet."; return }
+        val old = ears ?: return
+        val next = if (old.currentMode < 0) 0 else (old.currentMode + 1) % old.modeCount
+        prefs.edit().putInt("micMode", next).apply()
+        old.stop()
+        val e = Ears(
+            this, model,
+            onPartial = { p -> main.post { partial(p) } },
+            onHeard = { text -> main.post { heard(text) } },
+            onLevel = { l -> eyes.level = l },
+            onError = { msg -> main.post { eyes.caption = msg } },
+            startMode = next,
+        )
+        ears = e
+        e.start()
+        setPhase(Phase.LISTENING)
+        eyes.showCaptions = true
+        val until = System.currentTimeMillis() + 30_000
+        val tick = object : Runnable {
+            override fun run() {
+                if (ears !== e) return
+                val bars = (e.peak / 1000).coerceIn(0, 20)
+                eyes.subCaption = "Mic mode ${e.currentMode + 1}/${e.modeCount}  " +
+                    "level " + "▮".repeat(bars) + "·".repeat(20 - bars) +
+                    "  heard: " + e.lastHeardText.take(30)
+                if (System.currentTimeMillis() < until) main.postDelayed(this, 200)
+                else eyes.subCaption = ""
+            }
+        }
+        main.post(tick)
+        eyes.caption = "Mic test: talk and watch the level bar. Long-press again to try the next mode."
+    }
+
     private fun chooseBrain() {
         val current = chosenBrain().key
         val labels = Downloads.BRAINS.map { (if (it.key == current) "✓ " else "") + it.label + " · ${it.sizeMb} MB" }.toTypedArray()
@@ -249,6 +287,7 @@ class MainActivity : Activity() {
             onHeard = { text -> main.post { heard(text) } },
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post { eyes.caption = msg } },
+            startMode = prefs.getInt("micMode", 0),
         ).also { it.start() }
 
         eyes.subCaption = ""
@@ -434,6 +473,7 @@ class MainActivity : Activity() {
             "Forget our conversation",
             if (voiceInterrupt) "Stop voice interrupting (if I keep cutting myself off)" else "Let me interrupt by voice",
             "Change brain (smarter or faster)…",
+            "Microphone test / try next mic mode",
             "Retry setup",
             "Bluetooth settings",
             "Choose Home app (to exit companion mode)",
@@ -448,10 +488,11 @@ class MainActivity : Activity() {
                     2 -> brain?.forget()
                     3 -> { voiceInterrupt = !voiceInterrupt; setPhase(phase) }
                     4 -> chooseBrain()
-                    5 -> { setupStarted = false; startSetup() }
-                    6 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                    7 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
-                    8 -> startActivity(Intent(Settings.ACTION_SETTINGS))
+                    5 -> micTest()
+                    6 -> { setupStarted = false; startSetup() }
+                    7 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                    8 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+                    9 -> startActivity(Intent(Settings.ACTION_SETTINGS))
                 }
             }
             .show()

@@ -23,7 +23,18 @@ class Ears(
     private val onHeard: (String) -> Unit,
     private val onLevel: (Float) -> Unit,
     private val onError: (String) -> Unit = {},
+    /** Which way of opening the mic to try first (0 = automatic best). */
+    private val startMode: Int = 0,
 ) {
+    /** For the on-screen mic test. */
+    @Volatile var currentMode = -1
+        private set
+    @Volatile var peak = 0
+        private set
+    @Volatile var lastHeardText = ""
+        private set
+    val modeCount get() = setups.size
+
     @Volatile var paused = false
         set(value) { if (field && !value) needReset = true; field = value }
     @Volatile private var running = false
@@ -89,8 +100,8 @@ class Ears(
 
     private fun loop() {
         val rate = 16000
-        var setupIndex = 0
-        var opened = openMic(rate, setupIndex)
+        var setupIndex = startMode.coerceIn(0, setups.size - 1)
+        var opened = openMic(rate, setupIndex) ?: openMic(rate, 0)
         if (opened == null) {
             onError("I can't open the microphone. Check Pip has microphone permission in Settings → Apps, then long-press → Retry setup.")
             running = false
@@ -98,6 +109,7 @@ class Ears(
         }
         var rec = opened.first
         setupIndex = opened.second
+        currentMode = setupIndex
         val recognizer = Recognizer(model, rate.toFloat())
         val buf = ShortArray(rate / 10) // 100 ms
         var lastPartial = ""
@@ -131,21 +143,24 @@ class Ears(
                     }
                     rec = opened.first
                     setupIndex = opened.second
+                    currentMode = setupIndex
                     quietSince = System.currentTimeMillis()
                     continue
                 }
 
                 if (paused) { onLevel(0f); continue }
                 if (needReset) { recognizer.reset(); needReset = false; lastPartial = "" }
+                this.peak = peak
                 onLevel((sqrt(sum / n) / 2000.0).coerceIn(0.0, 1.0).toFloat())
 
                 if (recognizer.acceptWaveForm(buf, n)) {
                     val text = JSONObject(recognizer.result).optString("text").trim()
+                    if (text.isNotEmpty()) lastHeardText = text
                     lastPartial = ""
                     if (isRealSpeech(text)) onHeard(text)
                 } else {
                     val p = JSONObject(recognizer.partialResult).optString("partial").trim()
-                    if (p != lastPartial) { lastPartial = p; onPartial(p) }
+                    if (p != lastPartial) { lastPartial = p; if (p.isNotEmpty()) lastHeardText = p; onPartial(p) }
                 }
             }
         } finally {
