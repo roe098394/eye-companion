@@ -72,13 +72,18 @@ class MainActivity : Activity() {
         if (setupStarted && phase == Phase.SETUP) return
         ears?.stop(); ears = null
         voice?.shutUp(); voice?.shutdown(); voice = null
-        brain?.release(); brain = null
+        // The old brain and ears must be fully out of memory before loading new ones.
+        val oldBrain = brain; brain = null
+        val oldEars = voskModel; voskModel = null
         replyId++
         setupStarted = true
         phase = Phase.SETUP
         eyes.mood = EyesView.Mood.LOADING
         thread(name = "setup") {
             try {
+                oldBrain?.releaseAndWait()
+                try { oldEars?.close() } catch (_: Exception) {}
+                System.gc()
                 val llm = findOrDownloadLlm()
                 val vosk = findOrDownloadVosk()
 
@@ -100,7 +105,7 @@ class MainActivity : Activity() {
                         }
                     }
                     main.post {
-                        if (!ok) { brainFailed(llm); return@post }
+                        if (!ok) { brainFailed(llm, b.lastError); return@post }
                         prefs.edit().remove("brainRetried").apply()
                         voice = Voice(this) { ttsOk ->
                             main.post {
@@ -179,26 +184,34 @@ class MainActivity : Activity() {
     }
 
     /** The brain wouldn't start: try a fresh download once, then fall back to a smaller brain. */
-    private fun brainFailed(file: File) {
+    private fun brainFailed(file: File, why: String) {
         val current = chosenBrain()
         val custom = file.parentFile != filesDir
         if (custom) { status("Couldn't load your own .gguf file. Remove it from the app folder, then Retry setup."); return }
         // Only re-download if the file looks the wrong size; otherwise it's simply too big for the tablet.
         val sizeOk = kotlin.math.abs(file.length() / 1_000_000 - current.sizeMb) < current.sizeMb / 12
-        file.delete()
         val retried = prefs.getBoolean("brainRetried", false) || sizeOk
         val idx = Downloads.BRAINS.indexOf(current)
         when {
             !retried -> {
+                file.delete()
                 prefs.edit().putBoolean("brainRetried", true).apply()
                 status("My brain file was damaged. Downloading it again…")
             }
             idx > 0 -> {
+                file.delete()
                 val smaller = Downloads.BRAINS[idx - 1]
                 prefs.edit().putString("brain", smaller.key).remove("brainRetried").apply()
                 status("That brain is too big for this tablet. Switching to ${smaller.label.substringBefore(" (")}…")
             }
-            else -> { status("I couldn't load even my smallest brain. Long-press → Retry setup."); return }
+            else -> {
+                // Stop here and show the real reason, so it can be fixed.
+                prefs.edit().remove("brainRetried").apply()
+                status("I couldn't load my brain. Reason: " + why.lines().filter { it.isNotBlank() }.takeLast(3).joinToString(" | ").take(220))
+                eyes.showCaptions = true
+                setupStarted = false        // so Retry setup works
+                return
+            }
         }
         setupStarted = false
         main.postDelayed({ startSetup() }, 2500)

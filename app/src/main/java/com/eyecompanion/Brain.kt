@@ -16,6 +16,11 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
         maxTokens: Int, listener: TokenListener
     ): Boolean
     private external fun nativeFree(handle: Long)
+    private external fun nativeLastError(): String
+
+    /** Why the last load failed, from llama.cpp's own messages. */
+    @Volatile var lastError = ""
+        private set
 
     private val worker = Executors.newSingleThreadExecutor()
     private var handle = 0L
@@ -25,6 +30,7 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
     fun load(onDone: (Boolean) -> Unit) = worker.execute {
         handle = nativeLoad(modelPath, CONTEXT, THREADS, true)
         if (handle == 0L) handle = nativeLoad(modelPath, CONTEXT, THREADS, false)
+        if (handle == 0L) lastError = nativeLastError().trim()
         onDone(handle != 0L)
     }
 
@@ -49,6 +55,18 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
     fun stop() { stopRequested = true }
 
     fun forget() = worker.execute { history.clear() }
+
+    /** Free the model and wait until its memory is really gone. */
+    fun releaseAndWait() {
+        stopRequested = true
+        try {
+            worker.submit {
+                if (handle != 0L) nativeFree(handle)
+                handle = 0L
+            }.get(30, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (_: Exception) {}
+        worker.shutdown()
+    }
 
     fun release() = worker.execute {
         if (handle != 0L) nativeFree(handle)

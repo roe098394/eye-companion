@@ -26,6 +26,19 @@ struct Session {
 
 bool g_backend_ready = false;
 
+// Keep the last few warnings/errors from llama.cpp so the app can show why loading failed.
+std::string g_last_errors;
+int g_last_level = 0;
+void log_cb(ggml_log_level level, const char *text, void *) {
+    if (level == GGML_LOG_LEVEL_CONT) level = (ggml_log_level) g_last_level;
+    g_last_level = level;
+    if (level >= GGML_LOG_LEVEL_WARN) {
+        __android_log_print(level == GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_WARN, "llama", "%s", text);
+        g_last_errors += text;
+        if (g_last_errors.size() > 600) g_last_errors.erase(0, g_last_errors.size() - 600);
+    }
+}
+
 std::string jstr(JNIEnv *env, jstring s) {
     if (!s) return {};
     const char *c = env->GetStringUTFChars(s, nullptr);
@@ -83,7 +96,9 @@ extern "C" {
 
 JNIEXPORT jlong JNICALL
 Java_com_eyecompanion_Brain_nativeLoad(JNIEnv *env, jobject, jstring jpath, jint nCtx, jint nThreads, jboolean useMmap) {
+    g_last_errors.clear();
     if (!g_backend_ready) {
+        llama_log_set(log_cb, nullptr);
         llama_backend_init();
         g_backend_ready = true;
     }
@@ -229,6 +244,11 @@ Java_com_eyecompanion_Brain_nativeChat(JNIEnv *env, jobject, jlong handle,
     }
     llama_sampler_reset(s->sampler);
     return JNI_TRUE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_eyecompanion_Brain_nativeLastError(JNIEnv *env, jobject) {
+    return utf8ToJava(env, g_last_errors);
 }
 
 JNIEXPORT void JNICALL
