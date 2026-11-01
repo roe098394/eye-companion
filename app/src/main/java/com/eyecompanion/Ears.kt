@@ -20,7 +20,8 @@ class Ears(
     private val context: Context,
     private val model: Model,
     private val onPartial: (String) -> Unit,
-    private val onHeard: (String) -> Unit,
+    /** text, and average word confidence 0..1 */
+    private val onHeard: (String, Float) -> Unit,
     private val onLevel: (Float) -> Unit,
     private val onError: (String) -> Unit = {},
     /** Which way of opening the mic to try first (0 = automatic best). */
@@ -119,7 +120,7 @@ class Ears(
             return
         }
         currentMode = mic.index
-        var recognizer = Recognizer(model, mic.rate.toFloat())
+        var recognizer = Recognizer(model, mic.rate.toFloat()).apply { setWords(true) }
         var buf = ShortArray(mic.rate / 10) // 100 ms
         var lastPartial = ""
         var failedReads = 0
@@ -156,7 +157,7 @@ class Ears(
                     mic = next
                     currentMode = next.index
                     recognizer.close()
-                    recognizer = Recognizer(model, next.rate.toFloat())
+                    recognizer = Recognizer(model, next.rate.toFloat()).apply { setWords(true) }
                     buf = ShortArray(next.rate / 10)
                     openedAt = System.currentTimeMillis(); loudest = 0
                     continue
@@ -178,10 +179,14 @@ class Ears(
                 onLevel((sqrt(sum / n) / 2000.0).coerceIn(0.0, 1.0).toFloat())
 
                 if (recognizer.acceptWaveForm(buf, n)) {
-                    val text = JSONObject(recognizer.result).optString("text").trim()
+                    val res = JSONObject(recognizer.result)
+                    val text = res.optString("text").trim()
+                    val words = res.optJSONArray("result")
+                    val conf = if (words == null || words.length() == 0) 1f
+                        else (0 until words.length()).map { words.getJSONObject(it).optDouble("conf", 1.0) }.average().toFloat()
                     if (text.isNotEmpty()) lastHeardText = text
                     lastPartial = ""
-                    if (isRealSpeech(text)) onHeard(text)
+                    if (isRealSpeech(text)) onHeard(text, conf)
                 } else {
                     val p = JSONObject(recognizer.partialResult).optString("partial").trim()
                     if (p != lastPartial) { lastPartial = p; if (p.isNotEmpty()) lastHeardText = p; onPartial(p) }

@@ -47,11 +47,13 @@ class MainActivity : Activity() {
 
     /** Bumped on every new question or interruption, so callbacks from an old reply are ignored. */
     @Volatile private var replyId = 0
+    /** Keep the ears shut briefly after talking: Bluetooth speakers play the end of the voice late. */
+    private var deafUntil = 0L
     /** What Pip is currently saying, used to tell its own voice apart from yours. */
     private val currentReply = StringBuilder()
     private var voiceInterrupt: Boolean
-        get() = prefs.getBoolean("voiceInterrupt", true)
-        set(v) { prefs.edit().putBoolean("voiceInterrupt", v).apply() }
+        get() = prefs.getBoolean("voiceInterrupt2", false)
+        set(v) { prefs.edit().putBoolean("voiceInterrupt2", v).apply() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -238,7 +240,7 @@ class MainActivity : Activity() {
         val e = Ears(
             this, model,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text -> main.post { heard(text) } },
+            onHeard = { text, conf -> main.post { heard(text, conf) } },
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post { eyes.caption = msg } },
             startMode = next,
@@ -288,12 +290,20 @@ class MainActivity : Activity() {
         keepBluetoothInMusicMode()
         val v = voice ?: return
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
-        v.onFinishedTalking = { main.post { if (phase == Phase.TALKING || phase == Phase.THINKING) setPhase(Phase.LISTENING) } }
+        v.onFinishedTalking = { main.post {
+            if (phase == Phase.TALKING || phase == Phase.THINKING) {
+                deafUntil = System.currentTimeMillis() + 1800
+                ears?.paused = true
+                main.postDelayed({
+                    if (phase == Phase.TALKING || phase == Phase.THINKING) setPhase(Phase.LISTENING)
+                }, 1800)
+            }
+        } }
 
         ears = Ears(
             this, voskModel!!,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text -> main.post { heard(text) } },
+            onHeard = { text, conf -> main.post { heard(text, conf) } },
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post { eyes.caption = msg } },
             startMode = prefs.getInt("micMode", 0),
@@ -309,6 +319,7 @@ class MainActivity : Activity() {
     private fun partial(p: String) {
         when (phase) {
             Phase.LISTENING -> {
+                if (System.currentTimeMillis() < deafUntil) return
                 eyes.mood = if (p.isNotEmpty()) EyesView.Mood.LISTEN else EyesView.Mood.IDLE
                 if (p.isNotEmpty()) eyes.caption = p
             }
@@ -371,7 +382,7 @@ class MainActivity : Activity() {
         ears = Ears(
             this, model,
             onPartial = { p -> main.post { partial(p) } },
-            onHeard = { text -> main.post { heard(text) } },
+            onHeard = { text, conf -> main.post { heard(text, conf) } },
             onLevel = { l -> eyes.level = l },
             onError = { m -> main.post { eyes.caption = m } },
             startMode = 0,
@@ -380,7 +391,11 @@ class MainActivity : Activity() {
         eyes.caption = msg
     }
 
-    private fun heard(text: String) {
+    private fun heard(text: String, conf: Float = 1f) {
+        if (phase == Phase.LISTENING) {
+            if (System.currentTimeMillis() < deafUntil) return   // tail end of its own voice
+            if (conf < 0.6f) return                              // not sure what was said: stay quiet
+        }
         when (phase) {
             Phase.LISTENING -> {}
             Phase.THINKING, Phase.TALKING -> {
@@ -649,7 +664,7 @@ class MainActivity : Activity() {
             if (phase == Phase.ASLEEP) "Wake up" else "Go to sleep",
             if (eyes.showCaptions) "Hide captions" else "Show captions",
             "Forget our conversation",
-            if (voiceInterrupt) "Stop voice interrupting (if I keep cutting myself off)" else "Let me interrupt by voice",
+            if (voiceInterrupt) "Mic while talking: ON (tap to mute it while I speak)" else "Mic while talking: muted (tap to let me be interrupted by voice)",
             "Change brain (smarter or faster)…",
             "Microphone test / try next mic mode",
             (if (chosenEars() == Downloads.EARS_BIG) "✓ " else "") + "Better hearing (bigger speech model, ${Downloads.EARS_BIG.sizeMb} MB)",
