@@ -159,7 +159,8 @@ class MainActivity : Activity() {
     private fun chosenEars(): Downloads.EarsChoice {
         val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
         val mem = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.totalMem
-        val roomy = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() && mem >= 3_500_000_000L
+        prefs.getString("ears", null)?.let { return if (it == "big") Downloads.EARS_BIG else Downloads.EARS_SMALL }
+        val roomy = Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() && mem >= 2_900_000_000L
         return if (roomy && !prefs.getBoolean("smallEars", false)) Downloads.EARS_BIG else Downloads.EARS_SMALL
     }
 
@@ -512,6 +513,7 @@ class MainActivity : Activity() {
             if (voiceInterrupt) "Stop voice interrupting (if I keep cutting myself off)" else "Let me interrupt by voice",
             "Change brain (smarter or faster)…",
             "Microphone test / try next mic mode",
+            (if (chosenEars() == Downloads.EARS_BIG) "✓ " else "") + "Better hearing (bigger speech model, ${Downloads.EARS_BIG.sizeMb} MB)",
             "Retry setup",
             "Bluetooth settings",
             "Choose Home app (to exit companion mode)",
@@ -527,10 +529,15 @@ class MainActivity : Activity() {
                     3 -> { voiceInterrupt = !voiceInterrupt; setPhase(phase) }
                     4 -> chooseBrain()
                     5 -> micTest()
-                    6 -> { setupStarted = false; startSetup() }
-                    7 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                    8 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
-                    9 -> startActivity(Intent(Settings.ACTION_SETTINGS))
+                    6 -> {
+                        val big = chosenEars() == Downloads.EARS_BIG
+                        prefs.edit().putString("ears", if (big) "small" else "big").remove("smallEars").apply()
+                        setupStarted = false; startSetup()
+                    }
+                    7 -> { setupStarted = false; startSetup() }
+                    8 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                    9 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
+                    10 -> startActivity(Intent(Settings.ACTION_SETTINGS))
                 }
             }
             .show()

@@ -167,8 +167,8 @@ class Ears(
                 if (needReset) { recognizer.reset(); needReset = false; lastPartial = "" }
 
                 // Boost quiet audio so speech peaks around 9000 (max 30x), without clipping.
-                recentPeak = maxOf(peak.toFloat(), recentPeak * 0.97f)
-                val gain = (9000f / maxOf(recentPeak, 60f)).coerceIn(1f, 30f)
+                recentPeak = maxOf(peak.toFloat(), recentPeak * 0.985f)
+                val gain = (8000f / maxOf(recentPeak, 400f)).coerceIn(1f, 12f)
                 var sum = 0.0
                 if (gain > 1.05f) for (i in 0 until n) {
                     val v = (buf[i] * gain).toInt().coerceIn(-32767, 32767)
