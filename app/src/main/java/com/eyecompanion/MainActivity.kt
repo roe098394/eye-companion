@@ -33,7 +33,8 @@ class MainActivity : Activity() {
     /** Optional clever brain online (Groq). Key from the menu, or built in from the GitHub secret. */
     private val online by lazy {
         OnlineBrain { systemPrompt() }.apply {
-            apiKey = prefs.getString("onlineKey", null)?.takeIf { it.isNotBlank() } ?: BuildConfig.GROQ_KEY
+            // the key built in from GitHub wins; a key typed on the tablet is only a fallback
+            apiKey = BuildConfig.GROQ_KEY.ifBlank { prefs.getString("onlineKey", null) ?: "" }
             if (prefs.getBoolean("onlineOff", false)) apiKey = ""
         }
     }
@@ -578,8 +579,9 @@ class MainActivity : Activity() {
             .setPositiveButton("Turn on") { _, _ ->
                 val k = input.text.toString().trim()
                 if (k.isNotEmpty()) prefs.edit().putString("onlineKey", k).apply()
+                else if (BuildConfig.GROQ_KEY.isNotBlank()) prefs.edit().remove("onlineKey").apply()
                 prefs.edit().putBoolean("onlineOff", false).apply()
-                online.apiKey = k.ifEmpty { prefs.getString("onlineKey", null) ?: BuildConfig.GROQ_KEY }
+                online.apiKey = k.ifEmpty { BuildConfig.GROQ_KEY.ifBlank { prefs.getString("onlineKey", null) ?: "" } }
                 applyMode(); forgetAll()
                 speakLine(if (online.enabled) "Online brain on." else "I need a key for that.")
             }
