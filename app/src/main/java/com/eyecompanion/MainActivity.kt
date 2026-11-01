@@ -293,9 +293,10 @@ class MainActivity : Activity() {
         ).also { it.start() }
 
         watchForPluggedInMics()
+        applyMode()
         eyes.subCaption = ""
         setPhase(if (prefs.getBoolean("asleep", false)) Phase.ASLEEP else Phase.LISTENING)
-        if (phase == Phase.LISTENING) eyes.caption = "Hi! I'm listening."
+        if (phase == Phase.LISTENING) eyes.caption = if (carMode) "Ready when you are." else "Hi! I'm listening."
     }
 
     private fun partial(p: String) {
@@ -426,9 +427,54 @@ class MainActivity : Activity() {
         }
     }
 
+    private val companionName get() = prefs.getString("name", "Pip") ?: "Pip"
+    private val carMode get() = prefs.getBoolean("carMode", false)
+
     private fun systemPrompt(): String {
         val today = java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.UK).format(java.util.Date())
-        return "$SYSTEM_PROMPT Today is $today. You are in the UK."
+        var p = SYSTEM_PROMPT.replace("Pip", companionName)
+        if (carMode) p = p.replace("lives in a tablet on someone's desk", "rides along in the car with the driver") +
+            " The driver is driving: answer in ONE short sentence, never ask them to read or look at anything," +
+            " and if they sound stressed or the road might need their attention, keep it even shorter."
+        return "$p Today is $today. You are in the UK."
+    }
+
+    /** Apply car mode (or home mode) to the eyes, voice, brain and screen. */
+    private fun applyMode() {
+        val car = carMode
+        eyes.carMode = car
+        brain?.maxReplyTokens = if (car) 60 else Brain.MAX_REPLY_TOKENS
+        brain?.maxTurns = if (car) 4 else Brain.MAX_TURNS
+        voice?.setStyle(pitch = if (car) 0.92f else 1.15f, rate = if (car) 1.1f else 1.05f)
+        applyNightDimming()
+    }
+
+    /** In car mode, dim the screen after dark so it doesn't dazzle. */
+    private fun applyNightDimming() {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val night = hour >= 19 || hour < 7
+        window.attributes = window.attributes.apply {
+            screenBrightness = if (carMode && night) 0.12f else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        }
+        if (carMode) main.postDelayed({ applyNightDimming() }, 10 * 60_000L)
+    }
+
+    private fun renameCompanion() {
+        val input = android.widget.EditText(this).apply {
+            setText(companionName); setSelection(text.length)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("What should I be called?")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val n = input.text.toString().trim().take(20).ifEmpty { "Pip" }
+                prefs.edit().putString("name", n).apply()
+                brain?.forget()
+                speakLine("Okay, I'm $n now.")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun speakLine(text: String) {
@@ -518,9 +564,11 @@ class MainActivity : Activity() {
             "Bluetooth settings",
             "Choose Home app (to exit companion mode)",
             "Open Android settings",
+            if (carMode) "Car mode: ON (tap for home mode)" else "Car mode: off (tap to turn on)",
+            "Change my name…",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Eye Companion")
+            .setTitle(companionName)
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> if (phase == Phase.ASLEEP) wakeUp() else if (phase != Phase.SETUP) goToSleep()
@@ -538,6 +586,13 @@ class MainActivity : Activity() {
                     8 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
                     9 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
                     10 -> startActivity(Intent(Settings.ACTION_SETTINGS))
+                    11 -> {
+                        prefs.edit().putBoolean("carMode", !carMode).apply()
+                        applyMode()
+                        brain?.forget()
+                        speakLine(if (carMode) "Car mode on. Drive safely." else "Back to home mode.")
+                    }
+                    12 -> renameCompanion()
                 }
             }
             .show()

@@ -27,6 +27,10 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
     private val history = ArrayList<Pair<String, String>>()   // role to text
     @Volatile private var stopRequested = false
 
+    /** Shorter replies and memory = faster answers (used by car mode). */
+    @Volatile var maxReplyTokens = MAX_REPLY_TOKENS
+    @Volatile var maxTurns = MAX_TURNS
+
     fun load(onDone: (Boolean) -> Unit) = worker.execute {
         handle = nativeLoad(modelPath, CONTEXT, THREADS, true)
         if (handle == 0L) handle = nativeLoad(modelPath, CONTEXT, THREADS, false)
@@ -42,7 +46,7 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
         val roles = arrayOf("system") + history.map { it.first }
         val texts = arrayOf(systemPrompt()) + history.map { it.second }
         val reply = StringBuilder()
-        val ok = handle != 0L && nativeChat(handle, roles, texts, MAX_REPLY_TOKENS) { piece ->
+        val ok = handle != 0L && nativeChat(handle, roles, texts, maxReplyTokens) { piece ->
             reply.append(piece)
             onToken(piece) && !stopRequested
         }
@@ -75,7 +79,7 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
 
     private fun trimHistory() {
         // keep the last few exchanges so prompts stay quick on a tablet CPU
-        while (history.size > MAX_TURNS) history.removeAt(0)
+        while (history.size > maxTurns) history.removeAt(0)
         // the conversation must start with a user turn
         while (history.isNotEmpty() && history[0].first != "user") history.removeAt(0)
         // rough size cap (~4 chars per token)
@@ -88,8 +92,8 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
     companion object {
         const val CONTEXT = 2048
         const val THREADS = 4
-        const val MAX_REPLY_TOKENS = 160
-        const val MAX_TURNS = 10
+        const val MAX_REPLY_TOKENS = 110
+        const val MAX_TURNS = 8
 
         init { System.loadLibrary("companion") }
     }

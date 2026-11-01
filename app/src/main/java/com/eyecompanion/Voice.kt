@@ -87,6 +87,11 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
 
     fun shutdown() { tts.shutdown() }
 
+    /** Pitch/speed, e.g. a calmer, deeper voice for car mode. */
+    fun setStyle(pitch: Float, rate: Float) {
+        try { tts.setPitch(pitch); tts.setSpeechRate(rate) } catch (_: Exception) {}
+    }
+
     private fun say(raw: String) {
         val clean = cleanForSpeech(raw)
         if (clean.isBlank()) return

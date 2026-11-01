@@ -31,6 +31,10 @@ class EyesView(context: Context) : View(context) {
     var showCaptions = true
     var eyeColor = Color.parseColor("#5CE1FF")
 
+    /** Car mode: low, wide amber visor eyes with a voice equaliser underneath. */
+    var carMode = false
+        set(v) { field = v; eyeColor = Color.parseColor(if (v) "#FFB23E" else "#5CE1FF") }
+
     // smoothed animation state
     private var lookX = 0f; private var lookY = 0f
     private var open = 0.1f; private var scale = 1f; private var happy = 0f
@@ -105,11 +109,11 @@ class EyesView(context: Context) : View(context) {
 
         // --- draw ---
         val w = width.toFloat(); val h = height.toFloat()
-        val eyeW = min(w * 0.17f, h * 0.30f) * scale
-        val eyeH = eyeW * 1.55f
-        val gap = eyeW * 0.85f
+        val eyeW = min(w * 0.17f, h * 0.30f) * scale * (if (carMode) 1.25f else 1f)
+        val eyeH = eyeW * (if (carMode) 0.42f else 1.55f)
+        val gap = eyeW * (if (carMode) 0.55f else 0.85f)
         val cx = w / 2 + lookX * w * 0.07f
-        val cy = h * 0.46f + lookY * h * 0.08f + bounce * h
+        val cy = (if (carMode) h * 0.38f else h * 0.46f) + lookY * h * (if (carMode) 0.03f else 0.08f) + bounce * h
         val openNow = max(0.04f, open * blink)
 
         eyePaint.color = eyeColor
@@ -126,15 +130,38 @@ class EyesView(context: Context) : View(context) {
             rect.set(ex - ew / 2, cy - eh / 2, ex + ew / 2, cy + eh / 2)
             canvas.drawRoundRect(rect, r, r, eyePaint)
             // happy "cheeks": a dark oval pushing up from below
-            if (happy > 0.02f && openNow > 0.3f) {
+            if (!carMode && happy > 0.02f && openNow > 0.3f) {
                 val lift = eh * 0.55f * happy
                 rect.set(ex - ew * 0.9f, cy + eh / 2 - lift, ex + ew * 0.9f, cy + eh / 2 - lift + eh * 1.1f)
                 canvas.drawOval(rect, lidPaint)
             }
         }
 
+        // car mode: a mirrored voice equaliser that dances when listening or talking
+        if (carMode && mood != Mood.SLEEP && mood != Mood.LOADING) {
+            val bars = 17
+            val bw = w * 0.022f
+            val gapB = bw * 0.7f
+            val total = bars * bw + (bars - 1) * gapB
+            val baseY = h * 0.68f
+            val active = mood == Mood.TALK || mood == Mood.LISTEN
+            for (i in 0 until bars) {
+                val fromCentre = abs(i - bars / 2).toFloat() / (bars / 2)
+                val wave = 0.5f + 0.5f * sin(secs * 9f + i * 1.3f) * sin(secs * 3.7f + i * 0.6f)
+                val amp = if (active) (0.15f + level * 1.6f).coerceAtMost(1f) * (1f - fromCentre * 0.7f) * (0.35f + 0.65f * wave)
+                          else if (mood == Mood.THINK) 0.08f + 0.06f * max(0f, sin(secs * 5f - i * 0.5f))
+                          else 0.04f
+                val bh = max(bw, h * 0.22f * amp)
+                val x = w / 2 - total / 2 + i * (bw + gapB)
+                eyePaint.alpha = (90 + 165 * (1f - fromCentre * 0.6f)).toInt()
+                rect.set(x, baseY - bh / 2, x + bw, baseY + bh / 2)
+                canvas.drawRoundRect(rect, bw / 2, bw / 2, eyePaint)
+            }
+            eyePaint.alpha = 255
+        }
+
         // thinking dots
-        if (mood == Mood.THINK) {
+        if (mood == Mood.THINK && !carMode) {
             for (i in 0..2) {
                 val a = 0.3f + 0.7f * max(0f, sin(secs * 5f - i * 0.8f))
                 eyePaint.alpha = (255 * a).toInt()
