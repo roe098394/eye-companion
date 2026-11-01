@@ -68,7 +68,7 @@ class EyesView(context: Context) : View(context) {
         when (mood) {
             Mood.LOADING -> { tOpen = 0.35f; tLookX = 0f; tLookY = 0.5f; tHappy = 0f }
             Mood.SLEEP -> { tOpen = 0.06f + 0.03f * sin(secs * 1.2f); tLookX = 0f; tLookY = 0.3f; tHappy = 0f }
-            Mood.IDLE -> glanceAround(t)
+            Mood.IDLE -> { glanceAround(t); tScale = 1f + level * 0.10f }
             Mood.LISTEN -> { tScale = 1.06f + level * 0.12f; tLookX *= 0.9f; tLookY = -0.05f; tHappy = 0.05f }
             Mood.THINK -> {
                 tOpen = 0.78f; tHappy = 0f

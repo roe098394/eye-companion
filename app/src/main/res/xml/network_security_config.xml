@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Older Android versions have an out-of-date list of trusted certificates, so model downloads
+     fail with "Trust anchor for certification path not found". Ship a current list as well. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="@raw/extra_roots" />
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

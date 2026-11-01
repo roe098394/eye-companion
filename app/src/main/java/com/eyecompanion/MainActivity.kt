@@ -61,7 +61,10 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- setup
 
     private fun startSetup() {
-        if (setupStarted) return
+        if (setupStarted && phase == Phase.SETUP) return
+        ears?.stop(); ears = null
+        voice?.shutUp(); voice?.shutdown(); voice = null
+        brain?.release(); brain = null
         setupStarted = true
         eyes.mood = EyesView.Mood.LOADING
         thread(name = "setup") {
@@ -143,6 +146,7 @@ class MainActivity : Activity() {
             } } },
             onHeard = { text -> main.post { heard(text) } },
             onLevel = { l -> eyes.level = l },
+            onError = { msg -> main.post { eyes.caption = msg } },
         ).also { it.start() }
 
         eyes.subCaption = ""
