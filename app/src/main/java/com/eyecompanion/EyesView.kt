@@ -45,8 +45,15 @@ class EyesView(context: Context) : View(context) {
     /** 0..1 loudness from the mic or voice, used to make the eyes "breathe". */
     @Volatile var level = 0f
 
+    /** Captions fade away 10 seconds after they last changed (not during setup). */
     var caption = ""
+        set(v) { if (v != field) captionAt = now(); field = v }
     var subCaption = ""
+        set(v) { if (v != field) subCaptionAt = now(); field = v }
+    @Volatile private var captionAt = 0L
+    @Volatile private var subCaptionAt = 0L
+    private fun fade(since: Long, t: Long): Float =
+        if (mood == Mood.LOADING) 1f else (1f - ((t - since) - 10_000f) / 1000f).coerceIn(0f, 1f)
     var showCaptions = true
     var eyeColor = Color.parseColor("#5CE1FF")
 
@@ -237,8 +244,10 @@ class EyesView(context: Context) : View(context) {
         if (showCaptions || mood == Mood.LOADING) {
             textPaint.textSize = h * 0.035f
             subPaint.textSize = h * 0.028f
-            drawWrapped(canvas, caption, w / 2, h * 0.90f, w * 0.85f, textPaint)
-            if (subCaption.isNotEmpty()) canvas.drawText(subCaption.take(90), w / 2, h * 0.08f, subPaint)
+            val a1 = fade(captionAt, t); val a2 = fade(subCaptionAt, t)
+            textPaint.alpha = (170 * a1).toInt(); subPaint.alpha = (110 * a2).toInt()
+            if (a1 > 0f) drawWrapped(canvas, caption, w / 2, h * 0.90f, w * 0.85f, textPaint)
+            if (a2 > 0f && subCaption.isNotEmpty()) canvas.drawText(subCaption.take(90), w / 2, h * 0.08f, subPaint)
         }
 
         postInvalidateOnAnimation()
