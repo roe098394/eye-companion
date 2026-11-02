@@ -274,11 +274,43 @@ class MainActivity : Activity() {
         else thread { onDone(null) }
     }
 
+    // ---- slow charger: plugged in but the battery isn't really filling (or is still going down)
+    private var lastSlowMoan = 0L
+    private var plugLevelAt = 0L
+    private var plugLevel = -1
+    private fun slowCharging(): Boolean {
+        val i = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return false
+        val plugged = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0)
+        if (plugged == 0) { plugLevel = -1; return false }
+        val status = i.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1)
+        val level = batteryPercent()
+        if (status == android.os.BatteryManager.BATTERY_STATUS_FULL || level >= 98) return false
+        val now = System.currentTimeMillis()
+        if (plugLevel < 0) { plugLevel = level; plugLevelAt = now }
+        // after 20 minutes plugged in, see how much it has gained
+        val dropping = now - plugLevelAt > 20 * 60_000 && level <= plugLevel
+        if (now - plugLevelAt > 40 * 60_000) { plugLevel = level; plugLevelAt = now }   // keep measuring
+        return status == android.os.BatteryManager.BATTERY_STATUS_DISCHARGING ||
+            status == android.os.BatteryManager.BATTERY_STATUS_NOT_CHARGING || dropping ||
+            plugged == android.os.BatteryManager.BATTERY_PLUGGED_USB
+    }
+    private fun moanAboutSlowCharger() {
+        val now = System.currentTimeMillis()
+        if (phase != Phase.LISTENING || now - lastSlowMoan < 30 * 60_000 || !slowCharging()) return
+        lastSlowMoan = now
+        speakLine(listOf(
+            "[annoyed] Slow charger. Electrons come in like dripping tap.",
+            "[sad] This charger is weak. Battery ${batteryPercent()} percent and barely moving. Kettle get the good socket.",
+            "[angry] Plugged in, yes. Charging, barely. Need proper charger, not this toy.",
+            "[suspicious] Robot get the slowest charger in house. Mark, I noticed.").random())
+    }
+
     /** Every 10 minutes while unplugged, grumble again. */
     private val powerNagLoop = object : Runnable {
         override fun run() {
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
+            moanAboutSlowCharger()
             if (!isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
                 lastPowerNag = System.currentTimeMillis()
                 eyes.feel(EyesView.Emotion.ANGRY, 6000)
