@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.view.View
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -18,7 +19,15 @@ class EyesView(context: Context) : View(context) {
     enum class Mood { LOADING, SLEEP, IDLE, LISTEN, THINK, TALK, HAPPY }
 
     /** How Pip feels about what it's saying; shown on top of the mood for a while. */
-    enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING }
+    enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY }
+
+    /** Where a face was last seen (-1..1 from the screen's point of view), and when. */
+    @Volatile var faceX = 0f
+    @Volatile var faceY = 0f
+    @Volatile var faceAt = 0L
+    fun seeFace(x: Float, y: Float) { faceX = x; faceY = y; faceAt = now() }
+    /** How far the tablet leans (-1..1, + = right side lower): eyes slide to the low side. */
+    @Volatile var tilt = 0f
 
     @Volatile var emotion = Emotion.NEUTRAL
         private set
@@ -98,14 +107,16 @@ class EyesView(context: Context) : View(context) {
         when (mood) {
             Mood.LOADING -> { tOpen = 0.35f; tLookX = 0f; tLookY = 0.5f; tHappy = 0f }
             Mood.SLEEP -> { tOpen = 0.06f + 0.03f * sin(secs * 1.2f); tLookX = 0f; tLookY = 0.3f; tHappy = 0f }
-            Mood.IDLE -> { glanceAround(t); tScale = 1f + level * 0.10f }
-            Mood.LISTEN -> { tScale = 1.06f + level * 0.12f; tLookX *= 0.9f; tLookY = -0.05f; tHappy = 0.05f }
+            Mood.IDLE -> { if (seesFace) followFace() else glanceAround(t); tScale = 1f + level * 0.10f }
+            Mood.LISTEN -> { tScale = 1.06f + level * 0.12f; tLookX *= 0.9f; tLookY = -0.05f; tHappy = 0.05f
+                if (seesFace) followFace() }
             Mood.THINK -> {
                 tOpen = 0.78f; tHappy = 0f
                 tLookX = 0.55f + 0.1f * sin(secs * 0.7f); tLookY = -0.55f
             }
             Mood.TALK -> {
                 tHappy = 0.35f; tLookX *= 0.9f; tLookY = 0f
+                if (seesFace) followFace()
                 bounce = sin(secs * 13f) * (0.012f + level * 0.03f)
             }
             Mood.HAPPY -> { tHappy = 0.85f; tScale = 1.08f; tLookX = 0f; tLookY = -0.1f
@@ -124,8 +135,12 @@ class EyesView(context: Context) : View(context) {
             Emotion.LOVE -> { tHappy = 0.7f; tScale *= 1f + 0.05f * sin(secs * 6f); tTint = 1f }
             Emotion.CONFUSED -> { oneEye = 0.78f; tLookX = -0.3f; tLookY = -0.2f; tHappy = 0f }
             Emotion.THINKING -> { tOpen = 0.8f; tLookX = 0.55f; tLookY = -0.5f; tHappy = 0f }
+            Emotion.DIZZY -> { tLookX = 0.75f * cos(secs * 9f); tLookY = 0.5f * sin(secs * 9f); oneEye = 0.85f; tHappy = 0f }
             Emotion.NEUTRAL -> {}
         }
+        // leaning: eyes roll towards the low side
+        if (mood != Mood.SLEEP && mood != Mood.LOADING && abs(tilt) > 0.2f)
+            tLookX = (tLookX + (tilt - 0.2f * Math.signum(tilt)) * 2.2f).coerceIn(-1.3f, 1.3f)
 
         // --- blinking (not while asleep) ---
         if (nextBlink == 0L) nextBlink = t + 2000
@@ -300,6 +315,9 @@ class EyesView(context: Context) : View(context) {
             (Color.green(a) + (Color.green(b) - Color.green(a)) * g).toInt(),
             (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * g).toInt())
     }
+
+    private val seesFace get() = now() - faceAt < 1500
+    private fun followFace() { tLookX = faceX * 1.1f; tLookY = faceY * 0.7f }
 
     private fun glanceAround(t: Long) {
         if (t >= nextGlance) {

@@ -63,7 +63,7 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
             "sleepy" to EyesView.Emotion.SLEEPY, "tired" to EyesView.Emotion.SLEEPY,
             "love" to EyesView.Emotion.LOVE, "loving" to EyesView.Emotion.LOVE,
             "confused" to EyesView.Emotion.CONFUSED, "thinking" to EyesView.Emotion.THINKING,
-            "neutral" to EyesView.Emotion.NEUTRAL)
+            "dizzy" to EyesView.Emotion.DIZZY, "neutral" to EyesView.Emotion.NEUTRAL)
     }
 }
 
@@ -106,6 +106,79 @@ class MainActivity : Activity() {
 
     private enum class Phase { SETUP, ASLEEP, LISTENING, THINKING, TALKING }
     private var phase = Phase.SETUP
+
+    // ---- eyes that follow faces, and noticing being picked up
+    private var faces: FaceTracker? = null
+    private var handling: Handling? = null
+    private var resumed = false
+    @Volatile private var lastFaceSeen = 0L
+    private var lastSleepyLook = 0L
+    private var followFaces: Boolean
+        get() = prefs.getBoolean("followFaces", true)
+        set(v) { prefs.edit().putBoolean("followFaces", v).apply() }
+    private var reactToHandling: Boolean
+        get() = prefs.getBoolean("reactToHandling", true)
+        set(v) { prefs.edit().putBoolean("reactToHandling", v).apply() }
+
+    /** Camera on only while awake, on screen and wanted. */
+    private fun updateTracking() {
+        val want = followFaces && resumed && phase != Phase.SETUP && phase != Phase.ASLEEP
+        if (want && checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            if (!prefs.getBoolean("askedCamForFaces", false)) {
+                prefs.edit().putBoolean("askedCamForFaces", true).apply()
+                requestPermissions(arrayOf(Manifest.permission.CAMERA), 3)
+            }
+            return
+        }
+        val f = faces ?: FaceTracker(
+            onFace = { x, y ->
+                val now = System.currentTimeMillis()
+                val away = now - lastFaceSeen
+                lastFaceSeen = now
+                main.post {
+                    eyes.seeFace(x, y)
+                    // someone's back after a while: happy to see them
+                    if (away > 3 * 60_000 && phase == Phase.LISTENING) eyes.feel(EyesView.Emotion.HAPPY, 2000)
+                }
+            },
+            onNoFace = {
+                val now = System.currentTimeMillis()
+                if (now - lastFaceSeen > 10 * 60_000 && now - lastSleepyLook > 60_000) {
+                    lastSleepyLook = now
+                    main.post { if (phase == Phase.LISTENING) eyes.feel(EyesView.Emotion.SLEEPY, 55_000) }
+                }
+            }).also { faces = it }
+        if (want && !f.running) { lastFaceSeen = System.currentTimeMillis(); f.start(displayDegrees()) }
+        else if (!want && f.running) f.stop()
+    }
+
+    private fun setupHandling() {
+        val h = Handling(this) { displayDegrees() }
+        handling = h
+        val awake = { phase != Phase.ASLEEP && phase != Phase.SETUP && reactToHandling }
+        h.onTilt = { v -> eyes.tilt = if (reactToHandling && phase != Phase.ASLEEP) v else 0f }
+        h.onPickedUp = {
+            if (awake()) {
+                eyes.feel(EyesView.Emotion.SURPRISED, 3000)
+                if (phase == Phase.LISTENING) speakLine(listOf("Whoa! Question: where we go?", "Up up up! Careful.",
+                    "Whoa. Flying. Question: why?").random())
+            }
+        }
+        h.onShaken = {
+            if (awake()) {
+                eyes.feel(EyesView.Emotion.DIZZY, 3500)
+                if (phase == Phase.LISTENING) speakLine(listOf("Bad, bad, bad. Stop shake!", "Whoa. Everything spin.",
+                    "Not shake robot! Bad for circuits.").random())
+            }
+        }
+        h.onPutDown = {
+            if (awake()) {
+                eyes.feel(EyesView.Emotion.HAPPY, 2000)
+                if (phase == Phase.LISTENING) speakLine(listOf("Home again.", "Ah. Back on cupboard. Is good.", "Safe. Thank you.").random())
+            }
+        }
+        h.start()
+    }
     private var setupStarted = false
 
     /** Bumped on every new question or interruption, so callbacks from an old reply are ignored. */
@@ -125,6 +198,7 @@ class MainActivity : Activity() {
         eyes.showCaptions = prefs.getBoolean("captions", true)
         setContentView(eyes)
         setupTouch()
+        setupHandling()
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             eyes.caption = "I need the microphone to hear you."
@@ -134,6 +208,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
+        if (code == 3) { updateTracking(); return }   // camera, for following faces
         if (code == 2) {   // camera
             if (results.firstOrNull() == PackageManager.PERMISSION_GRANTED) speakLine("Yes yes yes. Now I see. Ask again.")
             return
@@ -614,8 +689,10 @@ class MainActivity : Activity() {
             }
             eyes.subCaption = "$shown  · looking…"
             eyes.feel(EyesView.Emotion.SURPRISED, 2500)
+            faces?.stop()                       // the photo needs the camera to itself
             Snapshot.take(displayDegrees()) { jpeg ->
                 main.post {
+                    updateTracking()
                     if (id != replyId) return@post
                     if (jpeg == null) { setPhase(Phase.LISTENING); speakLine("Camera not work. Bad, bad, bad."); return@post }
                     eyes.subCaption = "$shown  · camera"
@@ -927,6 +1004,7 @@ class MainActivity : Activity() {
             Phase.THINKING -> EyesView.Mood.THINK
             Phase.TALKING -> EyesView.Mood.TALK
         }
+        updateTracking()
     }
 
     private fun goToSleep() {
@@ -999,6 +1077,8 @@ class MainActivity : Activity() {
             "Forget everyone's voices",
             if (onlineEars) "Online hearing (Whisper): ON" else "Online hearing (Whisper): OFF",
             "Change voice…",
+            if (followFaces) "Eyes follow faces: ON" else "Eyes follow faces: OFF",
+            if (reactToHandling) "React to being picked up: ON" else "React to being picked up: OFF",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -1034,6 +1114,15 @@ class MainActivity : Activity() {
                     }
                     16 -> { voices.forgetAll(); pendingIntro = null; speakLine("Done. All voices forgot.") }
                     18 -> chooseVoice()
+                    19 -> {
+                        followFaces = !followFaces; updateTracking()
+                        speakLine(if (followFaces) "Yes yes yes. I watch you." else "Okay. Camera off.")
+                    }
+                    20 -> {
+                        reactToHandling = !reactToHandling
+                        if (!reactToHandling) eyes.tilt = 0f
+                        speakLine(if (reactToHandling) "I feel when you pick me up." else "Okay. Pick me up, I stay calm.")
+                    }
                     17 -> {
                         onlineEars = !onlineEars
                         speakLine(if (onlineEars) "Better ears on. Is good." else "Okay. Own ears only.")
@@ -1047,6 +1136,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
+        updateTracking()
         hideSystemBars()
         if (phase != Phase.SETUP) keepBluetoothInMusicMode()
     }
@@ -1076,7 +1167,14 @@ class MainActivity : Activity() {
     @Deprecated("Back does nothing: this is the home screen")
     override fun onBackPressed() { /* stay put */ }
 
+    override fun onPause() {
+        resumed = false
+        updateTracking()
+        super.onPause()
+    }
+
     override fun onDestroy() {
+        handling?.stop(); faces?.stop()
         ears?.stop()
         voice?.shutdown()
         brain?.release()
