@@ -169,6 +169,7 @@ class EyesView(context: Context) : View(context) {
             Emotion.NEUTRAL -> {}
         }
         if (seesFace && faceSize > 0.35f && feeling == Emotion.NEUTRAL) tScale *= 1f + min(0.12f, (faceSize - 0.35f) * 0.5f)
+        if (t < stareUntil && mood != Mood.SLEEP && mood != Mood.LOADING) { tLookX = stareX; tLookY = stareY }
         // leaning: eyes roll towards the low side
         if (mood != Mood.SLEEP && mood != Mood.LOADING && abs(tilt) > 0.2f)
             tLookX = (tLookX + (tilt - 0.2f * Math.signum(tilt)) * 2.2f).coerceIn(-1.3f, 1.3f)
@@ -418,6 +419,12 @@ class EyesView(context: Context) : View(context) {
             (Color.green(a) + (Color.green(b) - Color.green(a)) * g).toInt(),
             (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * g).toInt())
     }
+
+    /** Look at one spot for a moment, whatever else is going on (e.g. at a finger on the Home button). */
+    @Volatile private var stareX = 0f
+    @Volatile private var stareY = 0f
+    @Volatile private var stareUntil = 0L
+    fun stareAt(x: Float, y: Float, ms: Long) { stareX = x; stareY = y; stareUntil = now() + ms }
 
     private val seesFace get() = now() - faceAt < 1200
     private val seesMotion get() = now() - motionAt < 700

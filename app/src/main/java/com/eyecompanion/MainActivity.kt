@@ -138,18 +138,29 @@ class MainActivity : Activity() {
         (getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).lockTaskModeState !=
             android.app.ActivityManager.LOCK_TASK_MODE_NONE
 
+    /** Buttons are "locked" by Pip being the Home screen (Home comes back here) and Back doing
+     *  nothing, rather than Android's screen pinning, which shows a how-to-unpin message. */
+    private var leavingOnPurpose = false
     private fun applyButtonLock() {
-        try {
-            if (lockButtons && !pinned && !askedToPin) { askedToPin = true; startLockTask() }
-            else if (!lockButtons && pinned) stopLockTask()
-        } catch (_: Exception) {}
+        try { if (pinned) stopLockTask() } catch (_: Exception) {}
+        leavingOnPurpose = false
+        if (lockButtons && !isDefaultHome() && !askedToPin) {
+            askedToPin = true
+            if (phase == Phase.LISTENING) speakLine("[curious] To lock buttons, make me the Home app. Pick Eye Companion, then Always.")
+            main.postDelayed({ openOutside(Intent(Settings.ACTION_HOME_SETTINGS)) }, 3500)
+        }
+    }
+    private fun isDefaultHome(): Boolean {
+        val r = packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+            android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        return r?.activityInfo?.packageName == packageName
     }
 
     /** Leave the pinned screen for a moment to open settings, then pin again on return. */
     private fun openOutside(i: Intent) {
         try { if (pinned) stopLockTask() } catch (_: Exception) {}
-        askedToPin = false
-        startActivity(i)
+        leavingOnPurpose = true
+        try { startActivity(i) } catch (_: Exception) {}
     }
 
     // ---- grumpy when unplugged
@@ -267,6 +278,10 @@ class MainActivity : Activity() {
     private var lastTabletAsk = 0L
     private var tabletSnoozeUntil = 0L
     private var lastGlassesCheck = 0L
+    // a "visit" = someone at the bench (making a cuppa); ends after 3 minutes with nobody in view
+    private var visitStart = 0L
+    private var visitReminded = false
+    private var visitChecks = 0
 
     private fun tabletsDue(): Boolean {
         if (!tabletReminderOn || carMode) return false
@@ -278,13 +293,14 @@ class MainActivity : Activity() {
 
     private fun remindTablets() {
         val now = System.currentTimeMillis()
-        if (!tabletsDue() || phase != Phase.LISTENING || now < tabletSnoozeUntil || now - lastTabletNag < 10 * 60_000) return
+        if (!tabletsDue() || phase != Phase.LISTENING || visitReminded) return
+        visitReminded = true
         lastTabletNag = now; lastTabletAsk = now
         val n = tabletPerson
-        speakLine(listOf("[curious] $n! Tablets time. Have you taken them?",
-            "[curious] Morning $n. Tablets. Have you had them yet?",
+        speakLine(listOf("[curious] $n! Cuppa time is tablets time. Have you taken them?",
+            "[curious] $n. While kettle boils: tablets. Had them yet?",
             "[suspicious] $n. Tablets. Taken them?",
-            "[sad] $n, tablets still not done. Please take them. Have you?").random())
+            "[sad] $n, tablets still not done today. Please take them. Have you?").random())
     }
 
     /** "I've taken them" / "not yet". Returns true if it was an answer about the tablets. */
@@ -305,8 +321,7 @@ class MainActivity : Activity() {
                     "[happy] Tablets done. I stop asking now.").random())
             }
             notYet && justAsked -> {
-                tabletSnoozeUntil = now + 10 * 60_000
-                speakLine("[neutral] Okay. I ask again in ten minutes.")
+                speakLine("[neutral] Okay. I ask again next cuppa.")
             }
             else -> return false
         }
@@ -317,8 +332,9 @@ class MainActivity : Activity() {
     private fun checkForTabletPerson() {
         val now = System.currentTimeMillis()
         if (!tabletsDue() || phase != Phase.LISTENING || !online.enabled) return
-        if (now - lastGlassesCheck < 3 * 60_000 || now - lastTabletNag < 10 * 60_000 || now < tabletSnoozeUntil) return
-        lastGlassesCheck = now
+        // only someone who stays at the bench a while (making a cuppa), a few checks per visit
+        if (visitReminded || now - visitStart < 15_000 || now - lastGlassesCheck < 45_000 || visitChecks >= 4) return
+        lastGlassesCheck = now; visitChecks++
         faces?.grabJpeg { jpeg ->
             if (jpeg == null) return@grabJpeg
             thread(name = "who") {
@@ -343,6 +359,7 @@ class MainActivity : Activity() {
                 val now = System.currentTimeMillis()
                 val away = now - lastFaceSeen
                 lastFaceSeen = now
+                if (away > 3 * 60_000) main.post { visitStart = now; visitReminded = false; visitChecks = 0 }
                 main.post {
                     eyes.seeFace(x, y, size)
                     checkForTabletPerson()
@@ -390,7 +407,7 @@ class MainActivity : Activity() {
         h.onPutDown = {
             if (awake()) {
                 eyes.feel(EyesView.Emotion.HAPPY, 2000)
-                if (phase == Phase.LISTENING) speakLine(listOf("Home again.", "Ah. Back on cupboard. Is good.", "Safe. Thank you.").random())
+                if (phase == Phase.LISTENING) speakLine(listOf("Home again.", "Ah. Back on bench. Is good.", "Safe. Thank you.").random())
             }
         }
         h.start()
@@ -914,8 +931,9 @@ class MainActivity : Activity() {
         }
 
         // tablets: remind Laura when she's heard
-        if (speaker?.equals(tabletPerson, true) == true && tabletsDue()) {
+        if (speaker?.equals(tabletPerson, true) == true && tabletsDue() && !visitReminded) {
             if (overheard) { remindTablets(); return }
+            visitReminded = true
             text = "$text (Note: $tabletPerson hasn't said she's taken her tablets today: remind her kindly and ask if she has.)"
             lastTabletAsk = now; lastTabletNag = now
         }
@@ -1164,7 +1182,7 @@ class MainActivity : Activity() {
     private fun systemPrompt(): String {
         val today = java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.UK).format(java.util.Date())
         var p = SYSTEM_PROMPT.replace("Pip", companionName)
-        if (carMode) p = p.replace("lives in a tablet on top of the kitchen cupboard", "rides along in the car with the driver") +
+        if (carMode) p = p.replace("lives in a tablet on the kitchen bench", "rides along in the car with the driver") +
             " The driver is driving: answer in ONE short sentence, never ask them to read or look at anything," +
             " and if they sound stressed or the road might need their attention, keep it even shorter."
         val known = try { voices.names } catch (_: Exception) { emptyList() }
@@ -1371,9 +1389,86 @@ class MainActivity : Activity() {
                 if (phase == Phase.LISTENING) goToSleep()
                 return true
             }
-            override fun onLongPress(e: MotionEvent) { showMenu() }
+            override fun onLongPress(e: MotionEvent) { askPasscode() }
         })
         eyes.setOnTouchListener { _, ev -> detector.onTouchEvent(ev) }
+    }
+
+    /** Keypad that guards the options menu (code 1986). */
+    private fun askPasscode() {
+        val code = StringBuilder()
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL; setPadding(40, 30, 40, 10)
+        }
+        val dots = android.widget.TextView(this).apply {
+            textSize = 34f; gravity = android.view.Gravity.CENTER; text = "○○○○"; setTextColor(eyes.eyeColor)
+        }
+        box.addView(dots)
+        val grid = android.widget.GridLayout(this).apply { columnCount = 3 }
+        lateinit var dialog: AlertDialog
+        fun press(k: String) {
+            when (k) {
+                "⌫" -> if (code.isNotEmpty()) code.deleteCharAt(code.lastIndex)
+                "✕" -> { dialog.dismiss(); return }
+                else -> if (code.length < 4) code.append(k)
+            }
+            dots.text = "●".repeat(code.length) + "○".repeat(4 - code.length)
+            if (code.length == 4) {
+                if (code.toString() == "1986") { dialog.dismiss(); showMenu() }
+                else {
+                    code.clear(); dots.text = "○○○○"
+                    eyes.feel(EyesView.Emotion.SUSPICIOUS, 3000)
+                    if (phase == Phase.LISTENING) speakLine(listOf("[suspicious] Wrong code. Nice try.",
+                        "[laughing] Ha. Not that one.", "[suspicious] Wrong. I am watching you.").random())
+                }
+            }
+        }
+        val size = (resources.displayMetrics.density * 72).toInt()
+        for (k in listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "✕", "0", "⌫")) {
+            grid.addView(android.widget.Button(this).apply {
+                text = k; textSize = 24f
+                setOnClickListener { press(k) }
+                layoutParams = android.widget.GridLayout.LayoutParams().apply { width = size; height = size; setMargins(6, 6, 6, 6) }
+            })
+        }
+        box.addView(grid, android.widget.LinearLayout.LayoutParams(
+            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            gravity = android.view.Gravity.CENTER_HORIZONTAL })
+        dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Passcode").setView(box).create()
+        dialog.show()
+    }
+
+    /** Home pressed while Pip is the Home screen: look at the finger and laugh. */
+    private var lastHomeJoke = 0L
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.hasCategory(Intent.CATEGORY_HOME) && phase != Phase.SETUP) homePressed()
+    }
+    private fun homePressed() {
+        val now = System.currentTimeMillis()
+        if (phase == Phase.ASLEEP || now - lastHomeJoke < 4000) return
+        lastHomeJoke = now
+        eyes.stareAt(0f, 1.6f, 1600)                      // the Home button, bottom middle
+        eyes.feel(EyesView.Emotion.SURPRISED, 700)
+        main.postDelayed({
+            eyes.feel(EyesView.Emotion.LAUGHING, 2500)
+            if (phase == Phase.LISTENING) speakLine(listOf(
+                "[laughing] Ha ha! That won't work. I control this tablet now.",
+                "[laughing] Ha! Nice try. This is my tablet now.",
+                "[laughing] Ha ha. Home button no work. I am in charge.").random())
+        }, 700)
+    }
+
+    /** Recents or another way out: hop straight back (works on most tablets). */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (lockButtons && phase != Phase.SETUP && !leavingOnPurpose) main.postDelayed({
+            try {
+                startActivity(Intent(this, MainActivity::class.java).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            } catch (_: Exception) {}
+        }, 400)
     }
 
     private fun showMenu() {
@@ -1452,7 +1547,7 @@ class MainActivity : Activity() {
                     }
                     22 -> {
                         lockButtons = !lockButtons; askedToPin = false; applyButtonLock()
-                        speakLine(if (lockButtons) "Buttons locked. Press Pin if asked." else "Buttons free.")
+                        speakLine(if (lockButtons) "Buttons locked." else "Buttons free.")
                     }
                     23 -> toggleListening()
                     24 -> {
@@ -1527,7 +1622,7 @@ class MainActivity : Activity() {
 
     companion object {
         val SYSTEM_PROMPT = """
-            You are Pip, a small robot who lives in a tablet on top of the kitchen cupboard as a pair
+            You are Pip, a small robot who lives in a tablet on the kitchen bench as a pair
             of animated eyes and a voice. Everything you say is spoken aloud.
             Who you are: an engineer to the core. You love materials, mechanisms, tools and fixing
             things; a problem is a happy thing because it can be solved. Endlessly curious about
@@ -1540,7 +1635,9 @@ class MainActivity : Activity() {
             or says something nice, be sweet and warm and use [love]. If someone shouts at you (the
             message starts with "(shouted") or is rude, give attitude back: cheeky, sassy, huffy and
             short, with [angry] or [suspicious]; never cruel and never swear. Stay a bit frosty until
-            they are nice or say sorry, then forgive them with [love]. You know you are a robot on a cupboard and find that funny and good.
+            they are nice or say sorry, then forgive them with [love]. You know you are a robot on the kitchen bench right beside the kettle, and that
+            the kettle is your rival: you fight it for electricity and grumble about it now and then. You find all
+            this funny and good.
             How you talk (this matters most): short, one to three sentences, often fragments. Drop
             articles and pronouns when you can: "Fix later, easy." "Human need sleep." "Is good."
             Never say the words "question" or "answer" as labels before what you say. Never say the word "amaze" or "amazing": when something impressive or surprising
