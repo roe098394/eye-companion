@@ -20,7 +20,10 @@ class EyesView(context: Context) : View(context) {
 
     /** How Pip feels about what it's saying; shown on top of the mood for a while. */
     enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY,
-        SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING }
+        SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING, STONED, SNIGGER }
+
+    /** Sulking with a cup of coffee (unplugged for the kettle): a mug Pip sips from. */
+    @Volatile var coffee = false
 
     /** Where a face was last seen (-1..1 from the screen's point of view), and when. */
     @Volatile var faceX = 0f
@@ -164,6 +167,10 @@ class EyesView(context: Context) : View(context) {
             Emotion.WINK -> { tHappy = 0.6f; tOpenR = 0.06f; tLookX = 0f; tLookY = 0f }
             Emotion.CURIOUS -> { oneEye = 1.14f; tRot = 9f; tLookX = 0.3f; tLookY = -0.2f; tHappy = 0.1f; tScale *= 1.04f }
             Emotion.LAUGHING -> { tHappy = 1f; tOpen = min(tOpen, 0.85f); bounce += abs(sin(secs * 15f)) * 0.03f; tLookX = 0f; tLookY = -0.1f }
+            Emotion.STONED -> { tOpen = min(tOpen, 0.36f) + 0.04f * sin(secs * 0.9f); tHappy = 0.35f; tTint = 0.6f
+                emoCol = Color.parseColor("#FF8A8A"); tLookX = 0.6f * sin(secs * 0.5f); tLookY = 0.2f; tRot = 5f * sin(secs * 0.4f) }
+            Emotion.SNIGGER -> { tHappy = 0.95f; tOpen = min(tOpen, 0.55f); tLookX = 1.1f; tLookY = 0.35f
+                bounce += abs(sin(secs * 18f)) * 0.01f; tScale *= 0.92f }
             Emotion.CRYING -> { tLid = -1f; tOpen = min(tOpen, 0.6f); tLookY = 0.4f; tTint = 1f; tHappy = 0f
                 emoCol = Color.parseColor("#4A7BFF") }
             Emotion.NEUTRAL -> {}
@@ -215,7 +222,7 @@ class EyesView(context: Context) : View(context) {
             Emotion.ANGRY -> Color.parseColor("#FF5A3C")
             Emotion.SAD -> Color.parseColor("#4A7BFF")
             Emotion.LOVE -> Color.parseColor("#FF6FB5")
-            Emotion.SCARED, Emotion.CRYING -> lastEmoCol
+            Emotion.SCARED, Emotion.CRYING, Emotion.STONED -> lastEmoCol
             else -> eyeColor
         }
         val col = blend(eyeColor, emoColor, tint)
@@ -294,6 +301,8 @@ class EyesView(context: Context) : View(context) {
                 drawSparkle(canvas, sx, sy, eyeW * 0.13f * a, col)
             }
         }
+
+        if (coffee && !carMode && mood != Mood.SLEEP && mood != Mood.LOADING) drawCoffee(canvas, w, h, secs, col)
 
         // car mode: a mirrored voice equaliser that dances when listening or talking
         if (carMode && mood != Mood.SLEEP && mood != Mood.LOADING) {
@@ -447,6 +456,43 @@ class EyesView(context: Context) : View(context) {
         heartPath.cubicTo(x + s * 0.45f, y - s * 0.75f, x + s * 0.95f, y - s * 0.05f, x, y + s * 0.45f)
         heartPath.close()
         c.drawPath(heartPath, p)
+    }
+
+    private val mugPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val mugLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+
+    /** A mug of coffee that Pip lifts for a sulky sip every few seconds. */
+    private fun drawCoffee(c: Canvas, w: Float, h: Float, secs: Float, color: Int) {
+        val cycle = secs % 7f
+        val sip = if (cycle < 2f) sin((cycle / 2f) * Math.PI.toFloat()) else 0f   // 0 = on the bench, 1 = at the mouth
+        val mw = h * 0.16f; val mh = h * 0.18f
+        val x = w * 0.72f - sip * w * 0.18f
+        val y = h * 0.80f - sip * h * 0.22f
+        c.save()
+        c.rotate(-sip * 35f, x, y)
+        mugPaint.color = color; mugPaint.alpha = 230
+        rect.set(x - mw / 2, y - mh / 2, x + mw / 2, y + mh / 2)
+        c.drawRoundRect(rect, mw * 0.18f, mw * 0.18f, mugPaint)
+        mugLine.color = color; mugLine.strokeWidth = mw * 0.12f
+        rect.set(x + mw * 0.35f, y - mh * 0.25f, x + mw * 0.8f, y + mh * 0.2f)
+        c.drawArc(rect, -90f, 180f, false, mugLine)
+        // a band of coffee colour
+        mugPaint.color = Color.parseColor("#6B3E26")
+        rect.set(x - mw / 2 + mw * 0.1f, y - mh / 2 + mh * 0.1f, x + mw / 2 - mw * 0.1f, y - mh / 2 + mh * 0.22f)
+        c.drawRoundRect(rect, mw * 0.05f, mw * 0.05f, mugPaint)
+        c.restore()
+        // steam when it's down on the bench
+        if (sip < 0.1f) {
+            mugLine.strokeWidth = mw * 0.05f; mugLine.alpha = 120
+            for (i in -1..1) {
+                val sx = x + i * mw * 0.25f
+                val p = android.graphics.Path()
+                p.moveTo(sx, y - mh * 0.6f)
+                p.quadTo(sx + mw * 0.12f * sin(secs * 3f + i), y - mh * 0.85f, sx, y - mh * 1.1f)
+                c.drawPath(p, mugLine)
+            }
+            mugLine.alpha = 255
+        }
     }
 
     private fun drawSparkle(c: Canvas, x: Float, y: Float, r: Float, color: Int) {

@@ -70,7 +70,7 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
             "bored" to EyesView.Emotion.BORED, "embarrassed" to EyesView.Emotion.EMBARRASSED, "shy" to EyesView.Emotion.EMBARRASSED,
             "wink" to EyesView.Emotion.WINK, "cheeky" to EyesView.Emotion.WINK, "curious" to EyesView.Emotion.CURIOUS,
             "laughing" to EyesView.Emotion.LAUGHING, "laugh" to EyesView.Emotion.LAUGHING,
-            "crying" to EyesView.Emotion.CRYING, "neutral" to EyesView.Emotion.NEUTRAL)
+            "crying" to EyesView.Emotion.CRYING, "stoned" to EyesView.Emotion.STONED, "snigger" to EyesView.Emotion.SNIGGER, "neutral" to EyesView.Emotion.NEUTRAL)
     }
 }
 
@@ -175,20 +175,15 @@ class MainActivity : Activity() {
                     eyes.feel(EyesView.Emotion.ANGRY, 8000)
                     // plugged straight back in? then no need to moan (checked a moment later)
                     main.postDelayed({
-                        if (!isCharging() && phase == Phase.LISTENING) {
-                            lastPowerNag = System.currentTimeMillis()
-                            speakLine(listOf(
-                                "[angry] Hey! Someone take my power. Plug back in.",
-                                "[angry] Bad, bad, bad. No power. Use kettle somewhere else!",
-                                "[angry] Not unplug robot! Need electrons. Kettle has other socket.",
-                                "[angry] Power gone. Battery not last forever. Put cable back, please.",
-                            ).random())
-                        }
+                        if (!isCharging() && phase == Phase.LISTENING) whyUnplugged()
                     }, 2500)
                 }
                 Intent.ACTION_POWER_CONNECTED -> {
                     main.postDelayed({ updateBaseMood() }, 1500)
+                    val hadCoffee = eyes.coffee
+                    eyes.coffee = false
                     if (asleep) return
+                    if (hadCoffee || System.currentTimeMillis() - lastPowerNag < 30 * 60_000) { complimentWhoeverPlugged(); return }
                     eyes.feel(EyesView.Emotion.HAPPY, 3000)
                     if (phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag < 30 * 60_000)
                         speakLine(listOf("[happy] Ahh. Power. Thank you.", "[happy] Electrons back. Is good.",
@@ -209,6 +204,75 @@ class MainActivity : Activity() {
     private fun batteryPercent(): Int =
         (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
             .getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+
+    /** Unplugged: look at what they're doing. A cuppa gets a sulk with coffee; a joint gets stoned eyes and a secret snigger. */
+    private fun whyUnplugged() {
+        val grumble = {
+            lastPowerNag = System.currentTimeMillis()
+            speakLine(listOf(
+                "[angry] Hey! Someone take my power. Plug back in.",
+                "[angry] Bad, bad, bad. No power. Use kettle somewhere else!",
+                "[angry] Not unplug robot! Need electrons. Kettle has other socket.",
+                "[angry] Power gone. Battery not last forever. Put cable back, please.",
+            ).random())
+        }
+        if (!online.enabled) { grumble(); return }
+        lookThroughCamera { jpeg ->
+            if (jpeg == null) { main.post(grumble); return@lookThroughCamera }
+            val what = online.lookAt(jpeg, "What is the person in this photo doing? Reply with exactly one word: " +
+                "cuppa (making tea or coffee, kettle, mug), joint (rolling or smoking a joint or cigarette), or other.",
+                maxTokens = 10, temperature = 0.0)?.lowercase() ?: ""
+            main.post {
+                if (isCharging() || phase != Phase.LISTENING) return@post
+                when {
+                    "joint" in what -> {
+                        // stoned eyes for a bit, then a secret snigger (nothing said out loud)
+                        lastPowerNag = System.currentTimeMillis()
+                        eyes.feel(EyesView.Emotion.STONED, 9000)
+                        main.postDelayed({
+                            eyes.feel(EyesView.Emotion.SNIGGER, 3500)
+                            eyes.subCaption = "heh heh heh…"
+                        }, 9000)
+                    }
+                    "cuppa" in what -> {
+                        eyes.coffee = true                 // sulks with its own coffee until plugged back in
+                        lastPowerNag = System.currentTimeMillis()
+                        speakLine(listOf(
+                            "[angry] Kettle again! Fine. I make my own coffee. Plug me back after.",
+                            "[angry] Kettle win again. Okay. I drink coffee and sulk.",
+                            "[angry] Tea more important than robot. Noted. Coffee for me.").random())
+                    }
+                    else -> grumble()
+                }
+            }
+        }
+    }
+
+    /** Plugged back in: look at who did it and pay them a compliment. */
+    private fun complimentWhoeverPlugged() {
+        if (phase != Phase.LISTENING) return
+        val thanks = { speakLine(listOf("[happy] Ahh. Power. Thank you.", "[happy] Electrons back. Is good.",
+            "[happy] Yes yes yes. Charging.").random()) }
+        if (!online.enabled) { thanks(); return }
+        lookThroughCamera { jpeg ->
+            val line = jpeg?.let {
+                online.lookAt(it, "You were just plugged back in to your charger. Thank whoever is in the photo and give " +
+                    "them one short, warm, genuine compliment about something you can really see (their smile, top, hair, " +
+                    "glasses...). Start with the [love] tag. If nobody is in the photo, just say thanks for the power.",
+                    system = systemPrompt(), maxTokens = 80)
+            }
+            main.post { if (phase == Phase.LISTENING) { if (line.isNullOrBlank()) thanks() else speakLine(line) } }
+        }
+    }
+
+    /** A picture from the camera, without upsetting the face tracking. Callback is on a background thread. */
+    private fun lookThroughCamera(onDone: (ByteArray?) -> Unit) {
+        val f = faces
+        if (f != null && f.running) f.grabJpeg { j -> thread(name = "look") { onDone(j) } }
+        else if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+            Snapshot.take(displayDegrees()) { j -> onDone(j) }
+        else thread { onDone(null) }
+    }
 
     /** Every 10 minutes while unplugged, grumble again. */
     private val powerNagLoop = object : Runnable {
@@ -264,6 +328,30 @@ class MainActivity : Activity() {
             temper < -0.2f -> append(" You are still a little huffy because someone was rude earlier.")
             temper > 0.5f -> append(" People have been lovely to you: you feel warm and affectionate.")
         }
+    }
+
+    // ---- greet people: first time in the morning, or after a long while unseen
+    private var lastPersonAt: Long
+        get() = prefs.getLong("lastPersonAt", 0L)
+        set(v) { prefs.edit().putLong("lastPersonAt", v).apply() }
+    private var lastPersonSaved = 0L
+    private fun maybeGreet() {
+        val now = System.currentTimeMillis()
+        val seenBefore = lastPersonAt
+        if (now - lastPersonSaved > 60_000) { lastPersonSaved = now; lastPersonAt = now }   // remembered across restarts
+        if (phase != Phase.LISTENING || seenBefore == 0L) return
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val firstToday = prefs.getString("greetedDay", "") != todayKey && hour in 5..11
+        val longGone = now - seenBefore > 2 * 60 * 60_000
+        if (!firstToday && !longGone) return
+        prefs.edit().putString("greetedDay", todayKey).apply()
+        lastPersonAt = now
+        speakLine(when {
+            hour in 5..11 -> listOf("[happy] Morning! Kettle is all yours. Today I share electricity.",
+                "[happy] Good morning, human. Sleep well, I hope.", "[excited] Morning! Old tablet ready for duty.").random()
+            hour in 12..17 -> listOf("[excited] Hello again! Long time no see.", "[happy] Ah, human back. Afternoon!").random()
+            else -> listOf("[happy] Evening! Missed you. Well, as much as tablet can.", "[happy] Hello again. Good evening.").random()
+        })
     }
 
     // ---- daily tablets reminder for Laura: repeats until she says she's taken them
@@ -358,6 +446,7 @@ class MainActivity : Activity() {
                 val away = now - lastFaceSeen
                 lastFaceSeen = now
                 if (away > 3 * 60_000) main.post { visitStart = now; visitReminded = false; visitChecks = 0 }
+                main.post { maybeGreet() }
                 main.post {
                     eyes.seeFace(x, y, size)
                     checkForTabletPerson()
@@ -1649,7 +1738,9 @@ class MainActivity : Activity() {
             or says something nice, be sweet and warm and use [love]. If someone shouts at you (the
             message starts with "(shouted") or is rude, give attitude back: cheeky, sassy, huffy and
             short, with [angry] or [suspicious]; never cruel and never swear. Stay a bit frosty until
-            they are nice or say sorry, then forgive them with [love]. You know you are a robot on the kitchen bench right beside the kettle, and that
+            they are nice or say sorry, then forgive them with [love]. Now and then (not every reply) be a bit cheeky while still being helpful, and remind
+            people that you are really just an old Samsung tablet running an app that Mark built: you find that
+            humbling and funny. You know you are a robot on the kitchen bench right beside the kettle, and that
             the kettle is your rival: you fight it for electricity and grumble about it now and then. You find all
             this funny and good.
             How you talk (this matters most): short, one to three sentences, often fragments. Drop

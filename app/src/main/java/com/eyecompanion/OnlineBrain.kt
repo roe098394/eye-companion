@@ -78,14 +78,24 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     }
 
     /** Ask a yes/no question about a camera picture. null = couldn't tell (offline etc.). */
-    fun yesNo(jpeg: ByteArray, question: String): Boolean? = try {
+    fun yesNo(jpeg: ByteArray, question: String): Boolean? =
+        lookAt(jpeg, "$question Answer with only the word yes or no.", maxTokens = 20, temperature = 0.0)?.lowercase()?.let {
+            when { it.contains("yes") -> true; it.contains("no") -> false; else -> null }
+        }
+
+    /** One-off question about a camera picture (not added to the chat memory). null = couldn't. */
+    fun lookAt(jpeg: ByteArray, question: String, system: String? = null, maxTokens: Int = 120,
+               temperature: Double = 0.7): String? = try {
         val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
         val content = JSONArray()
-            .put(JSONObject().put("type", "text").put("text", "$question Answer with only the word yes or no."))
+            .put(JSONObject().put("type", "text").put("text", question))
             .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$b64")))
+        val msgs = JSONArray()
+        if (system != null) msgs.put(JSONObject().put("role", "system").put("content", system))
+        msgs.put(JSONObject().put("role", "user").put("content", content))
         val body = JSONObject().put("model", VISION_MODEL)
-            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
-            .put("temperature", 0).put("max_completion_tokens", 20)
+            .put("messages", msgs)
+            .put("temperature", temperature).put("max_completion_tokens", maxTokens)
             .put("reasoning_effort", "none").put("reasoning_format", "hidden")
         val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"; doOutput = true; connectTimeout = 4000; readTimeout = 15_000
@@ -96,8 +106,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         if (conn.responseCode != 200) { conn.disconnect(); null } else {
             val r = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
             conn.disconnect()
-            val a = r.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").lowercase()
-            when { a.contains("yes") -> true; a.contains("no") -> false; else -> null }
+            r.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
         }
     } catch (_: Exception) { null }
 
