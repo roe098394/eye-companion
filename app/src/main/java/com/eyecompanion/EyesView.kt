@@ -265,7 +265,35 @@ class EyesView(context: Context) : View(context) {
             if (a2 > 0f && subCaption.isNotEmpty()) canvas.drawText(subCaption.take(90), w / 2, h * 0.08f, subPaint)
         }
 
+        // the listening-mode button, small and dim in the bottom-left corner
+        if (listenChip.isNotEmpty() && mood != Mood.LOADING) {
+            chipPaint.textSize = h * 0.03f
+            chipPaint.color = eyeColor; chipPaint.alpha = if (t - chipTappedAt < 1500) 230 else 95
+            val pad = h * 0.022f
+            val tw = chipPaint.measureText(listenChip)
+            chipRect.set(w * 0.025f, h * 0.9f, w * 0.025f + tw + pad * 2, h * 0.9f + chipPaint.textSize + pad * 1.6f)
+            chipBox.color = eyeColor; chipBox.alpha = chipPaint.alpha / 3
+            chipBox.strokeWidth = h * 0.004f
+            canvas.drawRoundRect(chipRect, chipRect.height() / 2, chipRect.height() / 2, chipBox)
+            canvas.drawText(listenChip, chipRect.left + pad, chipRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
+        }
+
         postInvalidateOnAnimation()
+    }
+
+    /** Label on the always-listening / wake-word button ("" hides it). */
+    var listenChip = ""
+    @Volatile private var chipTappedAt = 0L
+    private val chipRect = RectF()
+    private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val chipBox = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    /** Was the button tapped? (generous target, easy to hit) */
+    fun chipHit(x: Float, y: Float): Boolean {
+        if (listenChip.isEmpty() || chipRect.isEmpty) return false
+        val m = height * 0.04f
+        val hit = x >= chipRect.left - m && x <= chipRect.right + m && y >= chipRect.top - m && y <= chipRect.bottom + m
+        if (hit) chipTappedAt = now()
+        return hit
     }
 
     private fun drawFist(c: Canvas, w: Float, h: Float, age: Float, left: Float, color: Int) {

@@ -539,6 +539,7 @@ class MainActivity : Activity() {
     private fun startCompanion() {
         keepBluetoothInMusicMode()
         applyButtonLock()
+        updateListenChip()
         val v = voice ?: return
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
@@ -683,6 +684,15 @@ class MainActivity : Activity() {
         // Pip often gets heard as pipp / pep / pipe / pips
         val extra = if (companionName.equals("Pip", true)) "|pipp?s?|pep|pipe|peep" else ""
         return Regex("\\b(hey |hi |ok |okay )?($n$extra)\\b[,.!?]?", RegexOption.IGNORE_CASE)
+    }
+    private fun updateListenChip() {
+        eyes.listenChip = if (onlyWhenCalled) "💬 Wake word: say \"$companionName\"" else "👂 Always listening"
+    }
+    private fun toggleListening() {
+        onlyWhenCalled = !onlyWhenCalled
+        updateListenChip()
+        if (phase == Phase.LISTENING) speakLine(if (onlyWhenCalled) "Okay. Say $companionName when you want me."
+            else "Okay. I listen and work out when is for me.")
     }
     private fun calledByName(t: String) = nameRegex().containsMatchIn(t)
     private fun removeName(t: String) = t.replace(nameRegex(), " ").replace(Regex("\\s+"), " ").trim(' ', ',', '.')
@@ -1117,7 +1127,7 @@ class MainActivity : Activity() {
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 val n = input.text.toString().trim().take(20).ifEmpty { "Pip" }
-                prefs.edit().putString("name", n).apply()
+                prefs.edit().putString("name", n).apply(); updateListenChip()
                 forgetAll()
                 speakLine("Okay, I'm $n now.")
             }
@@ -1189,6 +1199,7 @@ class MainActivity : Activity() {
         val detector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent) = true
             override fun onSingleTapUp(e: MotionEvent): Boolean {
+                if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
                 when (phase) {
                     Phase.ASLEEP -> wakeUp()
                     Phase.TALKING, Phase.THINKING -> interrupt()
@@ -1198,6 +1209,7 @@ class MainActivity : Activity() {
                 return true
             }
             override fun onDoubleTap(e: MotionEvent): Boolean {
+                if (eyes.chipHit(e.x, e.y)) return true
                 if (phase == Phase.LISTENING) goToSleep()
                 return true
             }
@@ -1275,10 +1287,7 @@ class MainActivity : Activity() {
                         lockButtons = !lockButtons; askedToPin = false; applyButtonLock()
                         speakLine(if (lockButtons) "Buttons locked. Press Pin if asked." else "Buttons free.")
                     }
-                    22 -> {
-                        onlyWhenCalled = !onlyWhenCalled
-                        speakLine(if (onlyWhenCalled) "Okay. Say $companionName when you want me." else "Okay. I listen and work out when is for me.")
-                    }
+                    22 -> toggleListening()
                     20 -> {
                         reactToHandling = !reactToHandling
                         if (!reactToHandling) eyes.tilt = 0f
