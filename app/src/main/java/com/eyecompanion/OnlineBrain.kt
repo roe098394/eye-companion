@@ -162,7 +162,6 @@ class OnlineBrain(private val systemPrompt: () -> String) {
                     field("language", "en")
                     field("response_format", "json")
                     field("temperature", "0")
-                    field("prompt", "Pip, a little robot in a kitchen in the North East of England. British English.")
                     out.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n".toByteArray())
                     out.write(wav)
                     out.write("\r\n--$boundary--\r\n".toByteArray())
@@ -193,7 +192,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     companion object {
         const val STT_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
         /** Whisper sometimes "hears" these in background noise. */
-        val NOISE = setOf("thank you", "thanks", "thank you for watching", "thanks for watching", "you", "bye", "okay", "uh", "um")
+        val NOISE = setOf("british english", "british english.", "thank you", "thanks", "thank you for watching", "thanks for watching", "you", "bye", "okay", "uh", "um")
         /** the Groq model that can see pictures */
         const val VISION_MODEL = "qwen/qwen3.8-27b"
         const val ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"

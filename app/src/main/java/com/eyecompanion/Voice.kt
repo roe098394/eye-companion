@@ -71,7 +71,16 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     /** Start a new reply. */
+    // online voice: after the first sentence, gather the rest into fewer, bigger requests
+    private val cloudBatch = StringBuilder()
+    private var sentencesThisReply = 0
+
+    private fun flushCloudBatch() {
+        if (cloudBatch.isNotBlank()) { val t = cloudBatch.toString(); cloudBatch.clear(); sayNow(t) }
+    }
+
     fun beginReply() {
+        synchronized(sentence) { cloudBatch.clear(); sentencesThisReply = 0 }
         synchronized(sentence) { sentence.clear() }
         replyFinished = false
     }
@@ -93,6 +102,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         synchronized(sentence) {
             say(sentence.toString())
             sentence.clear()
+            flushCloudBatch()
         }
         replyFinished = true
         if (pending.get() == 0) onFinishedTalking()
@@ -116,6 +126,19 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun say(raw: String) {
         val clean = cleanForSpeech(raw)
         if (clean.isBlank()) return
+        val online = cloudKey().isNotBlank() && cloudVoice.isNotBlank()
+        if (online && sentencesThisReply++ > 0) {
+            // later sentences wait and go together (stays under 190 characters per request)
+            if (cloudBatch.length + clean.length + 1 > 180) flushCloudBatch()
+            if (cloudBatch.isNotEmpty()) cloudBatch.append(' ')
+            cloudBatch.append(clean)
+            if (cloudBatch.length > 120) flushCloudBatch()
+            return
+        }
+        sayNow(clean)
+    }
+
+    private fun sayNow(clean: String) {
         val key = cloudKey()
         if (key.isNotBlank() && cloudVoice.isNotBlank()) { sayCloud(clean, key, cloudVoice); return }
         pending.incrementAndGet()
@@ -161,7 +184,18 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         return out
     }
 
-    private fun fetchSpeech(text: String, key: String, voiceName: String): ByteArray? = try {
+    private fun fetchSpeech(text: String, key: String, voiceName: String): ByteArray? {
+        for (attempt in 0..1) {
+            val r = fetchOnce(text, key, voiceName, quietOn429 = attempt == 0)
+            if (r !== RETRY) return r
+            Thread.sleep(1500)
+        }
+        return null
+    }
+
+    private val RETRY = ByteArray(0)
+
+    private fun fetchOnce(text: String, key: String, voiceName: String, quietOn429: Boolean): ByteArray? = try {
         val body = JSONObject().put("model", "canopylabs/orpheus-v1-english").put("voice", voiceName)
             .put("input", text).put("response_format", "wav")
         val conn = (URL("https://api.groq.com/openai/v1/audio/speech").openConnection() as HttpURLConnection).apply {
@@ -172,6 +206,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         }
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
         if (conn.responseCode == 200) conn.inputStream.use { it.readBytes() }.also { conn.disconnect() }
+        else if (conn.responseCode == 429 && quietOn429) { conn.disconnect(); RETRY }
         else {
             val why = try {
                 val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
