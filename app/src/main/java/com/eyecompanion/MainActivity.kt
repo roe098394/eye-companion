@@ -222,6 +222,7 @@ class MainActivity : Activity() {
     private var lastPowerJoke = 0L
     /** Pip's own pop-ups (menu, passcode...) are open: losing focus to them is fine. */
     private var ownDialogs = 0
+    private var lastFocusClose = 0L
     private var lastPermissionAsk = 0L
     private fun AlertDialog.Builder.showOwn(): AlertDialog {
         ownDialogs++
@@ -1211,7 +1212,10 @@ class MainActivity : Activity() {
             onLevel = { l -> eyes.level = l },
             onError = { msg -> main.post {
                 // the mic dropped out (another app, a call, the screen going off...): try again by itself
-                if (earRestarts < 20) { earRestarts++; main.postDelayed({ startEars(); setPhase(phase) }, 3000) }
+                if (earRestarts < 20) {
+                    earRestarts++; eyes.subCaption = "Mic dropped out, restarting it…"
+                    main.postDelayed({ startEars(); setPhase(phase) }, 3000)
+                }
                 else eyes.caption = msg
             } },
             startMode = prefs.getInt("micMode", 0),
@@ -1911,7 +1915,7 @@ class MainActivity : Activity() {
     /** Recents or another way out: hop straight back (works on most tablets). */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (lockButtons && phase != Phase.SETUP && !leavingOnPurpose) main.postDelayed({
+        if (false && lockButtons && phase != Phase.SETUP && !leavingOnPurpose) main.postDelayed({
             try {
                 startActivity(Intent(this, MainActivity::class.java).addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
@@ -2061,9 +2065,14 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         if (lockButtons && resumed && phase != Phase.SETUP && !leavingOnPurpose && ownDialogs == 0 &&
             now - lastPermissionAsk > 30_000) {
+            if (now - lastFocusClose < 4000) return
             main.postDelayed({
-                if (!hasWindowFocus() && ownDialogs == 0 && resumed) { closeSystemDialogs(); laughAtPowerOff() }
-            }, 250)
+                if (!hasWindowFocus() && ownDialogs == 0 && resumed) {
+                    lastFocusClose = System.currentTimeMillis()
+                    closeSystemDialogs()
+                    eyes.feel(EyesView.Emotion.LAUGHING, 1500)        // eyes only: no talking, so the mic stays free
+                }
+            }, 400)
         }
     }
 
