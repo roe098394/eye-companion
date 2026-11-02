@@ -792,13 +792,16 @@ class MainActivity : Activity() {
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
             if (phase == Phase.TALKING || phase == Phase.THINKING) {
-                lastSpokeEnd = System.currentTimeMillis() + 1000
+                // Bluetooth speakers play a moment behind, so wait longer before listening again
+                val tail = if (bluetoothOut()) 2000L else 1000L
+                lastSpokeEnd = System.currentTimeMillis() + tail
                 lastReplyAsked = currentReply.trim().endsWith("?")
-                deafUntil = System.currentTimeMillis() + 1000
+                rememberSaid(currentReply.toString())
+                deafUntil = System.currentTimeMillis() + tail
                 ears?.paused = true
                 main.postDelayed({
                     if (phase == Phase.TALKING || phase == Phase.THINKING) setPhase(Phase.LISTENING)
-                }, 1000)
+                }, tail)
             }
         } }
 
@@ -947,8 +950,31 @@ class MainActivity : Activity() {
     private fun calledByName(t: String) = nameRegex().containsMatchIn(t)
     private fun removeName(t: String) = t.replace(nameRegex(), " ").replace(Regex("\\s+"), " ").trim(' ', ',', '.')
 
+    // ---- never answer its own voice coming back through the mic (that's the "echo")
+    private val recentlySaid = ArrayDeque<Pair<Long, Set<String>>>()
+    private fun words(t: String) = t.lowercase().split(Regex("[^a-z0-9']+")).filter { it.length > 1 }
+    private fun rememberSaid(t: String) {
+        if (t.isBlank()) return
+        recentlySaid.addLast(System.currentTimeMillis() to words(t).toSet())
+        while (recentlySaid.size > 6) recentlySaid.removeFirst()
+    }
+    private fun isOwnEcho(t: String): Boolean {
+        val w = words(t)
+        if (w.isEmpty()) return false
+        val now = System.currentTimeMillis()
+        val said = recentlySaid.filter { now - it.first < 45_000 }.flatMap { it.second }.toSet() +
+            words(currentReply.toString())
+        return w.count { it in said }.toFloat() / w.size >= 0.6f
+    }
+    private fun bluetoothOut(): Boolean {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        return am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+    }
+
     private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null) {
         var text = rawText
+        if (isOwnEcho(text)) return                              // Pip's own words heard back
         if (phase == Phase.LISTENING) {
             if (System.currentTimeMillis() < deafUntil) return   // tail end of its own voice
             if (conf < 0.6f) return                              // not sure what was said: stay quiet
@@ -1415,6 +1441,7 @@ class MainActivity : Activity() {
     }
 
     private fun speakLine(line: String) {
+        rememberSaid(line)
         // a leading [feeling] tag shows on the face, it isn't said or shown
         var text = line
         Regex("^\\[([a-z]+)\\]\\s*").find(text)?.let { m ->
