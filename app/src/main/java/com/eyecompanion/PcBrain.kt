@@ -160,6 +160,15 @@ class PcBrain(private val systemPrompt: () -> String) {
                 ?: models.firstOrNull { !it.contains("embed") }
         }
 
+        /** "192.168.0" for this tablet's home Wi-Fi, or null. */
+        fun localSubnet(): String? = NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<Inet4Address>()
+            .map { it.hostAddress ?: "" }
+            .firstOrNull { it.startsWith("192.168.") || it.startsWith("10.") || it.matches(Regex("172\\.(1[6-9]|2\\d|3[01])\\..*")) }
+            ?.substringBeforeLast('.')
+
         /** Look round the home Wi-Fi for a PC running Ollama. Takes a few seconds. */
         fun findPc(): String? {
             val myIps = NetworkInterface.getNetworkInterfaces().toList()

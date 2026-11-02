@@ -328,6 +328,7 @@ class MainActivity : Activity() {
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
             moanAboutSlowCharger()
+            watchPrinter()
             if (!isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
                 lastPowerNag = System.currentTimeMillis()
                 eyes.feel(EyesView.Emotion.ANGRY, 6000)
@@ -633,6 +634,19 @@ class MainActivity : Activity() {
         rootView.addView(choiceBar, android.widget.FrameLayout.LayoutParams(
             android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
             android.view.Gravity.BOTTOM).apply { bottomMargin = (resources.displayMetrics.heightPixels * 0.15f).toInt() })
+        printerCard = android.widget.TextView(this).apply {
+            textSize = 17f; setTextColor(eyes.eyeColor); visibility = android.view.View.GONE
+            val dp = resources.displayMetrics.density
+            setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 18 * dp; setStroke((2 * dp).toInt(), eyes.eyeColor); setColor(0xCC000000.toInt())
+            }
+            setOnClickListener { visibility = android.view.View.GONE }
+        }
+        rootView.addView(printerCard, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.TOP or android.view.Gravity.END).apply {
+            topMargin = (resources.displayMetrics.density * 40).toInt(); rightMargin = topMargin / 2 })
         setContentView(rootView)
         setupTouch()
         setupHandling()
@@ -904,6 +918,9 @@ class MainActivity : Activity() {
         keepBluetoothInMusicMode()
         applyButtonLock()
         updateListenChip()
+        thread(name = "printer-find") {        // look for the 3D printer once, so Pip can watch it
+            if (printer.find() != null) prefs.edit().putString("printerHost", printer.host).apply()
+        }
         updateBaseMood()
         val v = voice ?: return
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
@@ -1095,6 +1112,56 @@ class MainActivity : Activity() {
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         return am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
             it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+    }
+
+    // ---- the 3D printer (Klipper/Fluidd on the Wi-Fi): look only, never control
+    private lateinit var printerCard: android.widget.TextView
+    private val printer by lazy { Printer(prefs.getString("printerHost", null)) }
+    private var lastPrinterState = ""
+    private var printerChecked = 0L
+    private val hidePrinterCard = Runnable { if (::printerCard.isInitialized) printerCard.visibility = android.view.View.GONE }
+
+    private fun showPrinterCard(s: Printer.Status) {
+        printerCard.text = s.card()
+        printerCard.visibility = android.view.View.VISIBLE
+        main.removeCallbacks(hidePrinterCard); main.postDelayed(hidePrinterCard, 30_000)
+    }
+
+    /** Status in the background (finding the printer first if needed); callback on the main thread. */
+    private fun printerStatus(onDone: (Printer.Status?) -> Unit) = thread(name = "printer") {
+        var s = printer.status()
+        if (s == null && printer.find() != null) {
+            prefs.edit().putString("printerHost", printer.host).apply()
+            s = printer.status()
+        }
+        main.post { onDone(s) }
+    }
+
+    private fun askedAboutPrinter(q: String) =
+        Regex("\\b(printer|printing|3d print|ender|print job|the print|my print|nozzle|hotend|heat ?bed|fluidd|klipper)\\b")
+            .containsMatchIn(q.lowercase())
+
+    /** Every minute: say when a print finishes or fails (only while printing was seen). */
+    private fun watchPrinter() {
+        val now = System.currentTimeMillis()
+        if (now - printerChecked < 60_000 || prefs.getString("printerHost", null) == null) return
+        printerChecked = now
+        thread(name = "printer-watch") {
+            val s = printer.status() ?: return@thread
+            main.post {
+                val was = lastPrinterState
+                lastPrinterState = s.state
+                if (phase != Phase.LISTENING || was.isEmpty() || was == s.state) return@post
+                when {
+                    was == "printing" && s.state == "complete" -> { showPrinterCard(s); speakLine(listOf(
+                        "[excited] Printer finished! ${s.file.removeSuffix(".gcode")} is done. Took ${Printer.hm(s.printedSecs)}.",
+                        "[happy] Ding! Print done. Ender-3 did good. Better than kettle ever did.").random()) }
+                    s.state == "error" -> { showPrinterCard(s); speakLine("[scared] Printer has an error! Better go look. Bad, bad, bad.") }
+                    was == "printing" && s.state == "cancelled" -> speakLine("[sad] Print cancelled. Plastic spaghetti, maybe.")
+                    s.state == "paused" -> { showPrinterCard(s); speakLine("[curious] Printer paused. Waiting for a human.") }
+                }
+            }
+        }
     }
 
     // ---- on-screen answer buttons
@@ -1300,6 +1367,22 @@ class MainActivity : Activity() {
                 pc.ask(text, onToken, onDone, onUnavailable = { askTablet() })
             } else askTablet()
             Unit
+        }
+        if (askedAboutPrinter(rawText) && !overheard) {
+            eyes.subCaption = "$shown  · checking printer…"
+            printerStatus { s ->
+                if (id != replyId) return@printerStatus
+                if (s != null) { showPrinterCard(s); lastPrinterState = s.state }
+                val note = s?.forBrain() ?: "the 3D printer can't be reached on the Wi-Fi right now (is it switched on?)"
+                val withData = "$text\n(Live data: $note Answer from this data.)"
+                if (online.worthTrying) online.ask(withData, onToken, onDone, onUnavailable = {
+                    if (pc.worthTrying) pc.ask(withData, onToken, onDone, onUnavailable = { brain?.ask(withData, onToken, onDone) ?: onDone("") })
+                    else brain?.ask(withData, onToken, onDone) ?: onDone("")
+                })
+                else if (pc.worthTrying) pc.ask(withData, onToken, onDone, onUnavailable = { brain?.ask(withData, onToken, onDone) ?: onDone("") })
+                else brain?.ask(withData, onToken, onDone) ?: onDone("")
+            }
+            return
         }
         if (wantsToSee(rawText)) {
             if (!online.enabled) { setPhase(Phase.LISTENING); speakLine("Not see without internet brain. Sorry."); return }
@@ -1811,6 +1894,7 @@ class MainActivity : Activity() {
             "Eyes look the wrong way? Flip face tracking",
             if (lockButtons) "Tablet buttons: LOCKED (tap to unlock)" else "Tablet buttons: unlocked (tap to lock)",
             if (onlyWhenCalled) "Only answer when called \"$companionName\": ON" else "Only answer when called \"$companionName\": OFF (works it out)",
+            "3D printer status",
             if (tabletReminderOn) "$tabletPerson's tablet reminder: ON" + (if (prefs.getString("tabletsDone", "") == todayKey) " (done today ✓)" else "")
                 else "$tabletPerson's tablet reminder: OFF",
         )
@@ -1863,7 +1947,12 @@ class MainActivity : Activity() {
                         speakLine(if (lockButtons) "Buttons locked." else "Buttons free.")
                     }
                     23 -> toggleListening()
-                    24 -> {
+                    24 -> printerStatus { s ->
+                        if (s != null) { showPrinterCard(s); speakLine("[curious] Printer is ${s.state}" +
+                            (if (s.busy) ", ${(s.progress * 100).toInt()} percent." else ".")) }
+                        else speakLine("[confused] Can't find the printer on the Wi-Fi. Is it switched on?")
+                    }
+                    25 -> {
                         tabletReminderOn = !tabletReminderOn
                         speakLine(if (tabletReminderOn) "Okay. I remind $tabletPerson about tablets every day." else "Okay. No tablet reminders.")
                     }
