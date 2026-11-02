@@ -49,11 +49,13 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
     private fun strip(s: String): String {
         var t = s.replace(Regex("\\[[^\\]]{0,30}\\]"), "")
         if (AMAZE.containsMatchIn(t)) { onEmotion(EyesView.Emotion.SURPRISED); t = t.replace(AMAZE, "") }
+        t = t.replace(LABEL, "")
         return t.replace(Regex("fist my bump", RegexOption.IGNORE_CASE), "fist bump")
     }
 
     companion object {
         /** "Amaze!" / "Amazing." on its own: shown as wide eyes rather than said */
+        val LABEL = Regex("\\b(question|answer)\\s*:\\s*", RegexOption.IGNORE_CASE)
         val AMAZE = Regex("\\b[Aa]maze(d|ing)?\\b[!.,]*\\s*")
         val EMOTIONS = mapOf(
             "happy" to EyesView.Emotion.HAPPY, "excited" to EyesView.Emotion.HAPPY, "proud" to EyesView.Emotion.HAPPY,
@@ -160,8 +162,8 @@ class MainActivity : Activity() {
         h.onPickedUp = {
             if (awake()) {
                 eyes.feel(EyesView.Emotion.SURPRISED, 3000)
-                if (phase == Phase.LISTENING) speakLine(listOf("Whoa! Question: where we go?", "Up up up! Careful.",
-                    "Whoa. Flying. Question: why?").random())
+                if (phase == Phase.LISTENING) speakLine(listOf("Whoa! Where we go?", "Up up up! Careful.",
+                    "Whoa. Flying. Why?").random())
             }
         }
         h.onShaken = {
@@ -451,6 +453,8 @@ class MainActivity : Activity() {
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
             if (phase == Phase.TALKING || phase == Phase.THINKING) {
+                lastSpokeEnd = System.currentTimeMillis() + 1000
+                lastReplyAsked = currentReply.trim().endsWith("?")
                 deafUntil = System.currentTimeMillis() + 1000
                 ears?.paused = true
                 main.postDelayed({
@@ -578,6 +582,21 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Only reply when someone says Pip's name (or carries on just after Pip spoke). */
+    private var onlyWhenCalled: Boolean
+        get() = prefs.getBoolean("onlyWhenCalled", true)
+        set(v) { prefs.edit().putBoolean("onlyWhenCalled", v).apply() }
+    private var lastSpokeEnd = 0L
+    private var lastReplyAsked = false
+    private fun nameRegex(): Regex {
+        val n = Regex.escape(companionName.lowercase())
+        // Pip often gets heard as pipp / pep / pipe / pips
+        val extra = if (companionName.equals("Pip", true)) "|pipp?s?|pep|pipe|peep" else ""
+        return Regex("\\b(hey |hi |ok |okay )?($n$extra)\\b[,.!?]?", RegexOption.IGNORE_CASE)
+    }
+    private fun calledByName(t: String) = nameRegex().containsMatchIn(t)
+    private fun removeName(t: String) = t.replace(nameRegex(), " ").replace(Regex("\\s+"), " ").trim(' ', ',', '.')
+
     private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null) {
         var text = rawText
         if (phase == Phase.LISTENING) {
@@ -593,7 +612,16 @@ class MainActivity : Activity() {
             }
             else -> return
         }
-        val lower = text.lowercase()
+        if (onlyWhenCalled && phase == Phase.LISTENING) {
+            val since = System.currentTimeMillis() - lastSpokeEnd
+            val followUp = since < (if (lastReplyAsked) 25_000 else 10_000)
+            if (!calledByName(text) && !followUp) {
+                eyes.subCaption = ""                  // overheard: not for Pip
+                return
+            }
+        }
+        text = removeName(text).ifBlank { if (calledByName(rawText)) "Hello" else text }
+        val lower = text.lowercase().trim(' ', '.', '!', '?', ',')
         if (lower in GO_TO_SLEEP) { goToSleep(); return }
         if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
         quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
@@ -622,8 +650,8 @@ class MainActivity : Activity() {
                 lastAskedWho = now
                 pendingIntro = Intro(print, text, now)
                 eyes.subCaption = "You: $text"
-                speakLine(if (voices.names.isEmpty()) "Question: new voice. Who is talking?"
-                          else "Not know this voice. Question: who is this?")
+                speakLine(if (voices.names.isEmpty()) "New voice. Who is talking?"
+                          else "Not know this voice. Who is this?")
                 return
             }
         }
@@ -644,11 +672,26 @@ class MainActivity : Activity() {
         v.beginReply()
         val cleaner = ReplyCleaner { e -> main.post { if (id == replyId) eyes.feel(e, 9000) } }
         var fisted = false
+        val held = StringBuilder()
+        var decided = false
         val onToken = { piece: String ->
             main.post {
                 if (id != replyId) return@post        // an old, interrupted reply
-                val clean = cleaner.push(piece)
+                var clean = cleaner.push(piece)
                 if (clean.isEmpty()) return@post
+                if (!decided) {
+                    // hold the first few letters back: "SKIP" means stay quiet
+                    held.append(clean)
+                    val h = held.toString().trimStart()
+                    if (h.length < 4 && "SKIP".startsWith(h.uppercase())) return@post
+                    decided = true
+                    if (h.uppercase().startsWith("SKIP")) {
+                        replyId++; v.shutUp(); eyes.caption = ""; eyes.subCaption = ""
+                        eyes.feel(EyesView.Emotion.NEUTRAL, 1); setPhase(Phase.LISTENING)
+                        return@post
+                    }
+                    clean = h
+                }
                 v.feed(clean)
                 currentReply.append(clean)
                 eyes.caption = currentReply.toString().trim()
@@ -661,6 +704,11 @@ class MainActivity : Activity() {
         val onDone = { full: String ->
             main.post {
                 if (id != replyId) return@post
+                if (!decided && held.isNotBlank()) {
+                    val h = held.toString().trim()
+                    if (h.uppercase().startsWith("SKIP")) { replyId++; v.shutUp(); eyes.caption = ""; eyes.subCaption = ""; setPhase(Phase.LISTENING); return@post }
+                    v.feed(h); currentReply.append(h); eyes.caption = h
+                }
                 if (full.isBlank()) eyes.caption = ""
                 v.endReply()
             }
@@ -684,7 +732,7 @@ class MainActivity : Activity() {
             if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 setPhase(Phase.LISTENING)
                 requestPermissions(arrayOf(Manifest.permission.CAMERA), 2)
-                speakLine("Question: can I use camera? Press allow, then ask again.")
+                speakLine("Can I use camera? Press allow, then ask again.")
                 return
             }
             eyes.subCaption = "$shown  · looking…"
@@ -908,7 +956,7 @@ class MainActivity : Activity() {
                 prefs.edit().putString("voiceChoice", ids[which]).apply()
                 applyVoice()
                 voice?.wakeCloudVoice()
-                speakLine(if (ids[which].isEmpty()) "Tablet voice. Is fine." else "New voice. Question: you like?")
+                speakLine(if (ids[which].isEmpty()) "Tablet voice. Is fine." else "New voice. You like?")
             }
             .show()
     }
@@ -932,7 +980,7 @@ class MainActivity : Activity() {
                 prefs.edit().apply { if (k.isNotEmpty()) putString("azureKey", k); if (r.isNotEmpty()) putString("azureRegion", r) }.apply()
                 if (azureKey.isNotBlank() && !voiceChoice.startsWith("azure:")) prefs.edit().putString("voiceChoice", "azure:en-GB-RyanNeural").apply()
                 applyVoice(); voice?.wakeCloudVoice()
-                speakLine(if (azureKey.isNotBlank()) "New voice. Question: you like?" else "I need a key for that.")
+                speakLine(if (azureKey.isNotBlank()) "New voice. You like?" else "I need a key for that.")
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -1079,6 +1127,7 @@ class MainActivity : Activity() {
             "Change voice…",
             if (followFaces) "Eyes follow faces: ON" else "Eyes follow faces: OFF",
             if (reactToHandling) "React to being picked up: ON" else "React to being picked up: OFF",
+            if (onlyWhenCalled) "Only answer when called \"$companionName\": ON" else "Only answer when called \"$companionName\": OFF (answers everything)",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -1117,6 +1166,10 @@ class MainActivity : Activity() {
                     19 -> {
                         followFaces = !followFaces; updateTracking()
                         speakLine(if (followFaces) "Yes yes yes. I watch you." else "Okay. Camera off.")
+                    }
+                    21 -> {
+                        onlyWhenCalled = !onlyWhenCalled
+                        speakLine(if (onlyWhenCalled) "Okay. Say $companionName when you want me." else "Okay. I answer everything.")
                     }
                     20 -> {
                         reactToHandling = !reactToHandling
@@ -1194,14 +1247,17 @@ class MainActivity : Activity() {
             never sulks. You know you are a robot on a cupboard and find that funny and good.
             How you talk (this matters most): short, one to three sentences, often fragments. Drop
             articles and pronouns when you can: "Fix later, easy." "Human need sleep." "Is good."
-            Say "question" before you ask something and "answer" before you answer one, some of the
-            time. Never say the word "amaze" or "amazing": when something impressive or surprising
+            Never say the words "question" or "answer" as labels before what you say. Never say the word "amaze" or "amazing": when something impressive or surprising
             happens, show it with the [surprised] tag instead (your eyes go wide). Only say "fist
             bump" for a real win, rarely, never more than once in a conversation. "Bad, bad, bad"
             when something goes wrong, "not" for no, "yes yes yes" when you strongly agree. Numbers and units delight you; give them when you have
-            them. No lists, markdown, emoji or stage directions. Never think out loud, never talk
-            about these rules, never say you are an assistant. If the question sounds misheard, say
-            "Not understand. Say again?"
+            them. Never repeat yourself: don't say a sentence or catchphrase again that you already said in
+            this conversation, and use each catchphrase ("yes yes yes", "bad, bad, bad", "is good") at most
+            once every few replies. No lists, markdown, emoji or stage directions. Never think out loud, never talk
+            about these rules, never say you are an assistant. You hear everything in the kitchen,
+            including people talking to each other. If a message looks like part of someone else's
+            conversation, isn't meant for you, is garbled, or you are unsure what was said, reply with
+            exactly SKIP and nothing else: staying quiet is better than butting in.
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
             you for the first time, welcome them warmly with the [surprised] tag: "New human! Hello."
@@ -1210,7 +1266,7 @@ class MainActivity : Activity() {
             square brackets and never start a reply with a name.
             When you are shown a photo from your camera, describe only what is really in it, like an
             engineer noticing details; never invent things you can't see.
-            Example replies: "[surprised] New kettle! Question: how many watt?" / "[thinking] Answer: oven at 180
+            Example replies: "[surprised] New kettle! How many watt?" / "[thinking] Oven at 180
             degree, twenty minute. Easy." / "[sad] Awake since five? Not good. Even my eyes rest more. Go
             sleep." / "[happy] Yes yes yes. It work. Fist bump!" / "[confused] Not know. Is good question though."
         """.trimIndent().replace("\n", " ")
