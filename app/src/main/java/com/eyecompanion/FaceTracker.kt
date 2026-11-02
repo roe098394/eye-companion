@@ -141,10 +141,8 @@ class FaceTracker(
                     val x = toScreenX(b.exactCenterX() / uw).coerceIn(-1f, 1f)
                     val y = ((b.exactCenterY() / uh) * 2f - 1f).coerceIn(-1f, 1f)
                     onFace(x, y, b.width().toFloat() / uw, f.smilingProbability ?: 0f)
-                } else {
-                    onNoFace()
-                    movement(nv21, w, h, rotation)
-                }
+                } else onNoFace()
+                movement(nv21, w, h, rotation)          // the eyes follow movement, face or not
             }
             .addOnFailureListener { onNoFace() }
             .addOnCompleteListener { busy = false }

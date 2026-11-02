@@ -1596,7 +1596,7 @@ class MainActivity : Activity() {
             "Forget everyone's voices",
             if (onlineEars) "Online hearing (Whisper): ON" else "Online hearing (Whisper): OFF",
             "Change voice…",
-            if (followFaces) "Eyes follow faces: ON" else "Eyes follow faces: OFF",
+            if (followFaces) "Eyes follow movement (camera): ON" else "Eyes follow movement (camera): OFF",
             if (reactToHandling) "React to being picked up: ON" else "React to being picked up: OFF",
             "Eyes look the wrong way? Flip face tracking",
             if (lockButtons) "Tablet buttons: LOCKED (tap to unlock)" else "Tablet buttons: unlocked (tap to lock)",

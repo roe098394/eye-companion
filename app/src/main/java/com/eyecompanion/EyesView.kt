@@ -122,19 +122,19 @@ class EyesView(context: Context) : View(context) {
             Mood.LOADING -> { tOpen = 0.35f; tLookX = 0f; tLookY = 0.5f; tHappy = 0f }
             Mood.SLEEP -> { tOpen = 0.06f + 0.03f * sin(secs * 1.2f); tLookX = 0f; tLookY = 0.3f; tHappy = 0f }
             Mood.IDLE -> {
-                when { seesFace -> followFace(); seesMotion -> followMotion(); else -> glanceAround(t) }
+                if (seesMotion) followMotion() else glanceAround(t)
                 tScale = 1f + level * 0.10f
                 idleFeelings(t)
             }
             Mood.LISTEN -> { tScale = 1.06f + level * 0.12f; tLookX *= 0.9f; tLookY = -0.05f; tHappy = 0.05f
-                if (seesFace) followFace() else if (seesMotion) followMotion() }
+                if (seesMotion) followMotion() }
             Mood.THINK -> {
                 tOpen = 0.78f; tHappy = 0f
                 tLookX = 0.55f + 0.1f * sin(secs * 0.7f); tLookY = -0.55f
             }
             Mood.TALK -> {
                 tHappy = 0.35f; tLookX *= 0.9f; tLookY = 0f
-                if (seesFace) followFace()
+                if (seesMotion) followMotion()
                 bounce = sin(secs * 13f) * (0.012f + level * 0.03f)
             }
             Mood.HAPPY -> { tHappy = 0.85f; tScale = 1.08f; tLookX = 0f; tLookY = -0.1f
@@ -436,9 +436,11 @@ class EyesView(context: Context) : View(context) {
     fun stareAt(x: Float, y: Float, ms: Long) { stareX = x; stareY = y; stareUntil = now() + ms }
 
     private val seesFace get() = now() - faceAt < 1200
-    private val seesMotion get() = now() - motionAt < 700
+    private val seesMotion get() = now() - motionAt < 1200
+    /** Pip sits low on the bench, so it looks up a little at people. */
+    private val UP = -0.28f
     private fun followFace() { tLookX = faceX * 1.25f; tLookY = faceY * 0.9f }
-    private fun followMotion() { tLookX = motionX * 1.2f; tLookY = motionY * 0.6f }
+    private fun followMotion() { tLookX = motionX * 1.2f; tLookY = (motionY * 0.45f + UP).coerceIn(-1f, 0.6f) }
 
     // smoothed extras
     private var openL = 1f; private var openR = 1f; private var rot = 0f; private var blush = 0f
@@ -520,8 +522,8 @@ class EyesView(context: Context) : View(context) {
 
     private fun glanceAround(t: Long) {
         if (t >= nextGlance) {
-            if (Random.nextFloat() < 0.45f) { tLookX = 0f; tLookY = 0f }
-            else { tLookX = Random.nextFloat() * 1.6f - 0.8f; tLookY = Random.nextFloat() * 1.0f - 0.5f }
+            if (Random.nextFloat() < 0.45f) { tLookX = 0f; tLookY = UP }
+            else { tLookX = Random.nextFloat() * 1.6f - 0.8f; tLookY = UP + Random.nextFloat() * 0.6f - 0.3f }
             nextGlance = t + Random.nextLong(1200, 4200)
         }
     }
