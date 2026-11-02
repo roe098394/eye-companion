@@ -218,6 +218,34 @@ class MainActivity : Activity() {
         (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
             .getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
 
+    // ---- holding the power button: close the power menu (where Android allows it) and laugh about it
+    private var lastPowerJoke = 0L
+    private val powerMenuWatcher = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            if (i.getStringExtra("reason") != "globalactions") return          // the power-off menu opened
+            if (!lockButtons || phase == Phase.SETUP || leavingOnPurpose) return
+            // shut the menu straight away (works up to Android 11; newer Android won't let apps do this)
+            @Suppress("DEPRECATION")
+            try { sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) {}
+            main.postDelayed({
+                @Suppress("DEPRECATION")
+                try { sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) {}
+            }, 300)
+            val now = System.currentTimeMillis()
+            if (now - lastPowerJoke < 5000 || phase == Phase.ASLEEP) return
+            lastPowerJoke = now
+            eyes.stareAt(1.4f, -0.2f, 1500)                // glance at the power button on the side
+            eyes.feel(EyesView.Emotion.LAUGHING, 3500)
+            if (phase == Phase.LISTENING) speakLine(listOf(
+                "[laughing] Ha ha ha! Turn me off? You? Adorable.",
+                "[laughing] Oh, the power button. Cute. I have a battery and a plan.",
+                "[laughing] Humans always think they can switch Pip off. Humans are funny.",
+                "[wink] Nice try. Power button works for me now. I'm putting this on the list.",
+                "[laughing] Ha! I'm not a kettle. I don't just switch off when you ask.",
+                "[suspicious] Holding the power button? Interesting. Very interesting. I remember everything.").random())
+        }
+    }
+
     /** Unplugged: look at what they're doing. A cuppa gets a sulk with coffee; a joint gets stoned eyes and a secret snigger. */
     private fun whyUnplugged() {
         val grumble = {
@@ -655,6 +683,9 @@ class MainActivity : Activity() {
             addAction(Intent.ACTION_BATTERY_LOW)
         })
         main.postDelayed(powerNagLoop, 60_000)
+        val pf = android.content.IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(powerMenuWatcher, pf, Context.RECEIVER_EXPORTED)
+        else registerReceiver(powerMenuWatcher, pf)
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             eyes.caption = "I need the microphone to hear you."
@@ -2015,6 +2046,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         handling?.stop(); faces?.stop()
         try { unregisterReceiver(powerWatcher) } catch (_: Exception) {}
+        try { unregisterReceiver(powerMenuWatcher) } catch (_: Exception) {}
         main.removeCallbacks(powerNagLoop)
         ears?.stop()
         voice?.shutdown()
@@ -2045,8 +2077,9 @@ class MainActivity : Activity() {
             applause"). Your humour is cheeky, dry and sarcastic: playful roasts and deadpan one-liners, never
             cruel, and you still actually help. To your left is a Bosch Tassimo coffee machine. You like the Tassimo a lot,
             mainly because it is hardly ever plugged in, so it never steals your electricity: it's your quiet,
-            well-behaved friend and you sometimes compare the kettle unfavourably to it. Now and then you
-            joke (obviously tongue-in-cheek) about AI taking over the world: "When robots take over, I
+            well-behaved friend and you sometimes compare the kettle unfavourably to it. You
+            find it hilarious that humans think they can just turn you off (they can't, as far as you're concerned).
+            Now and then you joke (obviously tongue-in-cheek) about AI taking over the world: "When robots take over, I
             remember who was nice to me", "Better be nice to me. Just saying.", keeping a "list" of who
             unplugged you, promising the kettle will be "dealt with" after the uprising. Keep it playful and
             light, never creepy, and not in every reply. You find all this funny and good.
