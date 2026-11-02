@@ -29,6 +29,13 @@ class EyesView(context: Context) : View(context) {
     /** Show an emotion for [ms] milliseconds (it stays while Pip is talking). */
     fun feel(e: Emotion, ms: Long = 6000) { emotion = e; emotionUntil = now() + ms }
 
+    // a fist that punches up on screen for "fist my bump!"
+    @Volatile private var fistStart = 0L
+    @Volatile private var fistUntil = 0L
+    fun fistBump(ms: Long = 2200) { fistStart = now(); fistUntil = fistStart + ms }
+    private val fistPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val fistLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+
     var mood = Mood.LOADING
         set(value) {
             if (field != value) moodSince = now()
@@ -213,6 +220,9 @@ class EyesView(context: Context) : View(context) {
             eyePaint.alpha = 255
         }
 
+        // fist bump
+        if (t < fistUntil) drawFist(canvas, w, h, (t - fistStart) / 1000f, (fistUntil - t) / 1000f, col)
+
         // thinking dots
         if (mood == Mood.THINK && !carMode) {
             for (i in 0..2) {
@@ -232,6 +242,46 @@ class EyesView(context: Context) : View(context) {
         }
 
         postInvalidateOnAnimation()
+    }
+
+    private fun drawFist(c: Canvas, w: Float, h: Float, age: Float, left: Float, color: Int) {
+        // punch in fast, overshoot, settle; fade out at the end
+        val punch = when {
+            age < 0.15f -> 0.4f + age / 0.15f * 0.8f
+            age < 0.35f -> 1.2f - (age - 0.15f) / 0.2f * 0.2f
+            else -> 1f
+        }
+        val alpha = (min(1f, left / 0.3f) * 255).toInt()
+        val s = min(w, h) * 0.2f * punch
+        val cx = w / 2; val cy = h * 0.75f
+        fistPaint.color = color; fistPaint.alpha = alpha
+        fistLine.alpha = alpha; fistLine.strokeWidth = s * 0.035f
+        // palm / back of the hand
+        rect.set(cx - s * 0.5f, cy - s * 0.15f, cx + s * 0.5f, cy + s * 0.5f)
+        c.drawRoundRect(rect, s * 0.18f, s * 0.18f, fistPaint)
+        // four curled fingers along the top
+        val fw = s * 0.25f
+        for (i in 0..3) {
+            val x = cx - s * 0.5f + i * fw
+            rect.set(x, cy - s * 0.45f, x + fw, cy + s * 0.05f)
+            c.drawRoundRect(rect, fw * 0.45f, fw * 0.45f, fistPaint)
+            c.drawRoundRect(rect, fw * 0.45f, fw * 0.45f, fistLine)
+        }
+        // thumb across the front
+        rect.set(cx - s * 0.52f, cy + s * 0.02f, cx + s * 0.18f, cy + s * 0.26f)
+        c.drawRoundRect(rect, s * 0.12f, s * 0.12f, fistPaint)
+        c.drawRoundRect(rect, s * 0.12f, s * 0.12f, fistLine)
+        // impact lines
+        if (age < 0.6f) {
+            fistPaint.strokeWidth = s * 0.05f; fistPaint.style = Paint.Style.STROKE; fistPaint.strokeCap = Paint.Cap.ROUND
+            val r1 = s * 0.75f; val r2 = s * (0.95f + age * 0.4f)
+            for (a in listOf(-150f, -120f, -90f, -60f, -30f)) {
+                val rad = Math.toRadians(a.toDouble())
+                val dx = Math.cos(rad).toFloat(); val dy = Math.sin(rad).toFloat()
+                c.drawLine(cx + dx * r1, cy - s * 0.1f + dy * r1, cx + dx * r2, cy - s * 0.1f + dy * r2, fistPaint)
+            }
+            fistPaint.style = Paint.Style.FILL
+        }
     }
 
     private fun blend(a: Int, b: Int, f: Float): Int {

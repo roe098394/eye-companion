@@ -562,6 +562,7 @@ class MainActivity : Activity() {
         currentReply.clear()
         v.beginReply()
         val cleaner = ReplyCleaner { e -> main.post { if (id == replyId) eyes.feel(e, 9000) } }
+        var fisted = false
         val onToken = { piece: String ->
             main.post {
                 if (id != replyId) return@post        // an old, interrupted reply
@@ -570,6 +571,9 @@ class MainActivity : Activity() {
                 v.feed(clean)
                 currentReply.append(clean)
                 eyes.caption = currentReply.toString().trim()
+                if (!fisted && Regex("fist (my )?bump", RegexOption.IGNORE_CASE).containsMatchIn(currentReply)) {
+                    fisted = true; eyes.fistBump()
+                }
             }
             id == replyId                              // false tells the brain to stop
         }
