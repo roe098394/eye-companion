@@ -122,6 +122,29 @@ class MainActivity : Activity() {
         get() = prefs.getBoolean("reactToHandling", true)
         set(v) { prefs.edit().putBoolean("reactToHandling", v).apply() }
 
+    // ---- lock the tablet's buttons (Home, Back, Recents) with Android's screen pinning
+    private var lockButtons: Boolean
+        get() = prefs.getBoolean("lockButtons", true)
+        set(v) { prefs.edit().putBoolean("lockButtons", v).apply() }
+    private var askedToPin = false
+    private val pinned: Boolean get() =
+        (getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).lockTaskModeState !=
+            android.app.ActivityManager.LOCK_TASK_MODE_NONE
+
+    private fun applyButtonLock() {
+        try {
+            if (lockButtons && !pinned && !askedToPin) { askedToPin = true; startLockTask() }
+            else if (!lockButtons && pinned) stopLockTask()
+        } catch (_: Exception) {}
+    }
+
+    /** Leave the pinned screen for a moment to open settings, then pin again on return. */
+    private fun openOutside(i: Intent) {
+        try { if (pinned) stopLockTask() } catch (_: Exception) {}
+        askedToPin = false
+        startActivity(i)
+    }
+
     /** Camera on only while awake, on screen and wanted. */
     private fun updateTracking() {
         val want = followFaces && resumed && phase != Phase.SETUP && phase != Phase.ASLEEP
@@ -449,6 +472,7 @@ class MainActivity : Activity() {
 
     private fun startCompanion() {
         keepBluetoothInMusicMode()
+        applyButtonLock()
         val v = voice ?: return
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
@@ -1127,6 +1151,7 @@ class MainActivity : Activity() {
             "Change voice…",
             if (followFaces) "Eyes follow faces: ON" else "Eyes follow faces: OFF",
             if (reactToHandling) "React to being picked up: ON" else "React to being picked up: OFF",
+            if (lockButtons) "Tablet buttons: LOCKED (tap to unlock)" else "Tablet buttons: unlocked (tap to lock)",
             if (onlyWhenCalled) "Only answer when called \"$companionName\": ON" else "Only answer when called \"$companionName\": OFF (answers everything)",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -1145,9 +1170,9 @@ class MainActivity : Activity() {
                         setupStarted = false; startSetup()
                     }
                     7 -> { setupStarted = false; startSetup() }
-                    8 -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                    9 -> startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
-                    10 -> startActivity(Intent(Settings.ACTION_SETTINGS))
+                    8 -> openOutside(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                    9 -> { lockButtons = false; openOutside(Intent(Settings.ACTION_HOME_SETTINGS)) }
+                    10 -> openOutside(Intent(Settings.ACTION_SETTINGS))
                     11 -> {
                         prefs.edit().putBoolean("carMode", !carMode).apply()
                         applyMode()
@@ -1168,6 +1193,10 @@ class MainActivity : Activity() {
                         speakLine(if (followFaces) "Yes yes yes. I watch you." else "Okay. Camera off.")
                     }
                     21 -> {
+                        lockButtons = !lockButtons; askedToPin = false; applyButtonLock()
+                        speakLine(if (lockButtons) "Buttons locked. Press Pin if asked." else "Buttons free.")
+                    }
+                    22 -> {
                         onlyWhenCalled = !onlyWhenCalled
                         speakLine(if (onlyWhenCalled) "Okay. Say $companionName when you want me." else "Okay. I answer everything.")
                     }
@@ -1191,6 +1220,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         updateTracking()
+        if (phase != Phase.SETUP) applyButtonLock()
         hideSystemBars()
         if (phase != Phase.SETUP) keepBluetoothInMusicMode()
     }
