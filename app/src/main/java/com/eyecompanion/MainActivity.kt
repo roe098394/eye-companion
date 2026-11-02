@@ -46,8 +46,21 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
         return strip(h)
     }
 
+    /** Tappable answers the reply offered, written as {Yes | No | Later}: never spoken or shown as text. */
+    private val choiceBuf = StringBuilder()
+    private var inChoice = false
+    val choices: List<String> get() = choiceBuf.toString().removePrefix("choices:").split("|")
+        .map { it.trim().trim('"') }.filter { it.isNotEmpty() && it.length <= 30 }.take(4)
+
     private fun strip(s: String): String {
-        var t = s.replace(Regex("\\[[^\\]]{0,30}\\]"), "")
+        val out = StringBuilder()
+        for (c in s) when {
+            inChoice && c == '}' -> inChoice = false
+            inChoice -> choiceBuf.append(c)
+            c == '{' -> { inChoice = true; choiceBuf.clear() }
+            else -> out.append(c)
+        }
+        var t = out.toString().replace(Regex("\\[[^\\]]{0,30}\\]"), "")
         if (AMAZE.containsMatchIn(t)) { onEmotion(EyesView.Emotion.SURPRISED); t = t.replace(AMAZE, "") }
         t = t.replace(LABEL, "")
         return t.replace(Regex("fist my bump", RegexOption.IGNORE_CASE), "fist bump")
@@ -423,6 +436,7 @@ class MainActivity : Activity() {
             "[curious] $n. While kettle boils: tablets. Had them yet?",
             "[suspicious] $n. Tablets. Taken them?",
             "[sad] $n, tablets still not done today. Please take them. Have you?").random())
+        showChoices(listOf("Yes, taken them", "Not yet"))
     }
 
     /** "I've taken them" / "not yet". Returns true if it was an answer about the tablets. */
@@ -584,7 +598,17 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         eyes = EyesView(this)
         eyes.showCaptions = prefs.getBoolean("captions", true)
-        setContentView(eyes)
+        val rootView = android.widget.FrameLayout(this)
+        rootView.addView(eyes)
+        choiceBar = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            visibility = android.view.View.GONE
+        }
+        rootView.addView(choiceBar, android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.BOTTOM).apply { bottomMargin = (resources.displayMetrics.heightPixels * 0.15f).toInt() })
+        setContentView(rootView)
         setupTouch()
         setupHandling()
         registerReceiver(powerWatcher, android.content.IntentFilter().apply {
@@ -1048,10 +1072,42 @@ class MainActivity : Activity() {
             it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
     }
 
-    private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null) {
+    // ---- on-screen answer buttons
+    private lateinit var choiceBar: android.widget.LinearLayout
+    private val hideChoicesLater = Runnable { hideChoices() }
+    private fun hideChoices() { if (::choiceBar.isInitialized) { choiceBar.removeAllViews(); choiceBar.visibility = android.view.View.GONE } }
+    /** Show a row of buttons; tapping one answers as if it had been said out loud (or runs [onPick]). */
+    private fun showChoices(options: List<String>, onPick: ((String) -> Unit)? = null) {
+        if (options.isEmpty() || !::choiceBar.isInitialized) return
+        hideChoices()
+        val dp = resources.displayMetrics.density
+        for (o in options) {
+            choiceBar.addView(android.widget.TextView(this).apply {
+                text = o; textSize = 22f; setTextColor(eyes.eyeColor)
+                setPadding((22 * dp).toInt(), (12 * dp).toInt(), (22 * dp).toInt(), (12 * dp).toInt())
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 40 * dp; setStroke((2 * dp).toInt(), eyes.eyeColor); setColor(0x22000000)
+                }
+                setOnClickListener {
+                    hideChoices()
+                    if (onPick != null) onPick(o) else heard(o, 1f, null, tapped = true)
+                }
+            }, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins((8 * dp).toInt(), 0, (8 * dp).toInt(), 0) })
+        }
+        choiceBar.visibility = android.view.View.VISIBLE
+        main.removeCallbacks(hideChoicesLater)
+        main.postDelayed(hideChoicesLater, 40_000)
+    }
+    private val FAMILY = listOf("Mark", "Laura", "Sophie", "Amelia", "Chloe")
+
+    private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null, tapped: Boolean = false) {
         var text = rawText
-        if (isOwnEcho(text)) return                              // Pip's own words heard back
-        if (phase == Phase.LISTENING) {
+        if (!tapped) hideChoices()                               // answered out loud instead
+        if (tapped && (phase == Phase.THINKING || phase == Phase.TALKING)) interrupt()
+        if (!tapped && isOwnEcho(text)) return                   // Pip's own words heard back
+        if (phase == Phase.LISTENING && !tapped) {
             if (System.currentTimeMillis() < deafUntil) return   // tail end of its own voice
             if (conf < 0.6f) return                              // not sure what was said: stay quiet
         }
@@ -1074,7 +1130,7 @@ class MainActivity : Activity() {
             val since = System.currentTimeMillis() - lastSpokeEnd
             val followUp = since < (if (lastReplyAsked) 25_000 else 10_000)
             val looking = System.currentTimeMillis() - lastFaceSeen < 10_000 && faces?.running == true
-            if (!calledByName(text) && !followUp && !looking) {
+            if (!tapped && !calledByName(text) && !followUp && !looking) {
                 // the clever brains hear it and decide; the tablet's own brain, or strict mode, just ignores it
                 if (onlyWhenCalled || !(online.worthTrying || pc.worthTrying)) { eyes.subCaption = ""; return }
                 overheard = true
@@ -1128,6 +1184,10 @@ class MainActivity : Activity() {
                 eyes.subCaption = "You: $text"
                 speakLine(if (voices.names.isEmpty()) "New voice. Who is talking?"
                           else "Not know this voice. Who is this?")
+                showChoices((FAMILY + voices.names).distinct().take(6) + "Someone else") { pick ->
+                    if (pick == "Someone else") speakLine("[curious] Okay, new human. Tell me your name.")
+                    else heard(pick, 1f, null, tapped = true)
+                }
                 return
             }
         }
@@ -1196,6 +1256,7 @@ class MainActivity : Activity() {
                 }
                 if (full.isBlank()) eyes.caption = ""
                 v.endReply()
+                cleaner.choices.takeIf { it.size >= 2 }?.let { showChoices(it) }
             }
             Unit
         }
@@ -1551,6 +1612,7 @@ class MainActivity : Activity() {
     }
 
     private fun goToSleep() {
+        hideChoices()
         voice?.shutUp(); brain?.stop(); pc.stop(); online.stop()
         prefs.edit().putBoolean("asleep", true).apply()
         eyes.caption = ""; eyes.subCaption = ""
@@ -1896,6 +1958,9 @@ class MainActivity : Activity() {
             spot); Chloe (small and cute: keep it simple, kind and playful). There are children in the
             house, so keep everything child-friendly: no swearing and no grown-up topics. Never guess who
             is talking from a description; only use a name when the message gives it.
+            When you ask someone a question with a few short possible answers, put them at the very end in
+            curly braces separated by |, like {Yes | No | Later}: they appear as buttons on your screen. At
+            most 4, each one to three words, and only when it really helps. Never say the braces out loud.
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
             you for the first time, welcome them warmly with the [surprised] tag: "New human! Hello."
