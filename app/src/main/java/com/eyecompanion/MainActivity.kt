@@ -1099,6 +1099,7 @@ class MainActivity : Activity() {
         get() = prefs.getBoolean("onlyWhenCalled2", false)
         set(v) { prefs.edit().putBoolean("onlyWhenCalled2", v).apply() }
     private var lastSpokeEnd = 0L
+    private val recentPrints = ArrayDeque<Pair<Long, FloatArray>>()
     private var lastReplyAsked = false
     private fun nameRegex(): Regex {
         val n = Regex.escape(companionName.lowercase())
@@ -1289,13 +1290,18 @@ class MainActivity : Activity() {
         // tablets answer ("I've taken them") counts whoever it's said to
         if (phase == Phase.LISTENING && tabletAnswer(removeName(text).lowercase())) return
 
-        // Was this said to Pip? Its name, carrying on just after Pip spoke, or someone looking at it.
+        // Was this said to Pip? Assume yes, unless two people seem to be talking to each other
+        // (and nobody said its name, carried on just after it spoke, or is at the bench).
         var overheard = false
+        val now0 = System.currentTimeMillis()
+        if (print != null && !tapped) { recentPrints.addLast(now0 to print); while (recentPrints.size > 8) recentPrints.removeFirst() }
         if (phase == Phase.LISTENING) {
             val since = System.currentTimeMillis() - lastSpokeEnd
             val followUp = since < (if (lastReplyAsked) 25_000 else 10_000)
             val looking = System.currentTimeMillis() - lastFaceSeen < 10_000 && faces?.running == true
-            if (!tapped && !calledByName(text) && !followUp && !looking) {
+            // two different voices talking in the last half minute = people chatting to each other
+            val chatting = print != null && recentPrints.any { now0 - it.first < 25_000 && !voices.sameVoice(it.second, print) }
+            if (!tapped && !calledByName(text) && !followUp && !looking && chatting) {
                 // the clever brains hear it and decide; the tablet's own brain, or strict mode, just ignores it
                 if (onlyWhenCalled || !(online.worthTrying || pc.worthTrying)) { eyes.subCaption = ""; return }
                 overheard = true
@@ -1735,7 +1741,7 @@ class MainActivity : Activity() {
         pc.maxReplyTokens = if (car) 70 else 220
         pc.maxTurns = if (car) 6 else 12
         online.maxReplyTokens = if (car) 70 else 220
-        online.maxTurns = if (car) 6 else 12
+        online.maxTurns = if (car) 6 else 8
         voice?.setStyle(pitch = if (car) 0.85f else 0.8f, rate = if (car) 1.05f else 0.95f)
         applyNightDimming()
     }

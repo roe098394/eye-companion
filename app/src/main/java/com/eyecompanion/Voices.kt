@@ -42,6 +42,9 @@ class Voices(private val prefs: SharedPreferences) {
 
     fun forgetAll() { people.clear(); save() }
 
+    /** Do two voice prints sound like the same person? */
+    fun sameVoice(a: FloatArray, b: FloatArray) = cosine(a, b) >= MATCH - 0.1f
+
     private fun cosine(a: FloatArray, b: FloatArray): Float {
         if (a.size != b.size) return -1f
         var dot = 0.0; var na = 0.0; var nb = 0.0
