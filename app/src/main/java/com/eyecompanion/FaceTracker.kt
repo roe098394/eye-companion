@@ -1,19 +1,28 @@
 package com.eyecompanion
 
-import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
-import android.media.FaceDetector
 import android.os.Handler
 import android.os.HandlerThread
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import kotlin.math.abs
 
 /**
- * Watches the front camera a few times a second and reports where a face is, so the eyes can
- * follow people around the kitchen. Everything stays on the tablet; it only finds *where* a face
- * is, never who. Reports x/y in -1..1 from the screen's point of view, or null for no face.
+ * Watches the front camera about 8 times a second so the eyes can follow people around the
+ * kitchen. Uses Google's on-device face finder (works with heads turned, in poorer light, and
+ * notices smiles). With no face in view it follows movement instead, so Pip glances at whoever
+ * walks past. Everything stays on the tablet; it finds *where* a face is, never who.
+ * x/y are -1..1 from the screen's point of view; size is the face's width as a share of the picture.
  */
 @Suppress("DEPRECATION")
-class FaceTracker(private val onFace: (Float, Float) -> Unit, private val onNoFace: () -> Unit) {
+class FaceTracker(
+    private val onFace: (x: Float, y: Float, size: Float, smile: Float) -> Unit,
+    private val onNoFace: () -> Unit,
+    private val onMotion: (x: Float, y: Float) -> Unit = { _, _ -> },
+) {
+    /** set if the picture comes out mirrored on this tablet (eyes look the wrong way) */
+    @Volatile var flip = false
 
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
@@ -21,14 +30,23 @@ class FaceTracker(private val onFace: (Float, Float) -> Unit, private val onNoFa
     private var texture: SurfaceTexture? = null
     @Volatile var running = false
         private set
-    @Volatile private var lastFrameAt = 0L
-    @Volatile private var busy = false
-
-    /** [displayDegrees] = how far the screen is rotated (0/90/180/270). */
-    /** set if this tablet's camera couldn't be opened, so we don't keep trying */
     @Volatile var failed = false
         private set
+    @Volatile private var lastFrameAt = 0L
+    @Volatile private var busy = false
+    private var prevGrid: IntArray? = null
 
+    private val detector by lazy {
+        FaceDetection.getClient(
+            FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_ALL)
+                .setMinFaceSize(0.08f)
+                .build()
+        )
+    }
+
+    /** [displayDegrees] = how far the screen is rotated (0/90/180/270). */
     fun start(displayDegrees: Int) {
         if (running || failed) return
         running = true
@@ -61,22 +79,22 @@ class FaceTracker(private val onFace: (Float, Float) -> Unit, private val onNoFa
             val p = c.parameters
             val size = p.supportedPreviewSizes.minByOrNull { abs(it.width - 640) + abs(it.height - 480) }!!
             p.setPreviewSize(size.width, size.height)
-            p.supportedPreviewFpsRange?.minByOrNull { it[1] }?.let { p.setPreviewFpsRange(it[0], it[1]) }
+            if (p.supportedFocusModes?.contains(android.hardware.Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO) == true)
+                p.focusMode = android.hardware.Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO
             c.parameters = p
-            // same rotation as Snapshot uses for the front camera
-            val device = (360 - displayDegrees) % 360
-            val rotation = (info.orientation - device + 360) % 360
+            // the rotation that makes the picture upright (same as Snapshot uses)
+            val rotation = (info.orientation + displayDegrees) % 360
             texture = SurfaceTexture(11)
             c.setPreviewTexture(texture)
             val w = size.width; val h = size.height
-            val buf = ByteArray(w * h * 3 / 2)
-            c.addCallbackBuffer(buf)
+            c.addCallbackBuffer(ByteArray(w * h * 3 / 2))
+            c.addCallbackBuffer(ByteArray(w * h * 3 / 2))
             c.setPreviewCallbackWithBuffer { data, camera ->
                 val now = System.currentTimeMillis()
-                if (!busy && now - lastFrameAt > 300) {
+                if (!busy && now - lastFrameAt > 120) {
                     lastFrameAt = now; busy = true
-                    try { look(data, w, h, rotation) } catch (_: Throwable) {}
-                    busy = false
+                    val copy = data.copyOf()
+                    try { look(copy, w, h, rotation) } catch (_: Throwable) { busy = false }
                 }
                 try { camera.addCallbackBuffer(data) } catch (_: Throwable) {}
             }
@@ -92,37 +110,50 @@ class FaceTracker(private val onFace: (Float, Float) -> Unit, private val onNoFa
         try { cam?.release() } catch (_: Throwable) {}
         cam = null
         texture?.release(); texture = null
+        prevGrid = null
     }
 
-    /** Small, upright grey picture from the camera's brightness channel, then find a face in it. */
+    /** picture position (0..1, upright) → screen -1..1; the camera faces the person, so mirror x */
+    private fun toScreenX(u: Float) = (if (flip) 1f else -1f) * (u * 2f - 1f)
+
     private fun look(nv21: ByteArray, w: Int, h: Int, rotation: Int) {
-        val step = maxOf(1, w / 200)             // about 200 pixels across is plenty
-        val sw = (w / step) and 1.inv(); val sh = h / step
         val upright = rotation == 90 || rotation == 270
-        val ow = if (upright) sh and 1.inv() else sw     // FaceDetector wants an even width
-        val oh = if (upright) sw else sh
-        val px = IntArray(ow * oh)
-        for (y in 0 until sh) for (x in 0 until sw) {
-            val v = nv21[(y * step) * w + x * step].toInt() and 0xFF
-            val (ox, oy) = when (rotation) {
-                90 -> (sh - 1 - y) to x
-                180 -> (sw - 1 - x) to (sh - 1 - y)
-                270 -> y to (sw - 1 - x)
-                else -> x to y
+        val uw = if (upright) h else w; val uh = if (upright) w else h
+        detector.process(InputImage.fromByteArray(nv21, w, h, rotation, InputImage.IMAGE_FORMAT_NV21))
+            .addOnSuccessListener { faces ->
+                val f = faces.maxByOrNull { it.boundingBox.width() }
+                if (f != null) {
+                    val b = f.boundingBox
+                    val x = toScreenX(b.exactCenterX() / uw).coerceIn(-1f, 1f)
+                    val y = ((b.exactCenterY() / uh) * 2f - 1f).coerceIn(-1f, 1f)
+                    onFace(x, y, b.width().toFloat() / uw, f.smilingProbability ?: 0f)
+                } else {
+                    onNoFace()
+                    movement(nv21, w, h, rotation)
+                }
             }
-            if (ox < ow && oy < oh) px[oy * ow + ox] = (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+            .addOnFailureListener { onNoFace() }
+            .addOnCompleteListener { busy = false }
+    }
+
+    /** No face: look for something moving (someone walking past) by comparing with the last picture. */
+    private fun movement(nv21: ByteArray, w: Int, h: Int, rotation: Int) {
+        val gw = 32; val gh = 24
+        val grid = IntArray(gw * gh) { i -> nv21[((i / gw) * h / gh) * w + (i % gw) * w / gw].toInt() and 0xFF }
+        val prev = prevGrid
+        prevGrid = grid
+        if (prev == null) return
+        var n = 0; var sx = 0f; var sy = 0f
+        for (i in grid.indices) if (abs(grid[i] - prev[i]) > 28) { n++; sx += (i % gw + 0.5f) / gw; sy += (i / gw + 0.5f) / gh }
+        // a few percent of the picture changed, but not all of it (that's a light switching)
+        if (n < gw * gh / 40 || n > gw * gh / 2) return
+        val u = sx / n; val v = sy / n
+        val (ux, uy) = when (rotation) {
+            90 -> (1f - v) to u
+            180 -> (1f - u) to (1f - v)
+            270 -> v to (1f - u)
+            else -> u to v
         }
-        val bmp = Bitmap.createBitmap(px, ow, oh, Bitmap.Config.ARGB_8888).copy(Bitmap.Config.RGB_565, false)
-        val faces = arrayOfNulls<FaceDetector.Face>(3)
-        val n = FaceDetector(ow, oh, faces.size).findFaces(bmp, faces)
-        bmp.recycle()
-        // follow the biggest (nearest) face
-        val f = faces.take(n).filterNotNull().maxByOrNull { it.eyesDistance() }
-        if (f == null) { onNoFace(); return }
-        val mid = android.graphics.PointF(); f.getMidPoint(mid)
-        // the camera faces the person, so their left is the picture's right: mirror x
-        val x = -((mid.x / ow) * 2f - 1f)
-        val y = (mid.y / oh) * 2f - 1f
-        onFace(x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f))
+        onMotion(toScreenX(ux), (uy * 2f - 1f))
     }
 }

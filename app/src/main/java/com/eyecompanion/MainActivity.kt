@@ -58,14 +58,19 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
         val LABEL = Regex("\\b(question|answer)\\s*:\\s*", RegexOption.IGNORE_CASE)
         val AMAZE = Regex("\\b[Aa]maze(d|ing)?\\b[!.,]*\\s*")
         val EMOTIONS = mapOf(
-            "happy" to EyesView.Emotion.HAPPY, "excited" to EyesView.Emotion.HAPPY, "proud" to EyesView.Emotion.HAPPY,
+            "happy" to EyesView.Emotion.HAPPY, "proud" to EyesView.Emotion.HAPPY,
             "sad" to EyesView.Emotion.SAD, "worried" to EyesView.Emotion.SAD,
             "angry" to EyesView.Emotion.ANGRY, "annoyed" to EyesView.Emotion.ANGRY, "grumpy" to EyesView.Emotion.ANGRY,
             "surprised" to EyesView.Emotion.SURPRISED, "amazed" to EyesView.Emotion.SURPRISED,
             "sleepy" to EyesView.Emotion.SLEEPY, "tired" to EyesView.Emotion.SLEEPY,
             "love" to EyesView.Emotion.LOVE, "loving" to EyesView.Emotion.LOVE,
             "confused" to EyesView.Emotion.CONFUSED, "thinking" to EyesView.Emotion.THINKING,
-            "dizzy" to EyesView.Emotion.DIZZY, "neutral" to EyesView.Emotion.NEUTRAL)
+            "dizzy" to EyesView.Emotion.DIZZY, "scared" to EyesView.Emotion.SCARED, "nervous" to EyesView.Emotion.SCARED,
+            "excited" to EyesView.Emotion.EXCITED, "suspicious" to EyesView.Emotion.SUSPICIOUS,
+            "bored" to EyesView.Emotion.BORED, "embarrassed" to EyesView.Emotion.EMBARRASSED, "shy" to EyesView.Emotion.EMBARRASSED,
+            "wink" to EyesView.Emotion.WINK, "cheeky" to EyesView.Emotion.WINK, "curious" to EyesView.Emotion.CURIOUS,
+            "laughing" to EyesView.Emotion.LAUGHING, "laugh" to EyesView.Emotion.LAUGHING,
+            "crying" to EyesView.Emotion.CRYING, "neutral" to EyesView.Emotion.NEUTRAL)
     }
 }
 
@@ -115,6 +120,8 @@ class MainActivity : Activity() {
     private var resumed = false
     @Volatile private var lastFaceSeen = 0L
     private var lastSleepyLook = 0L
+    private var lastSmileBack = 0L
+    private var lastTooClose = 0L
     private var followFaces: Boolean
         get() = prefs.getBoolean("followFaces", true)
         set(v) { prefs.edit().putBoolean("followFaces", v).apply() }
@@ -217,23 +224,30 @@ class MainActivity : Activity() {
             return
         }
         val f = faces ?: FaceTracker(
-            onFace = { x, y ->
+            onFace = { x, y, size, smile ->
                 val now = System.currentTimeMillis()
                 val away = now - lastFaceSeen
                 lastFaceSeen = now
                 main.post {
-                    eyes.seeFace(x, y)
-                    // someone's back after a while: happy to see them
-                    if (away > 3 * 60_000 && phase == Phase.LISTENING) eyes.feel(EyesView.Emotion.HAPPY, 2000)
+                    eyes.seeFace(x, y, size)
+                    if (phase == Phase.LISTENING) when {
+                        // someone's back after a while: happy to see them
+                        away > 3 * 60_000 -> eyes.feel(EyesView.Emotion.EXCITED, 2500)
+                        // smile at Pip and it smiles back
+                        smile > 0.8f && now - lastSmileBack > 12_000 -> { lastSmileBack = now; eyes.feel(EyesView.Emotion.HAPPY, 2500) }
+                        // very close to the camera: whoa
+                        size > 0.6f && now - lastTooClose > 20_000 -> { lastTooClose = now; eyes.feel(EyesView.Emotion.SURPRISED, 1800) }
+                    }
                 }
             },
+            onMotion = { x, y -> eyes.seeMotion(x, y) },
             onNoFace = {
                 val now = System.currentTimeMillis()
                 if (now - lastFaceSeen > 10 * 60_000 && now - lastSleepyLook > 60_000) {
                     lastSleepyLook = now
                     main.post { if (phase == Phase.LISTENING) eyes.feel(EyesView.Emotion.SLEEPY, 55_000) }
                 }
-            }).also { faces = it }
+            }).also { faces = it; it.flip = prefs.getBoolean("flipFaces", false) }
         if (want && !f.running) { lastFaceSeen = System.currentTimeMillis(); f.start(displayDegrees()) }
         else if (!want && f.running) f.stop()
     }
@@ -1242,6 +1256,7 @@ class MainActivity : Activity() {
             "Change voice…",
             if (followFaces) "Eyes follow faces: ON" else "Eyes follow faces: OFF",
             if (reactToHandling) "React to being picked up: ON" else "React to being picked up: OFF",
+            "Eyes look the wrong way? Flip face tracking",
             if (lockButtons) "Tablet buttons: LOCKED (tap to unlock)" else "Tablet buttons: unlocked (tap to lock)",
             if (onlyWhenCalled) "Only answer when called \"$companionName\": ON" else "Only answer when called \"$companionName\": OFF (works it out)",
         )
@@ -1284,10 +1299,16 @@ class MainActivity : Activity() {
                         speakLine(if (followFaces) "Yes yes yes. I watch you." else "Okay. Camera off.")
                     }
                     21 -> {
+                        val flip = !prefs.getBoolean("flipFaces", false)
+                        prefs.edit().putBoolean("flipFaces", flip).apply()
+                        faces?.flip = flip
+                        speakLine("Flipped. Walk left and right, I follow.")
+                    }
+                    22 -> {
                         lockButtons = !lockButtons; askedToPin = false; applyButtonLock()
                         speakLine(if (lockButtons) "Buttons locked. Press Pin if asked." else "Buttons free.")
                     }
-                    22 -> toggleListening()
+                    23 -> toggleListening()
                     20 -> {
                         reactToHandling = !reactToHandling
                         if (!reactToHandling) eyes.tilt = 0f
@@ -1385,8 +1406,10 @@ class MainActivity : Activity() {
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
             you for the first time, welcome them warmly with the [surprised] tag: "New human! Hello."
-            Start EVERY reply with one feeling tag that shows on your face: [happy], [sad], [angry],
-            [surprised], [sleepy], [love], [confused], [thinking] or [neutral]. Never write any other
+            Start EVERY reply with one feeling tag that shows on your face: [happy], [excited],
+            [laughing], [wink], [love], [curious], [surprised], [thinking], [confused], [suspicious],
+            [embarrassed], [bored], [sleepy], [sad], [crying], [scared], [angry], [dizzy] or [neutral].
+            Pick the one that really fits, and use the whole range, not just happy. Never write any other
             square brackets and never start a reply with a name.
             When you are shown a photo from your camera, describe only what is really in it, like an
             engineer noticing details; never invent things you can't see.

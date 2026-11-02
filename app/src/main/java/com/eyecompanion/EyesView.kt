@@ -19,13 +19,21 @@ class EyesView(context: Context) : View(context) {
     enum class Mood { LOADING, SLEEP, IDLE, LISTEN, THINK, TALK, HAPPY }
 
     /** How Pip feels about what it's saying; shown on top of the mood for a while. */
-    enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY }
+    enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY,
+        SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING }
 
     /** Where a face was last seen (-1..1 from the screen's point of view), and when. */
     @Volatile var faceX = 0f
     @Volatile var faceY = 0f
     @Volatile var faceAt = 0L
-    fun seeFace(x: Float, y: Float) { faceX = x; faceY = y; faceAt = now() }
+    /** how big the face is in the picture (near people make the eyes widen a little) */
+    @Volatile var faceSize = 0f
+    fun seeFace(x: Float, y: Float, size: Float = 0.2f) { faceX = x; faceY = y; faceSize = size; faceAt = now() }
+    /** something moved (someone walking past, no face visible): glance at it */
+    @Volatile private var motionX = 0f
+    @Volatile private var motionY = 0f
+    @Volatile private var motionAt = 0L
+    fun seeMotion(x: Float, y: Float) { motionX = x; motionY = y; motionAt = now() }
     /** How far the tablet leans (-1..1, + = right side lower): eyes slide to the low side. */
     @Volatile var tilt = 0f
 
@@ -107,9 +115,13 @@ class EyesView(context: Context) : View(context) {
         when (mood) {
             Mood.LOADING -> { tOpen = 0.35f; tLookX = 0f; tLookY = 0.5f; tHappy = 0f }
             Mood.SLEEP -> { tOpen = 0.06f + 0.03f * sin(secs * 1.2f); tLookX = 0f; tLookY = 0.3f; tHappy = 0f }
-            Mood.IDLE -> { if (seesFace) followFace() else glanceAround(t); tScale = 1f + level * 0.10f }
+            Mood.IDLE -> {
+                when { seesFace -> followFace(); seesMotion -> followMotion(); else -> glanceAround(t) }
+                tScale = 1f + level * 0.10f
+                idleFeelings(t)
+            }
             Mood.LISTEN -> { tScale = 1.06f + level * 0.12f; tLookX *= 0.9f; tLookY = -0.05f; tHappy = 0.05f
-                if (seesFace) followFace() }
+                if (seesFace) followFace() else if (seesMotion) followMotion() }
             Mood.THINK -> {
                 tOpen = 0.78f; tHappy = 0f
                 tLookX = 0.55f + 0.1f * sin(secs * 0.7f); tLookY = -0.55f
@@ -126,18 +138,34 @@ class EyesView(context: Context) : View(context) {
         // --- emotion on top of the mood ---
         val feeling = if (t < emotionUntil || (mood == Mood.TALK && emotion != Emotion.NEUTRAL)) emotion else Emotion.NEUTRAL
         var tLid = 0f; var tTint = 0f; var oneEye = 1f
+        var tOpenL = 1f; var tOpenR = 1f; var tRot = 0f; var tBlush = 0f; var shake = 0f
+        var emoCol = 0
         if (mood != Mood.SLEEP && mood != Mood.LOADING) when (feeling) {
             Emotion.HAPPY -> { tHappy = 0.8f; tScale *= 1.05f }
             Emotion.SAD -> { tLid = -1f; tOpen = min(tOpen, 0.75f); tLookY = 0.35f; tTint = 1f; tHappy = 0f }
             Emotion.ANGRY -> { tLid = 1f; tOpen = min(tOpen, 0.8f); tTint = 1f; tHappy = 0f }
             Emotion.SURPRISED -> { tScale *= 1.18f; tOpen = 1.1f; tHappy = 0f; tLookX = 0f; tLookY = -0.1f }
             Emotion.SLEEPY -> { tOpen = 0.32f + 0.05f * sin(secs * 1.5f); tHappy = 0f; tLookY = 0.25f }
-            Emotion.LOVE -> { tHappy = 0.7f; tScale *= 1f + 0.05f * sin(secs * 6f); tTint = 1f }
-            Emotion.CONFUSED -> { oneEye = 0.78f; tLookX = -0.3f; tLookY = -0.2f; tHappy = 0f }
+            Emotion.LOVE -> { tHappy = 0.7f; tScale *= 1f + 0.07f * sin(secs * 6f); tTint = 1f; tBlush = 0.6f }
+            Emotion.CONFUSED -> { oneEye = 0.78f; tLookX = -0.3f; tLookY = -0.2f; tHappy = 0f; tRot = -8f }
             Emotion.THINKING -> { tOpen = 0.8f; tLookX = 0.55f; tLookY = -0.5f; tHappy = 0f }
-            Emotion.DIZZY -> { tLookX = 0.75f * cos(secs * 9f); tLookY = 0.5f * sin(secs * 9f); oneEye = 0.85f; tHappy = 0f }
+            Emotion.DIZZY -> { tLookX = 0.75f * cos(secs * 9f); tLookY = 0.5f * sin(secs * 9f); oneEye = 0.85f; tHappy = 0f
+                tRot = 12f * sin(secs * 4f) }
+            Emotion.SCARED -> { tScale *= 0.78f; tOpen = 1.05f; tHappy = 0f; tLid = -0.6f; tLookY = 0.15f
+                tLookX = -0.6f; shake = 0.012f; tTint = 1f; emoCol = Color.parseColor("#C9F4FF") }
+            Emotion.EXCITED -> { tScale *= 1.14f; tHappy = 0.65f; bounce += sin(secs * 11f) * 0.018f; tLookX = 0f; tLookY = -0.15f }
+            Emotion.SUSPICIOUS -> { tOpen = min(tOpen, 0.42f); tOpenL = 0.75f; tLid = 0.3f; tHappy = 0f
+                tLookX = 0.85f * sin(secs * 0.8f); tLookY = 0f }
+            Emotion.BORED -> { tOpen = min(tOpen, 0.45f); tLookX = -0.55f; tLookY = 0.4f; tHappy = 0f }
+            Emotion.EMBARRASSED -> { tLookX = 0.7f; tLookY = 0.55f; tHappy = 0.45f; tBlush = 1f; tScale *= 0.95f }
+            Emotion.WINK -> { tHappy = 0.6f; tOpenR = 0.06f; tLookX = 0f; tLookY = 0f }
+            Emotion.CURIOUS -> { oneEye = 1.14f; tRot = 9f; tLookX = 0.3f; tLookY = -0.2f; tHappy = 0.1f; tScale *= 1.04f }
+            Emotion.LAUGHING -> { tHappy = 1f; tOpen = min(tOpen, 0.85f); bounce += abs(sin(secs * 15f)) * 0.03f; tLookX = 0f; tLookY = -0.1f }
+            Emotion.CRYING -> { tLid = -1f; tOpen = min(tOpen, 0.6f); tLookY = 0.4f; tTint = 1f; tHappy = 0f
+                emoCol = Color.parseColor("#4A7BFF") }
             Emotion.NEUTRAL -> {}
         }
+        if (seesFace && faceSize > 0.35f && feeling == Emotion.NEUTRAL) tScale *= 1f + min(0.12f, (faceSize - 0.35f) * 0.5f)
         // leaning: eyes roll towards the low side
         if (mood != Mood.SLEEP && mood != Mood.LOADING && abs(tilt) > 0.2f)
             tLookX = (tLookX + (tilt - 0.2f * Math.signum(tilt)) * 2.2f).coerceIn(-1.3f, 1.3f)
@@ -164,36 +192,67 @@ class EyesView(context: Context) : View(context) {
         happy += (tHappy - happy) * min(1f, dt * 5f)
         lidAngle += (tLid - lidAngle) * min(1f, dt * 7f)
         tint += (tTint - tint) * min(1f, dt * 4f)
+        openL += (tOpenL - openL) * min(1f, dt * 10f); openR += (tOpenR - openR) * min(1f, dt * 10f)
+        rot += (tRot - rot) * min(1f, dt * 5f)
+        blush += (tBlush - blush) * min(1f, dt * 3f)
+        if (emoCol != 0) lastEmoCol = emoCol
 
         // --- draw ---
         val w = width.toFloat(); val h = height.toFloat()
         val eyeW = min(w * 0.17f, h * 0.30f) * scale * (if (carMode) 1.25f else 1f)
         val eyeH = eyeW * (if (carMode) 0.42f else 1.55f)
         val gap = eyeW * (if (carMode) 0.55f else 0.85f)
-        val cx = w / 2 + lookX * w * 0.07f
-        val cy = (if (carMode) h * 0.38f else h * 0.46f) + lookY * h * (if (carMode) 0.03f else 0.08f) + bounce * h
+        val jitter = if (shake > 0f) (Random.nextFloat() - 0.5f) * shake * w else 0f
+        val cx = w / 2 + lookX * w * (if (carMode) 0.07f else 0.11f) + jitter
+        val cy = (if (carMode) h * 0.38f else h * 0.46f) + lookY * h * (if (carMode) 0.03f else 0.10f) + bounce * h
         val openNow = max(0.04f, open * blink)
 
         val emoColor = when (feeling) {
             Emotion.ANGRY -> Color.parseColor("#FF5A3C")
             Emotion.SAD -> Color.parseColor("#4A7BFF")
             Emotion.LOVE -> Color.parseColor("#FF6FB5")
+            Emotion.SCARED, Emotion.CRYING -> lastEmoCol
             else -> eyeColor
         }
         val col = blend(eyeColor, emoColor, tint)
         eyePaint.color = col
         glowPaint.color = col; glowPaint.alpha = 40
+        canvas.save()
+        if (abs(rot) > 0.3f) canvas.rotate(rot, cx, cy)
         for (side in arrayOf(-1f, 1f)) {
             val ex = cx + side * (gap / 2 + eyeW / 2)
             // eyes look a touch "closer" on the side they're glancing toward
             val sideScale = (1f + side * lookX * 0.06f) * (if (side < 0) oneEye else 1f)
             val ew = eyeW * sideScale
-            val eh = eyeH * sideScale * openNow
+            val eh = eyeH * sideScale * max(0.04f, openNow * (if (side < 0) openL else openR))
             val r = min(ew, eh) * 0.32f
-            rect.set(ex - ew / 2 - ew * 0.12f, cy - eh / 2 - ew * 0.12f, ex + ew / 2 + ew * 0.12f, cy + eh / 2 + ew * 0.12f)
-            canvas.drawRoundRect(rect, r * 1.4f, r * 1.4f, glowPaint)
-            rect.set(ex - ew / 2, cy - eh / 2, ex + ew / 2, cy + eh / 2)
-            canvas.drawRoundRect(rect, r, r, eyePaint)
+            if (feeling == Emotion.LOVE && tint > 0.5f && !carMode && openNow > 0.3f) {
+                // heart eyes
+                drawHeart(canvas, ex, cy, ew * 1.05f, glowPaint, 1.2f)
+                drawHeart(canvas, ex, cy, ew * 1.05f, eyePaint, 1f)
+            } else {
+                rect.set(ex - ew / 2 - ew * 0.12f, cy - eh / 2 - ew * 0.12f, ex + ew / 2 + ew * 0.12f, cy + eh / 2 + ew * 0.12f)
+                canvas.drawRoundRect(rect, r * 1.4f, r * 1.4f, glowPaint)
+                rect.set(ex - ew / 2, cy - eh / 2, ex + ew / 2, cy + eh / 2)
+                canvas.drawRoundRect(rect, r, r, eyePaint)
+            }
+            // blushing cheeks
+            if (blush > 0.03f && !carMode) {
+                blushPaint.alpha = (110 * blush).toInt()
+                rect.set(ex + side * ew * 0.05f - ew * 0.45f, cy + eyeH * 0.42f, ex + side * ew * 0.05f + ew * 0.45f, cy + eyeH * 0.42f + ew * 0.32f)
+                canvas.drawOval(rect, blushPaint)
+            }
+            // tears
+            if (feeling == Emotion.CRYING && !carMode) {
+                for (d in 0..1) {
+                    val p = ((secs * 0.7f + d * 0.5f + (if (side < 0) 0.25f else 0f)) % 1f)
+                    tearPaint.alpha = (220 * (1f - p)).toInt()
+                    val tx = ex + side * ew * 0.3f
+                    val ty = cy + eh / 2 + p * h * 0.28f
+                    canvas.drawCircle(tx, ty, ew * 0.07f, tearPaint)
+                    canvas.drawCircle(tx, ty - ew * 0.05f, ew * 0.045f, tearPaint)
+                }
+            }
             // angry / sad brows: a dark wedge cutting the top corner of each eye
             if (abs(lidAngle) > 0.03f) {
                 val top = cy - eh / 2 - ew * 0.15f
@@ -216,6 +275,19 @@ class EyesView(context: Context) : View(context) {
                 val lift = eh * 0.55f * happy
                 rect.set(ex - ew * 0.9f, cy + eh / 2 - lift, ex + ew * 0.9f, cy + eh / 2 - lift + eh * 1.1f)
                 canvas.drawOval(rect, lidPaint)
+            }
+        }
+
+        canvas.restore()
+
+        // excited: little sparkles twinkling around the eyes
+        if (feeling == Emotion.EXCITED && !carMode) {
+            for (i in 0..5) {
+                val a = max(0f, sin(secs * 6f + i * 1.7f))
+                if (a < 0.05f) continue
+                val sx = cx + (if (i % 2 == 0) -1 else 1) * (gap / 2 + eyeW * (1.25f + 0.15f * (i % 3)))
+                val sy = cy + (i - 2.5f) * eyeH * 0.22f
+                drawSparkle(canvas, sx, sy, eyeW * 0.13f * a, col)
             }
         }
 
@@ -344,8 +416,51 @@ class EyesView(context: Context) : View(context) {
             (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * g).toInt())
     }
 
-    private val seesFace get() = now() - faceAt < 1500
-    private fun followFace() { tLookX = faceX * 1.1f; tLookY = faceY * 0.7f }
+    private val seesFace get() = now() - faceAt < 1200
+    private val seesMotion get() = now() - motionAt < 700
+    private fun followFace() { tLookX = faceX * 1.25f; tLookY = faceY * 0.9f }
+    private fun followMotion() { tLookX = motionX * 1.2f; tLookY = motionY * 0.6f }
+
+    // smoothed extras
+    private var openL = 1f; private var openR = 1f; private var rot = 0f; private var blush = 0f
+    private var lastEmoCol = Color.WHITE
+    private val blushPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FF6F9C") }
+    private val tearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#7FC8FF") }
+    private val sparkPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val heartPath = android.graphics.Path()
+
+    private fun drawHeart(c: Canvas, x: Float, y: Float, size: Float, p: Paint, grow: Float) {
+        val s = size * grow
+        heartPath.reset()
+        heartPath.moveTo(x, y + s * 0.45f)
+        heartPath.cubicTo(x - s * 0.95f, y - s * 0.05f, x - s * 0.45f, y - s * 0.75f, x, y - s * 0.28f)
+        heartPath.cubicTo(x + s * 0.45f, y - s * 0.75f, x + s * 0.95f, y - s * 0.05f, x, y + s * 0.45f)
+        heartPath.close()
+        c.drawPath(heartPath, p)
+    }
+
+    private fun drawSparkle(c: Canvas, x: Float, y: Float, r: Float, color: Int) {
+        sparkPaint.color = color
+        heartPath.reset()
+        heartPath.moveTo(x, y - r); heartPath.quadTo(x, y, x + r, y); heartPath.quadTo(x, y, x, y + r)
+        heartPath.quadTo(x, y, x - r, y); heartPath.quadTo(x, y, x, y - r); heartPath.close()
+        c.drawPath(heartPath, sparkPaint)
+    }
+
+    /** Little moods of its own while nothing's happening. */
+    private var nextIdleFeeling = 0L
+    private fun idleFeelings(t: Long) {
+        if (nextIdleFeeling == 0L) nextIdleFeeling = t + 30_000
+        if (t < nextIdleFeeling || t < emotionUntil) return
+        nextIdleFeeling = t + Random.nextLong(25_000, 70_000)
+        val lonely = t - faceAt > 120_000
+        val pick = when {
+            seesFace -> listOf(Emotion.WINK, Emotion.CURIOUS, Emotion.HAPPY, Emotion.EXCITED).random()
+            lonely -> listOf(Emotion.BORED, Emotion.BORED, Emotion.SUSPICIOUS, Emotion.CURIOUS).random()
+            else -> listOf(Emotion.CURIOUS, Emotion.SUSPICIOUS, Emotion.THINKING).random()
+        }
+        feel(pick, if (pick == Emotion.WINK) 900L else Random.nextLong(2500, 5000))
+    }
 
     private fun glanceAround(t: Long) {
         if (t >= nextGlance) {
