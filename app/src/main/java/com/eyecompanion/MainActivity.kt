@@ -693,7 +693,31 @@ class MainActivity : Activity() {
     }
 
     /** Apply car mode (or home mode) to the eyes, voice, brain and screen. */
+    /** "" = tablet voice, otherwise an Orpheus voice name. Default: Troy, when there's a key. */
+    private val voiceChoice get() = prefs.getString("voiceChoice", "troy") ?: "troy"
+
+    private fun applyVoice() {
+        voice?.cloudKey = { if (online.enabled) online.apiKey else "" }
+        voice?.cloudVoice = voiceChoice
+    }
+
+    private fun chooseVoice() {
+        val names = arrayOf("Troy (male)", "Austin (male)", "Daniel (male)", "Autumn (female)", "Diana (female)",
+            "Hannah (female)", "Tablet voice (offline)")
+        val ids = arrayOf("troy", "austin", "daniel", "autumn", "diana", "hannah", "")
+        val cur = ids.indexOf(voiceChoice)
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(if (online.enabled) "Pip's voice" else "Pip's voice (online voices need the online brain key)")
+            .setItems(names.mapIndexed { i, n -> (if (i == cur) "✓ " else "") + n }.toTypedArray()) { _, which ->
+                prefs.edit().putString("voiceChoice", ids[which]).apply()
+                applyVoice()
+                speakLine(if (ids[which].isEmpty()) "Tablet voice. Is fine." else "New voice. Amaze! Question: you like?")
+            }
+            .show()
+    }
+
     private fun applyMode() {
+        applyVoice()
         val car = carMode
         eyes.carMode = car
         brain?.maxReplyTokens = if (car) 60 else Brain.MAX_REPLY_TOKENS
@@ -829,6 +853,7 @@ class MainActivity : Activity() {
                 else "Recognise voices: OFF",
             "Forget everyone's voices",
             if (onlineEars) "Online hearing (Whisper): ON" else "Online hearing (Whisper): OFF",
+            "Change voice…",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -863,6 +888,7 @@ class MainActivity : Activity() {
                         speakLine(if (voiceNames) "Yes yes yes. I learn who is who." else "Okay. Everyone is stranger now.")
                     }
                     16 -> { voices.forgetAll(); pendingIntro = null; speakLine("Done. All voices forgot.") }
+                    18 -> chooseVoice()
                     17 -> {
                         onlineEars = !onlineEars
                         speakLine(if (onlineEars) "Better ears on. Amaze." else "Okay. Own ears only.")
