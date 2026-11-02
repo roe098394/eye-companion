@@ -22,6 +22,10 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
     private var haveRest = false
     /** -1..1, how far the screen leans: + = right side lower */
     var onTilt: (Float) -> Unit = {}
+    /** lying flat on its back (or face) for a while; called again every few minutes while it stays flat */
+    var onLyingFlat: (minutes: Int) -> Unit = {}
+    private var flatSince = 0L
+    private var lastFlatMoan = 0L
 
     private val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val accel: Sensor? = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -93,6 +97,14 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
             else -> g[0]
         }
         onTilt((-sx / 9.81f).coerceIn(-1f, 1f))
+
+        // flat = gravity straight through the screen
+        val gl = sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2])
+        if (gl > 0f && Math.abs(g[2]) / gl > 0.88f && !handled) {
+            if (flatSince == 0L) flatSince = now
+            val mins = ((now - flatSince) / 60_000).toInt()
+            if (now - flatSince > 120_000 && now - lastFlatMoan > 8 * 60_000) { lastFlatMoan = now; onLyingFlat(mins) }
+        } else { flatSince = 0L; lastFlatMoan = 0L }
     }
 
     private fun angleBetween(a: FloatArray, b: FloatArray): Double {

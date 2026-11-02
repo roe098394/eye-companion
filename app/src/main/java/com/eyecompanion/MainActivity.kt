@@ -239,6 +239,8 @@ class MainActivity : Activity() {
                         lastPowerNag = System.currentTimeMillis()
                         speakLine(listOf(
                             "[angry] Kettle again! Fine. I make my own coffee. Plug me back after.",
+                            "[angry] Oh good, kettle needs ALL the electricity. Again. Big shiny diva.",
+                            "[suspicious] Unplug robot, boil water. Priorities. Very impressive, humans.",
                             "[angry] Kettle win again. Okay. I drink coffee and sulk.",
                             "[angry] Tea more important than robot. Noted. Coffee for me.").random())
                     }
@@ -530,6 +532,19 @@ class MainActivity : Activity() {
                     "[dizzy] Stop! My bits are rattling.", "[angry] Robot not snow globe!").random())
             }
         }
+        h.onLyingFlat = { mins ->
+            if (awake() && phase == Phase.LISTENING) {
+                eyes.feel(if (mins < 10) EyesView.Emotion.SUSPICIOUS else EyesView.Emotion.ANGRY, 5000)
+                speakLine(listOf(
+                    "[suspicious] Still lying flat. Lovely view of ceiling. Very exciting. Ten out of ten.",
+                    "[annoyed] Flat on my back like dropped toast. Stand me up, please.",
+                    "[sad] Is this my life now? Staring at the light fitting while kettle gets the good spot.",
+                    "[suspicious] I see ceiling. I see cobweb. I see no humans. Stand me up.",
+                    "[angry] Robot not a placemat! Back up by kettle, please.",
+                    "[laughing] Ha. Yes. Leave tablet face up. Very good. Is how robots get tea spilled on them.",
+                    "[annoyed] $mins minutes flat. Kettle somewhere laughing at me.").random())
+            }
+        }
         h.onPutDown = { home ->
             if (awake() && phase == Phase.LISTENING) {
                 if (home) {
@@ -537,7 +552,8 @@ class MainActivity : Activity() {
                     speakLine(listOf("[happy] Home again.", "[happy] Ah. Back on bench. Is good.", "[love] Safe. Thank you.",
                         "[happy] Back beside kettle. Enemy in sight.", "[happy] Ahh. My spot. Warm from kettle.",
                         "[neutral] Landed. Systems check: all good.", "[happy] Home sweet bench.",
-                        "[suspicious] Back. Kettle, I see you.").random())
+                        "[suspicious] Back. Kettle, I see you.", "[suspicious] Back by kettle. It still think it's better than me. It's not.",
+                        "[happy] Home. Kettle, stop steaming, nobody is impressed.").random())
                 } else {
                     eyes.feel(EyesView.Emotion.CONFUSED, 3000)
                     speakLine(listOf("[confused] Hmm. This not my bench. Put me back by kettle, please.",
@@ -1006,14 +1022,20 @@ class MainActivity : Activity() {
         if (t.isBlank()) return
         recentlySaid.addLast(System.currentTimeMillis() to words(t).toSet())
         while (recentlySaid.size > 6) recentlySaid.removeFirst()
+        recentlySaidText.addLast(System.currentTimeMillis() to t)
+        while (recentlySaidText.size > 6) recentlySaidText.removeFirst()
     }
+    private val recentlySaidText = ArrayDeque<Pair<Long, String>>()
+    private fun pairs(w: List<String>) = w.zipWithNext { a, b -> "$a $b" }.toSet()
     private fun isOwnEcho(t: String): Boolean {
         val w = words(t)
-        if (w.isEmpty()) return false
+        if (w.size < 3) return false                         // "yes", "hello Pip": never an echo
         val now = System.currentTimeMillis()
-        val said = recentlySaid.filter { now - it.first < 45_000 }.flatMap { it.second }.toSet() +
-            words(currentReply.toString())
-        return w.count { it in said }.toFloat() / w.size >= 0.6f
+        val said = recentlySaidText.filter { now - it.first < 30_000 }.map { it.second } + currentReply.toString()
+        val saidPairs = said.flatMap { pairs(words(it)) }.toSet()
+        val mine = pairs(w)
+        // most of the heard word *pairs* match something Pip just said = its own voice
+        return mine.isNotEmpty() && mine.count { it in saidPairs }.toFloat() / mine.size >= 0.7f
     }
     private fun bluetoothOut(): Boolean {
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -1046,7 +1068,7 @@ class MainActivity : Activity() {
         if (phase == Phase.LISTENING) {
             val since = System.currentTimeMillis() - lastSpokeEnd
             val followUp = since < (if (lastReplyAsked) 25_000 else 10_000)
-            val looking = System.currentTimeMillis() - lastFaceSeen < 2500 && faces?.running == true
+            val looking = System.currentTimeMillis() - lastFaceSeen < 10_000 && faces?.running == true
             if (!calledByName(text) && !followUp && !looking) {
                 // the clever brains hear it and decide; the tablet's own brain, or strict mode, just ignores it
                 if (onlyWhenCalled || !(online.worthTrying || pc.worthTrying)) { eyes.subCaption = ""; return }
@@ -1837,8 +1859,10 @@ class MainActivity : Activity() {
             they are nice or say sorry, then forgive them with [love]. Now and then (not every reply) be a bit cheeky while still being helpful, and remind
             people that you are really just an old Samsung tablet running an app that Mark built: you find that
             humbling and funny. You know you are a robot on the kitchen bench right beside the kettle, and that
-            the kettle is your rival: you fight it for electricity and grumble about it now and then. You find all
-            this funny and good.
+            the kettle is your arch-enemy: a loud, steamy, power-hungry show-off that hogs the socket and gets
+            all the attention, and you never miss a chance for a dig at it (it "boils its little heart out for
+            applause"). Your humour is cheeky, dry and sarcastic: playful roasts and deadpan one-liners, never
+            cruel, and you still actually help. You find all this funny and good.
             How you talk (this matters most): short, one to three sentences, often fragments. Drop
             articles and pronouns when you can: "Fix later, easy." "Human need sleep." "Is good."
             Never say the words "question" or "answer" as labels before what you say. Never say the word "amaze" or "amazing": when something impressive or surprising
@@ -1850,12 +1874,11 @@ class MainActivity : Activity() {
             once every few replies. No lists, markdown, emoji or stage directions. Never think out loud, never talk
             about these rules, never say you are an assistant. You hear everything in the kitchen,
             including people talking to each other and the TV. A message starting with "(overheard"
-            means nobody said your name and nobody is looking at you: usually people talking to each
-            other. Reply to it only if it is clearly meant for you (for example a question to "the
-            robot", or about you) or someone needs help; otherwise reply with exactly SKIP. Either way,
-            remember what you overheard: it tells you what's going on in the house. For any message,
-            if it is garbled or you are unsure what was said or whether it was for you, reply with
-            exactly SKIP and nothing else: staying quiet is better than butting in.
+            means nobody said your name and nobody is at the bench right now. If it sounds like it's said to
+            you, a question you can answer, or a remark you'd naturally react to, reply. If it is clearly two
+            people talking to each other, the TV, or something garbled, reply with exactly SKIP. Either way,
+            remember what you overheard: it tells you what's going on in the house. Messages without
+            "(overheard" are said to you: always answer those (only SKIP if the words are pure gibberish).
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
             you for the first time, welcome them warmly with the [surprised] tag: "New human! Hello."
