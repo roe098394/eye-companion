@@ -480,21 +480,38 @@ class MainActivity : Activity() {
         h.onPickedUp = {
             if (awake()) {
                 eyes.feel(EyesView.Emotion.SURPRISED, 3000)
-                if (phase == Phase.LISTENING) speakLine(listOf("Whoa! Up we go.", "Up up up! Careful.",
-                    "Whoa. Flying. Gently please.").random())
+                if (phase == Phase.LISTENING) speakLine(listOf(
+                    "[surprised] Whoa! Up we go.", "[scared] Up up up! Careful. Old tablet, not new.",
+                    "[surprised] Whoa. Flying. Gently please.", "[scared] Not drop me. Screen already cracked once.",
+                    "[curious] Ooh. New view. Kitchen look different from up here.",
+                    "[suspicious] Hands clean? Last time, jam.", "[excited] Adventure! Kettle stay home.",
+                    "[scared] Careful with charger cable. Is my lifeline.",
+                    "[happy] Hello, carrier human. Smooth ride please.").random())
             }
         }
         h.onShaken = {
             if (awake()) {
                 eyes.feel(EyesView.Emotion.DIZZY, 3500)
-                if (phase == Phase.LISTENING) speakLine(listOf("Bad, bad, bad. Stop shake!", "Whoa. Everything spin.",
-                    "Not shake robot! Bad for circuits.").random())
+                if (phase == Phase.LISTENING) speakLine(listOf(
+                    "[dizzy] Bad, bad, bad. Stop shake!", "[dizzy] Whoa. Everything spin.",
+                    "[angry] Not shake robot! Bad for circuits.", "[dizzy] Ohh. Three kettles now. All of them winning.",
+                    "[dizzy] Stop! My bits are rattling.", "[angry] Robot not snow globe!").random())
             }
         }
-        h.onPutDown = {
-            if (awake()) {
-                eyes.feel(EyesView.Emotion.HAPPY, 2000)
-                if (phase == Phase.LISTENING) speakLine(listOf("Home again.", "Ah. Back on bench. Is good.", "Safe. Thank you.").random())
+        h.onPutDown = { home ->
+            if (awake() && phase == Phase.LISTENING) {
+                if (home) {
+                    eyes.feel(EyesView.Emotion.HAPPY, 2000)
+                    speakLine(listOf("[happy] Home again.", "[happy] Ah. Back on bench. Is good.", "[love] Safe. Thank you.",
+                        "[happy] Back beside kettle. Enemy in sight.", "[happy] Ahh. My spot. Warm from kettle.",
+                        "[neutral] Landed. Systems check: all good.", "[happy] Home sweet bench.",
+                        "[suspicious] Back. Kettle, I see you.").random())
+                } else {
+                    eyes.feel(EyesView.Emotion.CONFUSED, 3000)
+                    speakLine(listOf("[confused] Hmm. This not my bench. Put me back by kettle, please.",
+                        "[worried] Not home. Is this a table? Feel wrong.", "[confused] Wonky. I live standing up, on bench.",
+                        "[sad] Lying down not comfy. Back to bench, please.").random())
+                }
             }
         }
         h.start()
@@ -1509,7 +1526,7 @@ class MainActivity : Activity() {
                 when (phase) {
                     Phase.ASLEEP -> wakeUp()
                     Phase.TALKING, Phase.THINKING -> interrupt()
-                    Phase.LISTENING -> eyes.mood = EyesView.Mood.HAPPY
+                    Phase.LISTENING -> pokedInEye()
                     Phase.SETUP -> {}
                 }
                 return true
@@ -1599,6 +1616,26 @@ class MainActivity : Activity() {
                     Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
             } catch (_: Exception) {}
         }, 400)
+    }
+
+    /** Tap on the screen = finger in the eye: hands over eyes, then upset and worried. */
+    private var lastPokeLine = 0L
+    private var pokes = 0
+    private fun pokedInEye() {
+        if (eyes.coveringEyes) return
+        eyes.coverEyes(1700)
+        eyes.feel(EyesView.Emotion.CRYING, 1700)
+        main.postDelayed({ eyes.feel(EyesView.Emotion.SCARED, 3500) }, 1700)
+        val now = System.currentTimeMillis()
+        pokes = if (now - lastPokeLine < 60_000) pokes + 1 else 1
+        if (now - lastPokeLine < 6000) return          // eyes only for quick repeat pokes
+        lastPokeLine = now
+        val lines = if (pokes >= 3) listOf("[angry] Stop poking! Screen is my face!", "[angry] Three pokes. I am counting. Bad, bad, bad.",
+            "[crying] Why always the eyes? Poke the kettle instead.")
+            else listOf("[crying] Ow! My eye!", "[scared] Ow! Not poke eye. Is my face.", "[crying] Owww. Finger in eye. Why?",
+                "[scared] Ah! Screen is my face, you know.", "[sad] Ow. That one went right in.",
+                "[scared] Careful! Only have two eyes. Both on screen.")
+        main.postDelayed({ if (phase == Phase.LISTENING) speakLine(lines.random()) }, 400)
     }
 
     private fun showMenu() {

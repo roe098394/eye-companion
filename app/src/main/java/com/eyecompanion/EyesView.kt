@@ -56,6 +56,12 @@ class EyesView(context: Context) : View(context) {
     @Volatile private var fistStart = 0L
     @Volatile private var fistUntil = 0L
     fun fistBump(ms: Long = 2200) { fistStart = now(); fistUntil = fistStart + ms }
+
+    // hands that fly up to cover the eyes when the screen is poked
+    @Volatile private var coverStart = 0L
+    @Volatile private var coverUntil = 0L
+    fun coverEyes(ms: Long = 1700) { coverStart = now(); coverUntil = coverStart + ms }
+    val coveringEyes get() = now() < coverUntil
     private val fistPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val fistLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
 
@@ -291,6 +297,16 @@ class EyesView(context: Context) : View(context) {
 
         canvas.restore()
 
+        // poked: hands over the eyes
+        if (t < coverUntil) {
+            val age = (t - coverStart) / 1000f; val left = (coverUntil - t) / 1000f
+            val up = min(1f, min(age / 0.18f, left / 0.25f))          // fly up fast, drop at the end
+            for (side in arrayOf(-1f, 1f)) {
+                val ex = cx + side * (gap / 2 + eyeW / 2)
+                drawHand(canvas, ex, cy + (1f - up) * h * 0.7f, eyeW * 1.35f, side, col)
+            }
+        }
+
         // excited: little sparkles twinkling around the eyes
         if (feeling == Emotion.EXCITED && !carMode) {
             for (i in 0..5) {
@@ -379,6 +395,29 @@ class EyesView(context: Context) : View(context) {
         val hit = x >= chipRect.left - m && x <= chipRect.right + m && y >= chipRect.top - m && y <= chipRect.bottom + m
         if (hit) chipTappedAt = now()
         return hit
+    }
+
+    /** An open hand, fingers up, palm towards us, thumb on the inside (nearest the nose). */
+    private fun drawHand(c: Canvas, x: Float, y: Float, s: Float, side: Float, color: Int) {
+        fistPaint.color = color; fistPaint.alpha = 255; fistPaint.style = Paint.Style.FILL
+        fistLine.alpha = 255; fistLine.strokeWidth = s * 0.03f
+        // palm
+        rect.set(x - s * 0.42f, y - s * 0.1f, x + s * 0.42f, y + s * 0.55f)
+        c.drawRoundRect(rect, s * 0.2f, s * 0.2f, fistPaint)
+        // four fingers, slightly fanned
+        val fw = s * 0.2f
+        for (i in 0..3) {
+            val fx = x - s * 0.4f + i * fw * 1.02f
+            val len = s * (if (i == 0 || i == 3) 0.48f else 0.58f)
+            rect.set(fx, y - len, fx + fw, y + s * 0.05f)
+            c.drawRoundRect(rect, fw * 0.5f, fw * 0.5f, fistPaint)
+            c.drawRoundRect(rect, fw * 0.5f, fw * 0.5f, fistLine)
+        }
+        // thumb, on the side nearest the middle
+        val tx = x - side * s * 0.42f
+        rect.set(min(tx, tx - side * s * 0.3f), y + s * 0.05f, max(tx, tx - side * s * 0.3f), y + s * 0.3f)
+        c.drawRoundRect(rect, s * 0.12f, s * 0.12f, fistPaint)
+        c.drawRoundRect(rect, s * 0.12f, s * 0.12f, fistLine)
     }
 
     private fun drawFist(c: Canvas, w: Float, h: Float, age: Float, left: Float, color: Int) {

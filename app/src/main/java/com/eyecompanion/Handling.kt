@@ -16,7 +16,10 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
 
     var onPickedUp: () -> Unit = {}
     var onShaken: () -> Unit = {}
-    var onPutDown: () -> Unit = {}
+    /** [backInPlace] = resting the same way up as before it was picked up (back on the bench). */
+    var onPutDown: (backInPlace: Boolean) -> Unit = {}
+    private val restG = FloatArray(3)
+    private var haveRest = false
     /** -1..1, how far the screen leans: + = right side lower */
     var onTilt: (Float) -> Unit = {}
 
@@ -70,8 +73,13 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
         } else if (level < 0.3f) {
             if (movingSince != 0L) { movingSince = 0L; stillSince = now }
             if (stillSince == 0L) stillSince = now
-            // put down: still for 2.5 s after being handled
-            if (handled && now - lastHandledMove > 2500) { handled = false; onPutDown() }
+            // remember how it sits when settled (on the bench), to recognise it later
+            if (!handled && now - stillSince > (if (haveRest) 600_000L else 5000L)) { g.copyInto(restG); haveRest = true }   // home = where it settles for long
+            // put down: still for 3.5 s after being handled; is it sitting the way it did on the bench?
+            if (handled && now - lastHandledMove > 3500) {
+                handled = false
+                onPutDown(!haveRest || angleBetween(g, restG) < 15.0)
+            }
         } else if (movingSince != 0L && now - movingSince > 1500 && !handled) {
             // gentle wobble that never became a pick-up: start counting stillness again
             movingSince = 0L; stillSince = now
@@ -85,5 +93,12 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
             else -> g[0]
         }
         onTilt((-sx / 9.81f).coerceIn(-1f, 1f))
+    }
+
+    private fun angleBetween(a: FloatArray, b: FloatArray): Double {
+        val dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+        val la = sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); val lb = sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2])
+        if (la == 0f || lb == 0f) return 0.0
+        return Math.toDegrees(Math.acos((dot / (la * lb)).toDouble().coerceIn(-1.0, 1.0)))
     }
 }
