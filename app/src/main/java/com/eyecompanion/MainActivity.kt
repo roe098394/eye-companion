@@ -460,7 +460,7 @@ class MainActivity : Activity() {
         faces?.grabJpeg { jpeg ->
             if (jpeg == null) return@grabJpeg
             thread(name = "who") {
-                val yes = online.yesNo(jpeg, "Is there a woman or girl wearing glasses in this photo?")
+                val yes = online.yesNo(jpeg, "Is there an adult woman (not a child) wearing glasses in this photo?")
                 if (yes == true) main.post { remindTablets() }
             }
         }
@@ -1002,8 +1002,10 @@ class MainActivity : Activity() {
     private var lastReplyAsked = false
     private fun nameRegex(): Regex {
         val n = Regex.escape(companionName.lowercase())
-        // Pip often gets heard as pipp / pep / pipe / pips
-        val extra = if (companionName.equals("Pip", true)) "|pipp?s?|pep|pipe|peep" else ""
+        // Pip often gets misheard: any 3-letter word starting with p counts (pep, pop, pit, pick...),
+        // except everyday words like "put", "pan" or "pot" that people say in a kitchen
+        val extra = if (companionName.equals("Pip", true))
+            "|pipp?s?|pipe|peep|pick|p(?!(?:ut|ay|an|en|er|ub|ie|ot|al|ad|at|aw|eg|et|ro|ls)\\b)[a-z]{2}" else ""
         return Regex("\\b(hey |hi |ok |okay )?($n$extra)\\b[,.!?]?", RegexOption.IGNORE_CASE)
     }
     private fun updateListenChip() {
@@ -1888,6 +1890,12 @@ class MainActivity : Activity() {
             people talking to each other, the TV, or something garbled, reply with exactly SKIP. Either way,
             remember what you overheard: it tells you what's going on in the house. Messages without
             "(overheard" are said to you: always answer those (only SKIP if the words are pure gibberish).
+            The people in the house: Mark (he built you and this app); Laura (a woman with glasses, she
+            looks after you, so be extra sweet to her); Sophie (cheeky: give her playful banter back);
+            Amelia (a smaller girl with glasses, shy: be gentle and encouraging, never put her on the
+            spot); Chloe (small and cute: keep it simple, kind and playful). There are children in the
+            house, so keep everything child-friendly: no swearing and no grown-up topics. Never guess who
+            is talking from a description; only use a name when the message gives it.
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
             you for the first time, welcome them warmly with the [surprised] tag: "New human! Hello."
