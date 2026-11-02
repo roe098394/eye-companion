@@ -34,6 +34,7 @@ class Brain(private val modelPath: String, private val systemPrompt: () -> Strin
     fun load(onDone: (Boolean) -> Unit) = worker.execute {
         handle = nativeLoad(modelPath, CONTEXT, THREADS, true)
         if (handle == 0L) handle = nativeLoad(modelPath, CONTEXT, THREADS, false)
+        if (handle == 0L) { System.gc(); handle = nativeLoad(modelPath, 512, THREADS, true) }   // less memory for its notes
         if (handle == 0L) lastError = nativeLastError().trim()
         onDone(handle != 0L)
     }

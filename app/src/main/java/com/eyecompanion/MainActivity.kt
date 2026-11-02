@@ -481,7 +481,9 @@ class MainActivity : Activity() {
                 val b = Brain(llm.absolutePath) { systemPrompt() }
                 brain = b
                 b.load { ok ->
-                    if (ok) {
+                    // the smallest brain doesn't fit: carry on without it (online / PC brains still work)
+                    val without = !ok && canGoWithoutBrain(llm)
+                    if (ok || without) {
                         try {
                             LibVosk.setLogLevel(LogLevel.WARNINGS)
                             voskModel = Model(vosk.absolutePath)
@@ -496,7 +498,11 @@ class MainActivity : Activity() {
                         }
                     }
                     main.post {
-                        if (!ok) { brainFailed(llm, b.lastError); return@post }
+                        if (!ok && !without) { brainFailed(llm, b.lastError); return@post }
+                        if (without) {
+                            brain = null
+                            eyes.subCaption = "My own brain doesn't fit in memory right now: using the online/PC brain."
+                        }
                         prefs.edit().remove("brainRetried").apply()
                         voice = Voice(this) { ttsOk ->
                             main.post {
@@ -590,6 +596,13 @@ class MainActivity : Activity() {
     }
 
     /** The brain wouldn't start: try a fresh download once, then fall back to a smaller brain. */
+    private fun canGoWithoutBrain(file: File): Boolean {
+        val current = chosenBrain()
+        if (file.parentFile != filesDir || Downloads.BRAINS.indexOf(current) > 0) return false
+        val sizeOk = kotlin.math.abs(file.length() / 1_000_000 - current.sizeMb) < current.sizeMb / 12
+        return sizeOk && (online.enabled || pc.host != null)
+    }
+
     private fun brainFailed(file: File, why: String) {
         val current = chosenBrain()
         val custom = file.parentFile != filesDir
@@ -1000,7 +1013,10 @@ class MainActivity : Activity() {
         // Cleverest available first: online, then the PC, then the tablet's own brain.
         val askTablet = {
             main.post { if (id == replyId) eyes.subCaption = shown }
-            brain?.ask(text, onToken, onDone) ?: onDone("")
+            brain?.ask(text, onToken, onDone) ?: run {
+                val sorry = "[sad] Not think right now. No internet, and own brain too big for tablet."
+                onToken(sorry); onDone(sorry)
+            }
             Unit
         }
         val askPc = {
