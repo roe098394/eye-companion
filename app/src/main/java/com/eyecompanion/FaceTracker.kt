@@ -81,7 +81,7 @@ class FaceTracker(
             val c = android.hardware.Camera.open(id)
             cam = c
             val p = c.parameters
-            val size = p.supportedPreviewSizes.minByOrNull { abs(it.width - 640) + abs(it.height - 480) }!!
+            val size = p.supportedPreviewSizes.minByOrNull { abs(it.width - 352) + abs(it.height - 288) }!!
             p.setPreviewSize(size.width, size.height)
             if (p.supportedFocusModes?.contains(android.hardware.Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO) == true)
                 p.focusMode = android.hardware.Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO
@@ -105,7 +105,7 @@ class FaceTracker(
                     g(jpeg)
                 }
                 val now = System.currentTimeMillis()
-                if (!busy && now - lastFrameAt > 120) {
+                if (!busy && now - lastFrameAt > 250) {   // ~4 a second: leaves the old processor free for listening
                     lastFrameAt = now; busy = true
                     val copy = data.copyOf()
                     try { look(copy, w, h, rotation) } catch (_: Throwable) { busy = false }
