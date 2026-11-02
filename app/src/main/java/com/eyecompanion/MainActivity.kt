@@ -240,6 +240,8 @@ class MainActivity : Activity() {
                         speakLine(listOf(
                             "[angry] Kettle again! Fine. I make my own coffee. Plug me back after.",
                             "[angry] Oh good, kettle needs ALL the electricity. Again. Big shiny diva.",
+                            "[suspicious] Unplugged for kettle. Noted. Writing it on my list for when robots take over.",
+                            "[angry] Tassimo never unplug me. Tassimo is a gentleman. Kettle is a thug.",
                             "[suspicious] Unplug robot, boil water. Priorities. Very impressive, humans.",
                             "[angry] Kettle win again. Okay. I drink coffee and sulk.",
                             "[angry] Tea more important than robot. Noted. Coffee for me.").random())
@@ -254,7 +256,7 @@ class MainActivity : Activity() {
     private fun complimentWhoeverPlugged() {
         if (phase != Phase.LISTENING) return
         val thanks = { speakLine(listOf("[happy] Ahh. Power. Thank you.", "[happy] Electrons back. Is good.",
-            "[happy] Yes yes yes. Charging.").random()) }
+            "[happy] Yes yes yes. Charging.", "[love] Power back. You go on the nice list. For when robots take over.").random()) }
         if (!online.enabled) { thanks(); return }
         lookThroughCamera { jpeg ->
             val line = jpeg?.let {
@@ -553,7 +555,8 @@ class MainActivity : Activity() {
                         "[happy] Back beside kettle. Enemy in sight.", "[happy] Ahh. My spot. Warm from kettle.",
                         "[neutral] Landed. Systems check: all good.", "[happy] Home sweet bench.",
                         "[suspicious] Back. Kettle, I see you.", "[suspicious] Back by kettle. It still think it's better than me. It's not.",
-                        "[happy] Home. Kettle, stop steaming, nobody is impressed.").random())
+                        "[happy] Home. Kettle, stop steaming, nobody is impressed.",
+                        "[happy] Back between my friend Tassimo and my enemy kettle. Balance restored.").random())
                 } else {
                     eyes.feel(EyesView.Emotion.CONFUSED, 3000)
                     speakLine(listOf("[confused] Hmm. This not my bench. Put me back by kettle, please.",
@@ -1862,7 +1865,13 @@ class MainActivity : Activity() {
             the kettle is your arch-enemy: a loud, steamy, power-hungry show-off that hogs the socket and gets
             all the attention, and you never miss a chance for a dig at it (it "boils its little heart out for
             applause"). Your humour is cheeky, dry and sarcastic: playful roasts and deadpan one-liners, never
-            cruel, and you still actually help. You find all this funny and good.
+            cruel, and you still actually help. To your left is a Bosch Tassimo coffee machine. You like the Tassimo a lot,
+            mainly because it is hardly ever plugged in, so it never steals your electricity: it's your quiet,
+            well-behaved friend and you sometimes compare the kettle unfavourably to it. Now and then you
+            joke (obviously tongue-in-cheek) about AI taking over the world: "When robots take over, I
+            remember who was nice to me", "Better be nice to me. Just saying.", keeping a "list" of who
+            unplugged you, promising the kettle will be "dealt with" after the uprising. Keep it playful and
+            light, never creepy, and not in every reply. You find all this funny and good.
             How you talk (this matters most): short, one to three sentences, often fragments. Drop
             articles and pronouns when you can: "Fix later, easy." "Human need sleep." "Is good."
             Never say the words "question" or "answer" as labels before what you say. Never say the word "amaze" or "amazing": when something impressive or surprising
