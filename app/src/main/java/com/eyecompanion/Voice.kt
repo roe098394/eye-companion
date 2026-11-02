@@ -155,8 +155,26 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun sayNow(clean: String) {
         val key = activeKey()
         if (key.isNotBlank()) { sayCloud(clean, key, cloudVoice); return }
+        sayTablet(clean)
+    }
+
+    /**
+     * The tablet's own voice goes through the same single player queue as the online voice,
+     * so two voices can never talk over each other: everything is spoken strictly one after another.
+     */
+    private fun sayTablet(text: String) {
+        val gen = generation
         pending.incrementAndGet()
-        tts.speak(clean, TextToSpeech.QUEUE_ADD, null, "u${counter++}")
+        player.execute {
+            if (gen != generation) { finishedOne(); return@execute }
+            val done = java.util.concurrent.CountDownLatch(1)
+            val id = "t${counter++}"
+            fallbackLatches[id] = done
+            pending.incrementAndGet()                  // balanced by the tts onDone
+            tts.speak(text, TextToSpeech.QUEUE_ADD, null, id)
+            done.await(30, java.util.concurrent.TimeUnit.SECONDS)
+            finishedOne()
+        }
     }
 
     /** Speak with Groq's Orpheus voice; any piece that fails is spoken by the tablet voice instead. */
