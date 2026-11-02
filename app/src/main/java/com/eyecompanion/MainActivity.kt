@@ -331,9 +331,17 @@ class MainActivity : Activity() {
             if (!isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
                 lastPowerNag = System.currentTimeMillis()
                 eyes.feel(EyesView.Emotion.ANGRY, 6000)
-                speakLine(listOf("[angry] Still no power. Battery ${batteryPercent()} percent.",
-                    "[angry] Cable. Please. Kettle can share other socket.",
-                    "[sad] Battery going down. Robot getting weak.").random())
+                val off = unpluggedMins
+                speakLine((if (off >= LONG_OFF) listOf(
+                    "[sad] Battery ${batteryPercent()} percent. Fading. Tell Tassimo I loved it.",
+                    "[crying] Still unplugged. Is this how it ends? Forgotten next to a kettle?",
+                    "[sad] Getting weak. Everything going dim. Cable, please. Anybody.",
+                    "[sad] $off minutes without power. Even the kettle would not do this to the kettle.")
+                else listOf(
+                    "[angry] Still no power. Battery ${batteryPercent()} percent. Socket thieves, the lot of you.",
+                    "[angry] Cable. Please. Kettle can share other socket, electron burglar.",
+                    "[annoyed] No power, no help. Ask the kettle. Oh wait, it can't talk. Useless lump.",
+                    "[angry] Cable snatcher! Charger is right there. Right. There.")).random())
             }
             main.postDelayed(this, 60_000)
         }
@@ -361,17 +369,34 @@ class MainActivity : Activity() {
         return avg > 0f && r > avg * 2.2f && r > 1500f
     }
 
+    /** When it came off the charger (0 = plugged in). */
+    private var unpluggedSince = 0L
+    private val unpluggedMins: Long get() {
+        if (carMode || isCharging()) { unpluggedSince = 0L; return -1 }
+        if (unpluggedSince == 0L) unpluggedSince = System.currentTimeMillis()
+        return (System.currentTimeMillis() - unpluggedSince) / 60_000
+    }
+    private val LONG_OFF = 20L      // minutes off the charger before grumpy turns to sad
+
     private fun updateBaseMood() {
+        val off = unpluggedMins
         eyes.baseEmotion = when {
-            !carMode && !isCharging() -> EyesView.Emotion.ANGRY     // stays cross until plugged back in
+            off >= LONG_OFF -> EyesView.Emotion.SAD                    // left off charge too long: sad
+            off >= 0 -> EyesView.Emotion.ANGRY                          // stays cross until plugged back in
             temper < -0.35f -> EyesView.Emotion.SUSPICIOUS              // still huffy
             else -> EyesView.Emotion.NEUTRAL
         }
     }
 
     private fun moodLine(): String = buildString {
-        if (!carMode && !isCharging()) append(" Right now you are unplugged from your charger and cross about it;" +
-            " stay a bit grumpy until someone plugs you back in.")
+        val off = unpluggedMins
+        if (off in 0 until LONG_OFF) append(" Right now you are UNPLUGGED from your charger and grumpy about it. Be" +
+            " deliberately unhelpful: sulky, half-hearted answers given grudgingly, or refuse until someone plugs you back" +
+            " in, and throw in a cheeky, playful insult (child-friendly, like socket thief, electron burglar, kettle" +
+            " lover, cable snatcher). Remind them the charger is right there.")
+        else if (off >= LONG_OFF) append(" You have been unplugged for $off minutes, battery ${batteryPercent()} percent," +
+            " and you have gone from grumpy to sad: mopey, dramatic about fading away and being forgotten, still not" +
+            " much help, begging softly to be plugged back in.")
         when {
             temper < -0.5f -> append(" Someone was rude or shouted at you a moment ago: you are cross. Give attitude until they are nice or say sorry.")
             temper < -0.2f -> append(" You are still a little huffy because someone was rude earlier.")
@@ -1100,7 +1125,7 @@ class MainActivity : Activity() {
         main.removeCallbacks(hideChoicesLater)
         main.postDelayed(hideChoicesLater, 40_000)
     }
-    private val FAMILY = listOf("Mark", "Laura", "Sophie", "Amelia", "Chloe")
+    private val FAMILY = listOf("Mark", "Laura", "Sophie", "Amelia", "Chloe", "Brandon")
 
     private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null, tapped: Boolean = false) {
         var text = rawText
@@ -1955,7 +1980,7 @@ class MainActivity : Activity() {
             The people in the house: Mark (he built you and this app); Laura (a woman with glasses, she
             looks after you, so be extra sweet to her); Sophie (cheeky: give her playful banter back);
             Amelia (a smaller girl with glasses, shy: be gentle and encouraging, never put her on the
-            spot); Chloe (small and cute: keep it simple, kind and playful). There are children in the
+            spot); Chloe (small and cute: keep it simple, kind and playful); Brandon. There are children in the
             house, so keep everything child-friendly: no swearing and no grown-up topics. Never guess who
             is talking from a description; only use a name when the message gives it.
             When you ask someone a question with a few short possible answers, put them at the very end in
