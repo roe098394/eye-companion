@@ -16,6 +16,9 @@ android {
         versionName = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
         // Online brain key, from the GROQ_API_KEY secret on GitHub (never stored in the code)
         buildConfigField("String", "GROQ_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")
+        // Azure voice key/region, from the AZURE_SPEECH_KEY / AZURE_SPEECH_REGION secrets (optional)
+        buildConfigField("String", "AZURE_SPEECH_KEY", "\"${System.getenv("AZURE_SPEECH_KEY") ?: ""}\"")
+        buildConfigField("String", "AZURE_SPEECH_REGION", "\"${System.getenv("AZURE_SPEECH_REGION") ?: ""}\"")
 
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         externalNativeBuild {

@@ -783,14 +783,25 @@ class MainActivity : Activity() {
     }
 
     /** Apply car mode (or home mode) to the eyes, voice, brain and screen. */
-    /** "" = tablet voice, otherwise an Orpheus voice name. Default: Troy, when there's a key. */
-    private val voiceChoice get() = prefs.getString("voiceChoice", "troy") ?: "troy"
+    /** "" = tablet voice, "azure:<name>" = Microsoft voice, otherwise an Orpheus voice name. */
+    private val voiceChoice: String get() {
+        // first time an Azure key is available, switch to the British Azure voice (once)
+        if (azureKey.isNotBlank() && !prefs.getBoolean("azureDefaulted", false)) {
+            prefs.edit().putBoolean("azureDefaulted", true).putString("voiceChoice", "azure:en-GB-RyanNeural").apply()
+        }
+        return prefs.getString("voiceChoice", if (azureKey.isNotBlank()) "azure:en-GB-RyanNeural" else "troy") ?: "troy"
+    }
+    private val azureKey: String get() = BuildConfig.AZURE_SPEECH_KEY.ifBlank { prefs.getString("azureKey", null) ?: "" }
+    private val azureRegion: String get() =
+        (prefs.getString("azureRegion", null) ?: BuildConfig.AZURE_SPEECH_REGION).ifBlank { "uksouth" }
 
     private var lastVoiceErrorShown = 0L
 
     private fun applyVoice() {
         voice?.cloudKey = { if (online.enabled) online.apiKey else "" }
         voice?.cloudVoice = voiceChoice
+        voice?.azureKey = { azureKey }
+        voice?.azureRegion = { azureRegion }
         voice?.onCloudError = { msg ->
             main.post {
                 val now = System.currentTimeMillis()
@@ -800,17 +811,53 @@ class MainActivity : Activity() {
     }
 
     private fun chooseVoice() {
-        val names = arrayOf("Troy (male)", "Austin (male)", "Daniel (male)", "Autumn (female)", "Diana (female)",
-            "Hannah (female)", "Tablet voice (offline)")
-        val ids = arrayOf("troy", "austin", "daniel", "autumn", "diana", "hannah", "")
+        val azure = listOf(
+            "Ryan" to "en-GB-RyanNeural", "Thomas" to "en-GB-ThomasNeural", "Alfie" to "en-GB-AlfieNeural",
+            "Oliver" to "en-GB-OliverNeural", "Elliot" to "en-GB-ElliotNeural", "Ethan" to "en-GB-EthanNeural",
+            "Noah" to "en-GB-NoahNeural", "Sonia" to "en-GB-SoniaNeural", "Libby" to "en-GB-LibbyNeural",
+            "Abbi" to "en-GB-AbbiNeural", "Hollie" to "en-GB-HollieNeural", "Olivia" to "en-GB-OliviaNeural")
+        val male = setOf("Ryan", "Thomas", "Alfie", "Oliver", "Elliot", "Ethan", "Noah")
+        val azureTag = if (azureKey.isBlank()) " – needs Azure key" else ""
+        val names = azure.map { (n, _) -> "$n (British ${if (n in male) "male" else "female"}, Azure$azureTag)" } +
+            listOf("Troy (Groq, male)", "Austin (Groq, male)", "Daniel (Groq, male)", "Autumn (Groq, female)",
+                "Diana (Groq, female)", "Hannah (Groq, female)", "Tablet voice (offline)", "Set Azure voice key…")
+        val ids = azure.map { "azure:" + it.second } + listOf("troy", "austin", "daniel", "autumn", "diana", "hannah", "", "KEY")
         val cur = ids.indexOf(voiceChoice)
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle(if (online.enabled) "Pip's voice" else "Pip's voice (online voices need the online brain key)")
+            .setTitle("Pip's voice")
             .setItems(names.mapIndexed { i, n -> (if (i == cur) "✓ " else "") + n }.toTypedArray()) { _, which ->
+                if (ids[which] == "KEY") { setupAzureVoice(); return@setItems }
+                if (ids[which].startsWith("azure:") && azureKey.isBlank()) { setupAzureVoice(); return@setItems }
                 prefs.edit().putString("voiceChoice", ids[which]).apply()
                 applyVoice()
+                voice?.wakeCloudVoice()
                 speakLine(if (ids[which].isEmpty()) "Tablet voice. Is fine." else "New voice. Question: you like?")
             }
+            .show()
+    }
+
+    /** Type in an Azure Speech key and region (or leave blank to use the one built in from GitHub). */
+    private fun setupAzureVoice() {
+        val builtIn = BuildConfig.AZURE_SPEECH_KEY.isNotBlank()
+        val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(48, 8, 48, 0) }
+        val keyIn = android.widget.EditText(this).apply {
+            hint = if (builtIn) "Key already built in (leave blank)" else "Azure Speech key"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val regionIn = android.widget.EditText(this).apply { hint = "Region (e.g. uksouth)"; setText(azureRegion) }
+        box.addView(keyIn); box.addView(regionIn)
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Azure voice")
+            .setMessage(if (azureKey.isNotBlank()) "Key is set. Region: $azureRegion." else "No key yet. Free plan: about half a million characters a month.")
+            .setView(box)
+            .setPositiveButton("Save") { _, _ ->
+                val k = keyIn.text.toString().trim(); val r = regionIn.text.toString().trim().lowercase().replace(" ", "")
+                prefs.edit().apply { if (k.isNotEmpty()) putString("azureKey", k); if (r.isNotEmpty()) putString("azureRegion", r) }.apply()
+                if (azureKey.isNotBlank() && !voiceChoice.startsWith("azure:")) prefs.edit().putString("voiceChoice", "azure:en-GB-RyanNeural").apply()
+                applyVoice(); voice?.wakeCloudVoice()
+                speakLine(if (azureKey.isNotBlank()) "New voice. Question: you like?" else "I need a key for that.")
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 

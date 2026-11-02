@@ -32,6 +32,8 @@ jobs:
       - name: Build APK
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
         run: |
           chmod +x gradlew
           if ! ./gradlew assembleRelease > gradle.log 2>&1; then

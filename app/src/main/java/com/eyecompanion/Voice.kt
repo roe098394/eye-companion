@@ -32,8 +32,21 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
 
     /** Online voice (Groq Orpheus). Returns the key, or "" to use the tablet's own voice. */
     @Volatile var cloudKey: () -> String = { "" }
-    /** Orpheus voice name, e.g. "troy", or "" for the tablet voice. */
+    /** Orpheus voice name, e.g. "troy", or "azure:en-GB-RyanNeural", or "" for the tablet voice. */
     @Volatile var cloudVoice: String = ""
+    /** Microsoft Azure Speech key and region (e.g. "uksouth"), for the "azure:" voices. */
+    @Volatile var azureKey: () -> String = { "" }
+    @Volatile var azureRegion: () -> String = { "uksouth" }
+    /** When the free daily limit is hit, use the tablet voice until this time (no flip-flopping). */
+    @Volatile private var cloudRestingUntil = 0L
+
+    private val isAzure get() = cloudVoice.startsWith("azure:")
+    /** The key for whichever online voice is picked, or "" to use the tablet voice. */
+    private fun activeKey(): String = when {
+        cloudVoice.isBlank() || System.currentTimeMillis() < cloudRestingUntil -> ""
+        isAzure -> azureKey()
+        else -> cloudKey()
+    }
 
     // cloud speech: sentences are fetched in parallel (2 at a time) but played strictly in order
     private val fetcher = Executors.newFixedThreadPool(2)
@@ -126,21 +139,22 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun say(raw: String) {
         val clean = cleanForSpeech(raw)
         if (clean.isBlank()) return
-        val online = cloudKey().isNotBlank() && cloudVoice.isNotBlank()
+        val online = activeKey().isNotBlank()
         if (online && sentencesThisReply++ > 0) {
-            // later sentences wait and go together (stays under 190 characters per request)
-            if (cloudBatch.length + clean.length + 1 > 180) flushCloudBatch()
+            // later sentences wait and go together (fewer requests; Orpheus takes under 200 characters)
+            val max = if (isAzure) 400 else 180
+            if (cloudBatch.length + clean.length + 1 > max) flushCloudBatch()
             if (cloudBatch.isNotEmpty()) cloudBatch.append(' ')
             cloudBatch.append(clean)
-            if (cloudBatch.length > 120) flushCloudBatch()
+            if (cloudBatch.length > (if (isAzure) 250 else 120)) flushCloudBatch()
             return
         }
         sayNow(clean)
     }
 
     private fun sayNow(clean: String) {
-        val key = cloudKey()
-        if (key.isNotBlank() && cloudVoice.isNotBlank()) { sayCloud(clean, key, cloudVoice); return }
+        val key = activeKey()
+        if (key.isNotBlank()) { sayCloud(clean, key, cloudVoice); return }
         pending.incrementAndGet()
         tts.speak(clean, TextToSpeech.QUEUE_ADD, null, "u${counter++}")
     }
@@ -149,7 +163,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun sayCloud(text: String, key: String, voiceName: String) {
         val gen = generation
         // Orpheus takes at most 200 characters per request
-        for (piece in chunks(text, 190)) {
+        for (piece in chunks(text, if (voiceName.startsWith("azure:")) 900 else 190)) {
             pending.incrementAndGet()
             val audio: Future<ByteArray?> = fetcher.submit<ByteArray?> { fetchSpeech(piece, key, voiceName) }
             player.execute {
@@ -185,15 +199,51 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     private fun fetchSpeech(text: String, key: String, voiceName: String): ByteArray? {
+        if (System.currentTimeMillis() < cloudRestingUntil) return null
         for (attempt in 0..1) {
-            val r = fetchOnce(text, key, voiceName, quietOn429 = attempt == 0)
+            val r = if (voiceName.startsWith("azure:")) fetchAzure(text, key, voiceName.removePrefix("azure:"), attempt == 0)
+                    else fetchOnce(text, key, voiceName, quietOn429 = attempt == 0)
             if (r !== RETRY) return r
             Thread.sleep(1500)
         }
+        // still refused after waiting: the free allowance is used up, so rest the online voice
+        val azure = voiceName.startsWith("azure:")
+        cloudRestingUntil = System.currentTimeMillis() + if (azure) 10 * 60_000L else REST_MS
+        cloudFailed(if (azure) "Azure voice busy. Tablet voice for 10 minutes."
+                    else "Online voice limit reached. Using the tablet voice for a few hours.")
         return null
     }
 
+    /** Microsoft Azure neural voice. Returns a WAV, RETRY on a rate limit, or null on failure. */
+    private fun fetchAzure(text: String, key: String, name: String, quietOn429: Boolean): ByteArray? = try {
+        val region = azureRegion().ifBlank { "uksouth" }.lowercase().replace(" ", "")
+        val lang = name.split("-").take(2).joinToString("-")
+        val esc = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace("\"", "&quot;").replace("'", "&apos;")
+        val ssml = "<speak version='1.0' xml:lang='$lang'><voice name='$name'>" +
+            "<prosody rate='-4%'>$esc</prosody></voice></speak>"
+        val conn = (URL("https://$region.tts.speech.microsoft.com/cognitiveservices/v1").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"; doOutput = true
+            connectTimeout = 4000; readTimeout = 15_000
+            setRequestProperty("Ocp-Apim-Subscription-Key", key)
+            setRequestProperty("Content-Type", "application/ssml+xml")
+            setRequestProperty("X-Microsoft-OutputFormat", "riff-24khz-16bit-mono-pcm")
+            setRequestProperty("User-Agent", "Pip")
+        }
+        conn.outputStream.use { it.write(ssml.toByteArray(Charsets.UTF_8)) }
+        when (conn.responseCode) {
+            200 -> conn.inputStream.use { it.readBytes() }.also { conn.disconnect() }
+            429 -> { conn.disconnect(); if (quietOn429) RETRY else null }
+            401, 403 -> { conn.disconnect(); cloudFailed("Azure voice key or region not accepted (check them in the menu)."); null }
+            else -> { val c = conn.responseCode; conn.disconnect(); cloudFailed("Azure voice failed ($c)."); null }
+        }
+    } catch (e: Exception) { cloudFailed("Online voice failed: ${e.message ?: "no internet"}"); null }
+
+    /** Let the online voice try again now (e.g. after picking a voice). */
+    fun wakeCloudVoice() { cloudRestingUntil = 0L }
+
     private val RETRY = ByteArray(0)
+    private val REST_MS = 3 * 60 * 60 * 1000L
 
     private fun fetchOnce(text: String, key: String, voiceName: String, quietOn429: Boolean): ByteArray? = try {
         val body = JSONObject().put("model", "canopylabs/orpheus-v1-english").put("voice", voiceName)
