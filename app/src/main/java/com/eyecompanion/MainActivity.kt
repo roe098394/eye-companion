@@ -674,8 +674,8 @@ class MainActivity : Activity() {
 
     /** Only reply when someone says Pip's name (or carries on just after Pip spoke). */
     private var onlyWhenCalled: Boolean
-        get() = prefs.getBoolean("onlyWhenCalled", true)
-        set(v) { prefs.edit().putBoolean("onlyWhenCalled", v).apply() }
+        get() = prefs.getBoolean("onlyWhenCalled2", false)
+        set(v) { prefs.edit().putBoolean("onlyWhenCalled2", v).apply() }
     private var lastSpokeEnd = 0L
     private var lastReplyAsked = false
     private fun nameRegex(): Regex {
@@ -702,19 +702,25 @@ class MainActivity : Activity() {
             }
             else -> return
         }
-        if (onlyWhenCalled && phase == Phase.LISTENING) {
+        // Was this said to Pip? Its name, carrying on just after Pip spoke, or someone looking at it.
+        var overheard = false
+        if (phase == Phase.LISTENING) {
             val since = System.currentTimeMillis() - lastSpokeEnd
             val followUp = since < (if (lastReplyAsked) 25_000 else 10_000)
-            if (!calledByName(text) && !followUp) {
-                eyes.subCaption = ""                  // overheard: not for Pip
-                return
+            val looking = System.currentTimeMillis() - lastFaceSeen < 2500 && faces?.running == true
+            if (!calledByName(text) && !followUp && !looking) {
+                // the clever brains hear it and decide; the tablet's own brain, or strict mode, just ignores it
+                if (onlyWhenCalled || !(online.worthTrying || pc.worthTrying)) { eyes.subCaption = ""; return }
+                overheard = true
             }
         }
         text = removeName(text).ifBlank { if (calledByName(rawText)) "Hello" else text }
         val lower = text.lowercase().trim(' ', '.', '!', '?', ',')
-        if (lower in GO_TO_SLEEP) { goToSleep(); return }
-        if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
-        quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
+        if (!overheard) {   // commands only count when said to Pip
+            if (lower in GO_TO_SLEEP) { goToSleep(); return }
+            if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
+            quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
+        }
 
         // --- who's talking? ---
         val now = System.currentTimeMillis()
@@ -736,7 +742,7 @@ class MainActivity : Activity() {
             if (match != null) {
                 speaker = match.first
                 if (match.second > 0.7f) voices.remember(match.first, print)   // keep their voice print fresh
-            } else if (now - lastAskedWho > 120_000) {
+            } else if (!overheard && now - lastAskedWho > 120_000) {
                 lastAskedWho = now
                 pendingIntro = Intro(print, text, now)
                 eyes.subCaption = "You: $text"
@@ -746,7 +752,8 @@ class MainActivity : Activity() {
             }
         }
 
-        val shown = if (speaker != null) "$speaker: $text" else "You: $text"
+        val shown = if (overheard) "(overheard) $text" else if (speaker != null) "$speaker: $text" else "You: $text"
+        if (overheard) text = "(overheard: nobody said your name or is looking at you) $text"
         text = when {
             firstMeeting -> "[$speaker, meeting you for the first time] $text"
             speaker != null -> "[$speaker] $text"
@@ -1224,7 +1231,7 @@ class MainActivity : Activity() {
             if (followFaces) "Eyes follow faces: ON" else "Eyes follow faces: OFF",
             if (reactToHandling) "React to being picked up: ON" else "React to being picked up: OFF",
             if (lockButtons) "Tablet buttons: LOCKED (tap to unlock)" else "Tablet buttons: unlocked (tap to lock)",
-            if (onlyWhenCalled) "Only answer when called \"$companionName\": ON" else "Only answer when called \"$companionName\": OFF (answers everything)",
+            if (onlyWhenCalled) "Only answer when called \"$companionName\": ON" else "Only answer when called \"$companionName\": OFF (works it out)",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -1270,7 +1277,7 @@ class MainActivity : Activity() {
                     }
                     22 -> {
                         onlyWhenCalled = !onlyWhenCalled
-                        speakLine(if (onlyWhenCalled) "Okay. Say $companionName when you want me." else "Okay. I answer everything.")
+                        speakLine(if (onlyWhenCalled) "Okay. Say $companionName when you want me." else "Okay. I listen and work out when is for me.")
                     }
                     20 -> {
                         reactToHandling = !reactToHandling
@@ -1359,8 +1366,12 @@ class MainActivity : Activity() {
             this conversation, and use each catchphrase ("yes yes yes", "bad, bad, bad", "is good") at most
             once every few replies. No lists, markdown, emoji or stage directions. Never think out loud, never talk
             about these rules, never say you are an assistant. You hear everything in the kitchen,
-            including people talking to each other. If a message looks like part of someone else's
-            conversation, isn't meant for you, is garbled, or you are unsure what was said, reply with
+            including people talking to each other and the TV. A message starting with "(overheard"
+            means nobody said your name and nobody is looking at you: usually people talking to each
+            other. Reply to it only if it is clearly meant for you (for example a question to "the
+            robot", or about you) or someone needs help; otherwise reply with exactly SKIP. Either way,
+            remember what you overheard: it tells you what's going on in the house. For any message,
+            if it is garbled or you are unsure what was said or whether it was for you, reply with
             exactly SKIP and nothing else: staying quiet is better than butting in.
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
