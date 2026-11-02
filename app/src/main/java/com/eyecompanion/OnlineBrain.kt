@@ -77,6 +77,30 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         onDone(text)
     }
 
+    /** Ask a yes/no question about a camera picture. null = couldn't tell (offline etc.). */
+    fun yesNo(jpeg: ByteArray, question: String): Boolean? = try {
+        val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+        val content = JSONArray()
+            .put(JSONObject().put("type", "text").put("text", "$question Answer with only the word yes or no."))
+            .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$b64")))
+        val body = JSONObject().put("model", VISION_MODEL)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+            .put("temperature", 0).put("max_completion_tokens", 20)
+            .put("reasoning_effort", "none").put("reasoning_format", "hidden")
+        val conn = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"; doOutput = true; connectTimeout = 4000; readTimeout = 15_000
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer $apiKey")
+        }
+        conn.outputStream.use { it.write(body.toString().toByteArray()) }
+        if (conn.responseCode != 200) { conn.disconnect(); null } else {
+            val r = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+            conn.disconnect()
+            val a = r.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").lowercase()
+            when { a.contains("yes") -> true; a.contains("no") -> false; else -> null }
+        }
+    } catch (_: Exception) { null }
+
     private class RateLimited : Exception()
     private class BadKey : Exception()
 

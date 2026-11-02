@@ -50,7 +50,7 @@ object Snapshot {
     }
 
     /** Upright, at most 768 px across: plenty for describing, quick to send. */
-    private fun shrink(jpeg: ByteArray, rotation: Int): ByteArray {
+    fun shrink(jpeg: ByteArray, rotation: Int): ByteArray {
         val src = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return jpeg
         val scale = 768f / maxOf(src.width, src.height)
         val m = Matrix().apply { if (scale < 1f) postScale(scale, scale); if (rotation != 0) postRotate(rotation.toFloat()) }

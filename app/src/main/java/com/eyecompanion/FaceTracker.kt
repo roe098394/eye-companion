@@ -35,6 +35,10 @@ class FaceTracker(
     @Volatile private var lastFrameAt = 0L
     @Volatile private var busy = false
     private var prevGrid: IntArray? = null
+    @Volatile private var grab: ((ByteArray?) -> Unit)? = null
+
+    /** Hand back the next camera picture as a small upright JPEG (without stopping tracking). */
+    fun grabJpeg(onDone: (ByteArray?) -> Unit) { if (running) grab = onDone else onDone(null) }
 
     private val detector by lazy {
         FaceDetection.getClient(
@@ -90,6 +94,16 @@ class FaceTracker(
             c.addCallbackBuffer(ByteArray(w * h * 3 / 2))
             c.addCallbackBuffer(ByteArray(w * h * 3 / 2))
             c.setPreviewCallbackWithBuffer { data, camera ->
+                grab?.let { g ->
+                    grab = null
+                    val jpeg = try {
+                        val out = java.io.ByteArrayOutputStream()
+                        android.graphics.YuvImage(data, android.graphics.ImageFormat.NV21, w, h, null)
+                            .compressToJpeg(android.graphics.Rect(0, 0, w, h), 85, out)
+                        Snapshot.shrink(out.toByteArray(), rotation)
+                    } catch (_: Throwable) { null }
+                    g(jpeg)
+                }
                 val now = System.currentTimeMillis()
                 if (!busy && now - lastFrameAt > 120) {
                     lastFrameAt = now; busy = true

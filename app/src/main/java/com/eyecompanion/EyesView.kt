@@ -43,6 +43,9 @@ class EyesView(context: Context) : View(context) {
     private var lidAngle = 0f      // + = angry brows, - = sad brows (smoothed)
     private var tint = 0f          // 0..1 how far the colour has moved to the emotion colour
 
+    /** The feeling Pip falls back to when nothing else is going on (e.g. angry while unplugged). */
+    @Volatile var baseEmotion = Emotion.NEUTRAL
+
     /** Show an emotion for [ms] milliseconds (it stays while Pip is talking). */
     fun feel(e: Emotion, ms: Long = 6000) { emotion = e; emotionUntil = now() + ms }
 
@@ -136,7 +139,7 @@ class EyesView(context: Context) : View(context) {
         }
 
         // --- emotion on top of the mood ---
-        val feeling = if (t < emotionUntil || (mood == Mood.TALK && emotion != Emotion.NEUTRAL)) emotion else Emotion.NEUTRAL
+        val feeling = if (t < emotionUntil || (mood == Mood.TALK && emotion != Emotion.NEUTRAL)) emotion else baseEmotion
         var tLid = 0f; var tTint = 0f; var oneEye = 1f
         var tOpenL = 1f; var tOpenR = 1f; var tRot = 0f; var tBlush = 0f; var shake = 0f
         var emoCol = 0
@@ -451,7 +454,7 @@ class EyesView(context: Context) : View(context) {
     private var nextIdleFeeling = 0L
     private fun idleFeelings(t: Long) {
         if (nextIdleFeeling == 0L) nextIdleFeeling = t + 30_000
-        if (t < nextIdleFeeling || t < emotionUntil) return
+        if (t < nextIdleFeeling || t < emotionUntil || baseEmotion != Emotion.NEUTRAL) return
         nextIdleFeeling = t + Random.nextLong(25_000, 70_000)
         val lonely = t - faceAt > 120_000
         val pick = when {

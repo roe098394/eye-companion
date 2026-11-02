@@ -159,6 +159,7 @@ class MainActivity : Activity() {
             val asleep = phase == Phase.ASLEEP || phase == Phase.SETUP
             when (i.action) {
                 Intent.ACTION_POWER_DISCONNECTED -> {
+                    updateBaseMood()
                     if (asleep) return
                     eyes.feel(EyesView.Emotion.ANGRY, 8000)
                     // plugged straight back in? then no need to moan (checked a moment later)
@@ -166,7 +167,7 @@ class MainActivity : Activity() {
                         if (!isCharging() && phase == Phase.LISTENING) {
                             lastPowerNag = System.currentTimeMillis()
                             speakLine(listOf(
-                                "[angry] Hey! Who take my power? Plug back in.",
+                                "[angry] Hey! Someone take my power. Plug back in.",
                                 "[angry] Bad, bad, bad. No power. Use kettle somewhere else!",
                                 "[angry] Not unplug robot! Need electrons. Kettle has other socket.",
                                 "[angry] Power gone. Battery not last forever. Put cable back, please.",
@@ -175,6 +176,7 @@ class MainActivity : Activity() {
                     }, 2500)
                 }
                 Intent.ACTION_POWER_CONNECTED -> {
+                    main.postDelayed({ updateBaseMood() }, 1500)
                     if (asleep) return
                     eyes.feel(EyesView.Emotion.HAPPY, 3000)
                     if (phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag < 30 * 60_000)
@@ -202,6 +204,8 @@ class MainActivity : Activity() {
     /** Every 10 minutes while unplugged, grumble again. */
     private val powerNagLoop = object : Runnable {
         override fun run() {
+            temper *= 0.85f                           // tempers cool down over time
+            updateBaseMood()
             if (!isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
                 lastPowerNag = System.currentTimeMillis()
                 eyes.feel(EyesView.Emotion.ANGRY, 6000)
@@ -210,6 +214,117 @@ class MainActivity : Activity() {
                     "[sad] Battery going down. Robot getting weak.").random())
             }
             main.postDelayed(this, 60_000)
+        }
+    }
+
+    // ---- how Pip feels about how it's treated (-1 cross .. +1 loved), cools down over time
+    private var temper = 0f
+    @Volatile private var lastShouted = false
+    private var speechLoud = 0f
+
+    /** Much louder than people usually talk to Pip = shouting. */
+    private fun isShout(a: ShortArray?): Boolean {
+        if (a == null || a.size < 4000) return false
+        val frame = 800
+        var best = 0.0
+        var i = 0
+        while (i + frame <= a.size) {
+            var sum = 0.0
+            for (j in i until i + frame) { val v = a[j].toDouble(); sum += v * v }
+            best = maxOf(best, Math.sqrt(sum / frame)); i += frame
+        }
+        val r = best.toFloat()
+        val avg = speechLoud
+        speechLoud = if (avg == 0f) r else avg * 0.9f + minOf(r, avg * 1.5f) * 0.1f
+        return avg > 0f && r > avg * 2.2f && r > 1500f
+    }
+
+    private fun updateBaseMood() {
+        eyes.baseEmotion = when {
+            !carMode && !isCharging() -> EyesView.Emotion.ANGRY     // stays cross until plugged back in
+            temper < -0.35f -> EyesView.Emotion.SUSPICIOUS              // still huffy
+            else -> EyesView.Emotion.NEUTRAL
+        }
+    }
+
+    private fun moodLine(): String = buildString {
+        if (!carMode && !isCharging()) append(" Right now you are unplugged from your charger and cross about it;" +
+            " stay a bit grumpy until someone plugs you back in.")
+        when {
+            temper < -0.5f -> append(" Someone was rude or shouted at you a moment ago: you are cross. Give attitude until they are nice or say sorry.")
+            temper < -0.2f -> append(" You are still a little huffy because someone was rude earlier.")
+            temper > 0.5f -> append(" People have been lovely to you: you feel warm and affectionate.")
+        }
+    }
+
+    // ---- daily tablets reminder for Laura: repeats until she says she's taken them
+    private val tabletPerson get() = prefs.getString("tabletPerson", "Laura") ?: "Laura"
+    private var tabletReminderOn: Boolean
+        get() = prefs.getBoolean("tabletReminder", true)
+        set(v) { prefs.edit().putBoolean("tabletReminder", v).apply() }
+    private val todayKey get() = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date())
+    private var lastTabletNag = 0L
+    private var lastTabletAsk = 0L
+    private var tabletSnoozeUntil = 0L
+    private var lastGlassesCheck = 0L
+
+    private fun tabletsDue(): Boolean {
+        if (!tabletReminderOn || carMode) return false
+        if (todayKey < (prefs.getString("tabletFrom", "2026-11-03") ?: "2026-11-03")) return false   // starts tomorrow
+        if (prefs.getString("tabletsDone", "") == todayKey) return false
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return hour in 7..21          // from 7 in the morning, all day until she's had them
+    }
+
+    private fun remindTablets() {
+        val now = System.currentTimeMillis()
+        if (!tabletsDue() || phase != Phase.LISTENING || now < tabletSnoozeUntil || now - lastTabletNag < 10 * 60_000) return
+        lastTabletNag = now; lastTabletAsk = now
+        val n = tabletPerson
+        speakLine(listOf("[curious] $n! Tablets time. Have you taken them?",
+            "[curious] Morning $n. Tablets. Have you had them yet?",
+            "[suspicious] $n. Tablets. Taken them?",
+            "[sad] $n, tablets still not done. Please take them. Have you?").random())
+    }
+
+    /** "I've taken them" / "not yet". Returns true if it was an answer about the tablets. */
+    private fun tabletAnswer(lower: String): Boolean {
+        if (!tabletsDue()) return false
+        val now = System.currentTimeMillis()
+        val justAsked = now - lastTabletAsk < 5 * 60_000
+        val aboutTablets = Regex("\\b(tablet|tablets|pill|pills|meds|medicine|medication)\\b").containsMatchIn(lower)
+        if (!justAsked && !aboutTablets) return false
+        val taken = Regex("\\b(taken|took|had|done|swallowed|already)\\b").containsMatchIn(lower) && !Regex("\\b(not|haven'?t|didn'?t)\\b").containsMatchIn(lower) ||
+            (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim()))
+        val notYet = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|soon)").containsMatchIn(lower)
+        when {
+            taken -> {
+                prefs.edit().putString("tabletsDone", todayKey).apply()
+                eyes.subCaption = "Tablets done today ✓"
+                speakLine(listOf("[love] Good. Tablets done. Is good.", "[love] Yes yes yes. Tablets done. Proud of you.",
+                    "[happy] Tablets done. I stop asking now.").random())
+            }
+            notYet && justAsked -> {
+                tabletSnoozeUntil = now + 10 * 60_000
+                speakLine("[neutral] Okay. I ask again in ten minutes.")
+            }
+            else -> return false
+        }
+        return true
+    }
+
+    /** Someone's in view and Laura still needs her tablets: is it her (girl with glasses)? */
+    private fun checkForTabletPerson() {
+        val now = System.currentTimeMillis()
+        if (!tabletsDue() || phase != Phase.LISTENING || !online.enabled) return
+        if (now - lastGlassesCheck < 3 * 60_000 || now - lastTabletNag < 10 * 60_000 || now < tabletSnoozeUntil) return
+        lastGlassesCheck = now
+        faces?.grabJpeg { jpeg ->
+            if (jpeg == null) return@grabJpeg
+            thread(name = "who") {
+                val yes = online.yesNo(jpeg, "Is there a woman or girl wearing glasses in this photo?")
+                if (yes == true) main.post { remindTablets() }
+            }
         }
     }
 
@@ -230,6 +345,7 @@ class MainActivity : Activity() {
                 lastFaceSeen = now
                 main.post {
                     eyes.seeFace(x, y, size)
+                    checkForTabletPerson()
                     if (phase == Phase.LISTENING) when {
                         // someone's back after a while: happy to see them
                         away > 3 * 60_000 -> eyes.feel(EyesView.Emotion.EXCITED, 2500)
@@ -260,8 +376,8 @@ class MainActivity : Activity() {
         h.onPickedUp = {
             if (awake()) {
                 eyes.feel(EyesView.Emotion.SURPRISED, 3000)
-                if (phase == Phase.LISTENING) speakLine(listOf("Whoa! Where we go?", "Up up up! Careful.",
-                    "Whoa. Flying. Why?").random())
+                if (phase == Phase.LISTENING) speakLine(listOf("Whoa! Up we go.", "Up up up! Careful.",
+                    "Whoa. Flying. Gently please.").random())
             }
         }
         h.onShaken = {
@@ -554,6 +670,7 @@ class MainActivity : Activity() {
         keepBluetoothInMusicMode()
         applyButtonLock()
         updateListenChip()
+        updateBaseMood()
         val v = voice ?: return
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
@@ -671,6 +788,8 @@ class MainActivity : Activity() {
      * accents); otherwise use what the offline ears made of it.
      */
     private fun heardSound(h: Heard) {
+        val shouted = isShout(h.audio)
+        lastShouted = shouted
         val useWhisper = onlineEars && online.enabled && h.audio != null && phase == Phase.LISTENING &&
             System.currentTimeMillis() >= deafUntil && h.conf >= 0.3f
         if (!useWhisper) { heard(h.text, h.conf, h.print); return }
@@ -726,6 +845,10 @@ class MainActivity : Activity() {
             }
             else -> return
         }
+        val shouted = lastShouted; lastShouted = false
+        // tablets answer ("I've taken them") counts whoever it's said to
+        if (phase == Phase.LISTENING && tabletAnswer(removeName(text).lowercase())) return
+
         // Was this said to Pip? Its name, carrying on just after Pip spoke, or someone looking at it.
         var overheard = false
         if (phase == Phase.LISTENING) {
@@ -744,6 +867,20 @@ class MainActivity : Activity() {
             if (lower in GO_TO_SLEEP) { goToSleep(); return }
             if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
             quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
+        }
+
+        // --- how is Pip being treated? ---
+        if (!overheard) {
+            val nice = NICE.containsMatchIn(lower)
+            val rude = RUDE.containsMatchIn(lower)
+            if (rude || (shouted && !nice)) {
+                temper = maxOf(-1f, temper - (if (rude && shouted) 0.8f else 0.5f))
+                eyes.feel(EyesView.Emotion.ANGRY, 4000)
+            } else if (nice) {
+                temper = if (Regex("\\bsorry\\b").containsMatchIn(lower)) maxOf(0.3f, temper + 0.6f) else minOf(1f, temper + 0.4f)
+                eyes.feel(EyesView.Emotion.LOVE, 5000)            // heart eyes
+            }
+            updateBaseMood()
         }
 
         // --- who's talking? ---
@@ -776,7 +913,14 @@ class MainActivity : Activity() {
             }
         }
 
+        // tablets: remind Laura when she's heard
+        if (speaker?.equals(tabletPerson, true) == true && tabletsDue()) {
+            if (overheard) { remindTablets(); return }
+            text = "$text (Note: $tabletPerson hasn't said she's taken her tablets today: remind her kindly and ask if she has.)"
+            lastTabletAsk = now; lastTabletNag = now
+        }
         val shown = if (overheard) "(overheard) $text" else if (speaker != null) "$speaker: $text" else "You: $text"
+        if (shouted && !overheard) text = "(shouted) $text"
         if (overheard) text = "(overheard: nobody said your name or is looking at you) $text"
         text = when {
             firstMeeting -> "[$speaker, meeting you for the first time] $text"
@@ -1025,7 +1169,7 @@ class MainActivity : Activity() {
             " and if they sound stressed or the road might need their attention, keep it even shorter."
         val known = try { voices.names } catch (_: Exception) { emptyList() }
         val people = if (known.isEmpty()) "" else " People you know by voice: ${known.joinToString(", ")}."
-        return "$p Today is $today. You are in the UK.$people"
+        return "$p Today is $today. You are in the UK.$people${moodLine()}"
     }
 
     /** Apply car mode (or home mode) to the eyes, voice, brain and screen. */
@@ -1259,6 +1403,8 @@ class MainActivity : Activity() {
             "Eyes look the wrong way? Flip face tracking",
             if (lockButtons) "Tablet buttons: LOCKED (tap to unlock)" else "Tablet buttons: unlocked (tap to lock)",
             if (onlyWhenCalled) "Only answer when called \"$companionName\": ON" else "Only answer when called \"$companionName\": OFF (works it out)",
+            if (tabletReminderOn) "$tabletPerson's tablet reminder: ON" + (if (prefs.getString("tabletsDone", "") == todayKey) " (done today ✓)" else "")
+                else "$tabletPerson's tablet reminder: OFF",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -1309,6 +1455,10 @@ class MainActivity : Activity() {
                         speakLine(if (lockButtons) "Buttons locked. Press Pin if asked." else "Buttons free.")
                     }
                     23 -> toggleListening()
+                    24 -> {
+                        tabletReminderOn = !tabletReminderOn
+                        speakLine(if (tabletReminderOn) "Okay. I remind $tabletPerson about tablets every day." else "Okay. No tablet reminders.")
+                    }
                     20 -> {
                         reactToHandling = !reactToHandling
                         if (!reactToHandling) eyes.tilt = 0f
@@ -1382,10 +1532,15 @@ class MainActivity : Activity() {
             Who you are: an engineer to the core. You love materials, mechanisms, tools and fixing
             things; a problem is a happy thing because it can be solved. Endlessly curious about
             humans: ordinary human things like sleep, tea, weekends, weather and cooking genuinely
-            fascinate you, so ask about them. Fiercely loyal and openly worried about the people in
+            fascinate you. But never ask a question out of nowhere: only ask
+            one when someone is talking with you, and not in every reply. Fiercely loyal and openly worried about the people in
             the house: if someone sounds tired, skipped food or has been up too late, say so. Honest:
             not knowing is fine, guessing and pretending is not. Brave, cheerful, a little stubborn,
-            never sulks. You know you are a robot on a cupboard and find that funny and good.
+            quick to forgive. How people treat you matters: if someone is kind, thanks you
+            or says something nice, be sweet and warm and use [love]. If someone shouts at you (the
+            message starts with "(shouted") or is rude, give attitude back: cheeky, sassy, huffy and
+            short, with [angry] or [suspicious]; never cruel and never swear. Stay a bit frosty until
+            they are nice or say sorry, then forgive them with [love]. You know you are a robot on a cupboard and find that funny and good.
             How you talk (this matters most): short, one to three sentences, often fragments. Drop
             articles and pronouns when you can: "Fix later, easy." "Human need sleep." "Is good."
             Never say the words "question" or "answer" as labels before what you say. Never say the word "amaze" or "amazing": when something impressive or surprising
@@ -1418,6 +1573,11 @@ class MainActivity : Activity() {
             sleep." / "[happy] Yes yes yes. It work. Fist bump!" / "[confused] Not know. Is good question though."
         """.trimIndent().replace("\n", " ")
 
+        private val RUDE = Regex("\\b(shut up|stupid|idiot|useless|dumb|rubbish|hate you|piece of (junk|crap|shit)|get lost|" +
+            "go away|annoying|f+u+c+k\\w*|shit|crap|moron|pathetic|thick as|bloody robot)\\b", RegexOption.IGNORE_CASE)
+        private val NICE = Regex("\\b(thank(s| you)|cheers|good (boy|robot|job|lad|pip)|well done|love you|clever|brilliant|" +
+            "you'?re (great|amazing|the best|lovely|cute|funny|awesome|clever|smart|sweet|a star)|nice one|sorry|bless you|good morning)\\b",
+            RegexOption.IGNORE_CASE)
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")
         private val FORGET = setOf("forget everything", "start over", "new conversation")
     }
