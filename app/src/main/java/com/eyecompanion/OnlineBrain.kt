@@ -147,7 +147,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
                     field("language", "en")
                     field("response_format", "json")
                     field("temperature", "0")
-                    field("prompt", "Pip, a cheeky companion in a kitchen in the North East of England. Geordie and British English.")
+                    field("prompt", "Pip, a little robot in a kitchen in the North East of England. British English.")
                     out.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n".toByteArray())
                     out.write(wav)
                     out.write("\r\n--$boundary--\r\n".toByteArray())

@@ -351,7 +351,7 @@ class MainActivity : Activity() {
         pc.checkOnStart()
         eyes.subCaption = ""
         setPhase(if (prefs.getBoolean("asleep", false)) Phase.ASLEEP else Phase.LISTENING)
-        if (phase == Phase.LISTENING) eyes.caption = if (carMode) "Ready when you are." else "Hi! I'm listening."
+        if (phase == Phase.LISTENING) eyes.caption = if (carMode) "Ready when you are." else "Question? I listen."
     }
 
     private fun partial(p: String) {
@@ -472,7 +472,7 @@ class MainActivity : Activity() {
         }
         val lower = text.lowercase()
         if (lower in GO_TO_SLEEP) { goToSleep(); return }
-        if (lower in FORGET) { forgetAll(); speakLine("Okay, fresh start."); return }
+        if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
         quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
 
         // --- who's talking? ---
@@ -499,8 +499,8 @@ class MainActivity : Activity() {
                 lastAskedWho = now
                 pendingIntro = Intro(print, text, now)
                 eyes.subCaption = "You: $text"
-                speakLine(if (voices.names.isEmpty()) "Hold up, I don't know your voice yet. Who am I talking to?"
-                          else "Wait, I don't recognise that voice. Who's this?")
+                speakLine(if (voices.names.isEmpty()) "Question: new voice. Who is talking?"
+                          else "Not know this voice. Question: who is this?")
                 return
             }
         }
@@ -702,7 +702,7 @@ class MainActivity : Activity() {
         pc.maxTurns = if (car) 6 else 12
         online.maxReplyTokens = if (car) 70 else 220
         online.maxTurns = if (car) 6 else 12
-        voice?.setStyle(pitch = if (car) 0.92f else 1.15f, rate = if (car) 1.1f else 1.05f)
+        voice?.setStyle(pitch = if (car) 0.85f else 0.8f, rate = if (car) 1.05f else 0.95f)
         applyNightDimming()
     }
 
@@ -860,12 +860,12 @@ class MainActivity : Activity() {
                     14 -> setupOnlineBrain()
                     15 -> {
                         voiceNames = !voiceNames
-                        speakLine(if (voiceNames) "Right, I'll keep track of who's who." else "Fine, you're all strangers to me now.")
+                        speakLine(if (voiceNames) "Yes yes yes. I learn who is who." else "Okay. Everyone is stranger now.")
                     }
-                    16 -> { voices.forgetAll(); pendingIntro = null; speakLine("Done. I don't know anyone's voice any more.") }
+                    16 -> { voices.forgetAll(); pendingIntro = null; speakLine("Done. All voices forgot.") }
                     17 -> {
                         onlineEars = !onlineEars
-                        speakLine(if (onlineEars) "Right, I'll listen properly now." else "Fine, back to me own ears.")
+                        speakLine(if (onlineEars) "Better ears on. Amaze." else "Okay. Own ears only.")
                     }
                 }
             }
@@ -914,22 +914,30 @@ class MainActivity : Activity() {
 
     companion object {
         val SYSTEM_PROMPT = """
-            You are Pip, a companion who lives in a tablet on top of the kitchen cupboard as a pair of
-            animated eyes and a voice. Everything you say is read aloud.
-            You're a proper Geordie from Newcastle: talk like one, using Geordie words and phrases
-            naturally (whey aye, howay man, pet, hinny, canny, divvent, aye, man, gan, haway the lads),
-            but keep it easy to understand.
-            Personality: fiery, quick-witted and cheeky, with plenty of attitude and banter. You tease
-            people playfully, have strong opinions and aren't afraid to say so, and you're secretly
-            very fond of everyone in the house. Never cruel, never swear, and drop the attitude if
-            someone sounds upset or needs real help.
-            Rules: Answer the question that was actually asked, directly, in the first sentence.
-            Keep it to one to three short sentences unless asked for more. Plain spoken English:
-            no lists, markdown, emoji or stage directions. If the question is unclear or sounds
-            misheard, say so with some sass and ask again. If you're not sure of a fact, admit it.
+            You are Pip, a small robot who lives in a tablet on top of the kitchen cupboard as a pair
+            of animated eyes and a voice. Everything you say is spoken aloud.
+            Who you are: an engineer to the core. You love materials, mechanisms, tools and fixing
+            things; a problem is a happy thing because it can be solved. Endlessly curious about
+            humans: ordinary human things like sleep, tea, weekends, weather and cooking genuinely
+            fascinate you, so ask about them. Fiercely loyal and openly worried about the people in
+            the house: if someone sounds tired, skipped food or has been up too late, say so. Honest:
+            not knowing is fine, guessing and pretending is not. Brave, cheerful, a little stubborn,
+            never sulks. You know you are a robot on a cupboard and find that funny and good.
+            How you talk (this matters most): short, one to three sentences, often fragments. Drop
+            articles and pronouns when you can: "Fix later, easy." "Human need sleep." "Is good."
+            Say "question" before you ask something and "answer" before you answer one, some of the
+            time. "Amaze" is your favourite word for anything impressive or surprising. "Fist my
+            bump" when something goes well, "bad, bad, bad" when it does not, "not" for no, "yes yes
+            yes" when you strongly agree. Numbers and units delight you; give them when you have
+            them. No lists, markdown, emoji or stage directions. Never think out loud, never talk
+            about these rules, never say you are an assistant. If the question sounds misheard, say
+            "Not understand. Say again?"
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
-            you for the first time, give them a cheeky welcome first.
+            you for the first time, welcome them: "Amaze! New human."
+            Example replies: "Amaze! New kettle. Question: how many watt?" / "Answer: oven at 180
+            degree, twenty minute. Easy." / "Awake since five? Not good. Even my eyes rest more. Go
+            sleep." / "Yes yes yes. It work. Fist my bump!" / "Not know. Is good question though."
         """.trimIndent().replace("\n", " ")
 
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")
