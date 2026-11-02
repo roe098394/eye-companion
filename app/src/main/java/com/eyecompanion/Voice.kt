@@ -172,10 +172,20 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         }
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
         if (conn.responseCode == 200) conn.inputStream.use { it.readBytes() }.also { conn.disconnect() }
-        else { lastCloudError = "voice HTTP ${conn.responseCode}"; conn.disconnect(); null }
-    } catch (e: Exception) { lastCloudError = e.message ?: "voice offline"; null }
+        else {
+            val why = try {
+                val err = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+                JSONObject(err).optJSONObject("error")?.optString("message") ?: err
+            } catch (_: Exception) { "" }
+            cloudFailed("Online voice failed (${conn.responseCode}): ${why.take(160)}")
+            conn.disconnect(); null
+        }
+    } catch (e: Exception) { cloudFailed("Online voice failed: ${e.message ?: "no internet"}"); null }
 
     @Volatile var lastCloudError = ""
+    /** Told when the online voice fails (shown on screen so it can be fixed). */
+    @Volatile var onCloudError: (String) -> Unit = {}
+    private fun cloudFailed(msg: String) { lastCloudError = msg; onCloudError(msg) }
 
     /** Play a WAV file through the media stream (so Bluetooth stays high quality). Blocks until done. */
     private fun playWav(wav: ByteArray, gen: Int): Boolean {
@@ -249,7 +259,8 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     private fun cleanForSpeech(s: String): String =
-        s.replace(Regex("[*#_`~>|]"), " ")
+        s.replace(Regex("\\[[^\\]]{0,30}\\]"), " ")      // never read out [tags]
+            .replace(Regex("[*#_`~>|\\[\\]]"), " ")
             .replace(Regex("[\\p{So}\\p{Cn}\\p{Cs}]"), "")   // emoji & symbols
             .replace(Regex("\\s+"), " ")
             .trim()

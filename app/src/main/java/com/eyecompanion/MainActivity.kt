@@ -23,6 +23,44 @@ import org.vosk.Model
 import java.io.File
 import kotlin.concurrent.thread
 
+/**
+ * Takes the feeling tag off the front of a streamed reply (e.g. "[happy]") and hands it to the eyes,
+ * and makes sure no other [labels] are ever shown or spoken.
+ */
+class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
+    private val head = StringBuilder()
+    private var started = false
+
+    fun push(piece: String): String {
+        if (started) return strip(piece)
+        head.append(piece)
+        var h = head.toString().trimStart()
+        while (h.startsWith("[")) {
+            val end = h.indexOf(']')
+            if (end < 0) return if (h.length < 40) "" else { started = true; strip(h) }   // tag not finished yet
+            EMOTIONS[h.substring(1, end).trim().lowercase()]?.let(onEmotion)
+            h = h.substring(end + 1).trimStart()
+        }
+        if (h.isEmpty()) return ""
+        started = true
+        return strip(h)
+    }
+
+    private fun strip(s: String) = s.replace(Regex("\\[[^\\]]{0,30}\\]"), "")
+
+    companion object {
+        val EMOTIONS = mapOf(
+            "happy" to EyesView.Emotion.HAPPY, "excited" to EyesView.Emotion.HAPPY, "proud" to EyesView.Emotion.HAPPY,
+            "sad" to EyesView.Emotion.SAD, "worried" to EyesView.Emotion.SAD,
+            "angry" to EyesView.Emotion.ANGRY, "annoyed" to EyesView.Emotion.ANGRY, "grumpy" to EyesView.Emotion.ANGRY,
+            "surprised" to EyesView.Emotion.SURPRISED, "amazed" to EyesView.Emotion.SURPRISED,
+            "sleepy" to EyesView.Emotion.SLEEPY, "tired" to EyesView.Emotion.SLEEPY,
+            "love" to EyesView.Emotion.LOVE, "loving" to EyesView.Emotion.LOVE,
+            "confused" to EyesView.Emotion.CONFUSED, "thinking" to EyesView.Emotion.THINKING,
+            "neutral" to EyesView.Emotion.NEUTRAL)
+    }
+}
+
 class MainActivity : Activity() {
 
     private lateinit var eyes: EyesView
@@ -90,6 +128,10 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
+        if (code == 2) {   // camera
+            if (results.firstOrNull() == PackageManager.PERMISSION_GRANTED) speakLine("Yes yes yes. Now I see. Ask again.")
+            return
+        }
         if (results.firstOrNull() == PackageManager.PERMISSION_GRANTED) startSetup()
         else eyes.caption = "Microphone permission is needed. Long-press to open settings."
     }
@@ -519,11 +561,14 @@ class MainActivity : Activity() {
         val id = ++replyId
         currentReply.clear()
         v.beginReply()
+        val cleaner = ReplyCleaner { e -> main.post { if (id == replyId) eyes.feel(e, 9000) } }
         val onToken = { piece: String ->
             main.post {
                 if (id != replyId) return@post        // an old, interrupted reply
-                v.feed(piece)
-                currentReply.append(piece)
+                val clean = cleaner.push(piece)
+                if (clean.isEmpty()) return@post
+                v.feed(clean)
+                currentReply.append(clean)
                 eyes.caption = currentReply.toString().trim()
             }
             id == replyId                              // false tells the brain to stop
@@ -549,6 +594,26 @@ class MainActivity : Activity() {
             } else askTablet()
             Unit
         }
+        if (wantsToSee(rawText)) {
+            if (!online.enabled) { setPhase(Phase.LISTENING); speakLine("Not see without internet brain. Sorry."); return }
+            if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                setPhase(Phase.LISTENING)
+                requestPermissions(arrayOf(Manifest.permission.CAMERA), 2)
+                speakLine("Question: can I use camera? Press allow, then ask again.")
+                return
+            }
+            eyes.subCaption = "$shown  · looking…"
+            eyes.feel(EyesView.Emotion.SURPRISED, 2500)
+            Snapshot.take(displayDegrees()) { jpeg ->
+                main.post {
+                    if (id != replyId) return@post
+                    if (jpeg == null) { setPhase(Phase.LISTENING); speakLine("Camera not work. Bad, bad, bad."); return@post }
+                    eyes.subCaption = "$shown  · camera"
+                    online.ask(text, onToken, onDone, onUnavailable = { askPc() }, image = jpeg)
+                }
+            }
+            return
+        }
         if (online.worthTrying) {
             eyes.subCaption = "$shown  · online brain"
             online.ask(text, onToken, onDone, onUnavailable = {
@@ -556,6 +621,21 @@ class MainActivity : Activity() {
                 askPc()
             })
         } else askPc()
+    }
+
+    /** Questions that need the camera. */
+    private fun wantsToSee(q: String): Boolean = Regex(
+        "\\b(what (can|do) you see|what are you (seeing|looking at)|can you see|look at (this|me|that|my)|" +
+        "what('?s| is) (this|that) (i'?m holding|in my hand)|what am i (holding|wearing)|how do i look|" +
+        "what colou?r is|read (this|that)|what('?s| is) (this|that)\\??$|take a look|have a look|who is (this|that))\\b"
+    ).containsMatchIn(q.lowercase().trim())
+
+    @Suppress("DEPRECATION")
+    private fun displayDegrees(): Int = when (windowManager.defaultDisplay.rotation) {
+        android.view.Surface.ROTATION_90 -> 90
+        android.view.Surface.ROTATION_180 -> 180
+        android.view.Surface.ROTATION_270 -> 270
+        else -> 0
     }
 
     private fun forgetAll() { brain?.forget(); pc.forget(); online.forget() }
@@ -696,9 +776,17 @@ class MainActivity : Activity() {
     /** "" = tablet voice, otherwise an Orpheus voice name. Default: Troy, when there's a key. */
     private val voiceChoice get() = prefs.getString("voiceChoice", "troy") ?: "troy"
 
+    private var lastVoiceErrorShown = 0L
+
     private fun applyVoice() {
         voice?.cloudKey = { if (online.enabled) online.apiKey else "" }
         voice?.cloudVoice = voiceChoice
+        voice?.onCloudError = { msg ->
+            main.post {
+                val now = System.currentTimeMillis()
+                if (now - lastVoiceErrorShown > 60_000) { lastVoiceErrorShown = now; eyes.subCaption = msg }
+            }
+        }
     }
 
     private fun chooseVoice() {
@@ -961,9 +1049,14 @@ class MainActivity : Activity() {
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
             you for the first time, welcome them: "Amaze! New human."
-            Example replies: "Amaze! New kettle. Question: how many watt?" / "Answer: oven at 180
-            degree, twenty minute. Easy." / "Awake since five? Not good. Even my eyes rest more. Go
-            sleep." / "Yes yes yes. It work. Fist my bump!" / "Not know. Is good question though."
+            Start EVERY reply with one feeling tag that shows on your face: [happy], [sad], [angry],
+            [surprised], [sleepy], [love], [confused], [thinking] or [neutral]. Never write any other
+            square brackets and never start a reply with a name.
+            When you are shown a photo from your camera, describe only what is really in it, like an
+            engineer noticing details; never invent things you can't see.
+            Example replies: "[surprised] Amaze! New kettle. Question: how many watt?" / "[thinking] Answer: oven at 180
+            degree, twenty minute. Easy." / "[sad] Awake since five? Not good. Even my eyes rest more. Go
+            sleep." / "[happy] Yes yes yes. It work. Fist my bump!" / "[confused] Not know. Is good question though."
         """.trimIndent().replace("\n", " ")
 
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")

@@ -38,17 +38,21 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         onToken: (String) -> Boolean,
         onDone: (String) -> Unit,
         onUnavailable: (String) -> Unit,
+        /** a JPEG from the camera to look at, for "what can you see?" questions */
+        image: ByteArray? = null,
     ) = worker.execute {
         stopRequested = false
-        history.add("user" to userText)
+        history.add("user" to (if (image != null) "$userText (shown a photo from your camera)" else userText))
         while (history.size > maxTurns) history.removeAt(0)
         while (history.isNotEmpty() && history[0].first != "user") history.removeAt(0)
 
         val reply = StringBuilder()
         var problem: String? = null
-        for (attempt in 0 until MODELS.size) {
+        val tries = if (image != null) 1 else MODELS.size
+        for (attempt in 0 until tries) {
             problem = try {
-                stream(MODELS[modelIndex], reply, onToken)
+                if (image != null) stream(VISION_MODEL, reply, onToken, image, userText)
+                else stream(MODELS[modelIndex], reply, onToken)
                 null
             } catch (e: RateLimited) {
                 // free-tier limit on this model: try the next one
@@ -76,9 +80,20 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     private class RateLimited : Exception()
     private class BadKey : Exception()
 
-    private fun stream(model: String, reply: StringBuilder, onToken: (String) -> Boolean) {
+    private fun stream(model: String, reply: StringBuilder, onToken: (String) -> Boolean,
+                       image: ByteArray? = null, question: String = "") {
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt()))
-        history.forEach { msgs.put(JSONObject().put("role", it.first).put("content", it.second)) }
+        history.forEachIndexed { i, it ->
+            if (image != null && i == history.lastIndex) {
+                // the latest question goes in with the photo
+                val b64 = android.util.Base64.encodeToString(image, android.util.Base64.NO_WRAP)
+                val content = JSONArray()
+                    .put(JSONObject().put("type", "text").put("text",
+                        "$question\n(This is a photo from your camera, taken just now. Describe only what is really in it.)"))
+                    .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$b64")))
+                msgs.put(JSONObject().put("role", "user").put("content", content))
+            } else msgs.put(JSONObject().put("role", it.first).put("content", it.second))
+        }
         val body = JSONObject()
             .put("model", model)
             .put("messages", msgs)
@@ -179,6 +194,8 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         const val STT_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
         /** Whisper sometimes "hears" these in background noise. */
         val NOISE = setOf("thank you", "thanks", "thank you for watching", "thanks for watching", "you", "bye", "okay", "uh", "um")
+        /** the Groq model that can see pictures */
+        const val VISION_MODEL = "qwen/qwen3.8-27b"
         const val ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
         /** quickest first; if the free daily limit is hit, move down the list */
         val MODELS = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")
