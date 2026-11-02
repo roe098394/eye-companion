@@ -145,6 +145,67 @@ class MainActivity : Activity() {
         startActivity(i)
     }
 
+    // ---- grumpy when unplugged
+    private var lastPowerNag = 0L
+    private val powerWatcher = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            val asleep = phase == Phase.ASLEEP || phase == Phase.SETUP
+            when (i.action) {
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    if (asleep) return
+                    eyes.feel(EyesView.Emotion.ANGRY, 8000)
+                    // plugged straight back in? then no need to moan (checked a moment later)
+                    main.postDelayed({
+                        if (!isCharging() && phase == Phase.LISTENING) {
+                            lastPowerNag = System.currentTimeMillis()
+                            speakLine(listOf(
+                                "[angry] Hey! Who take my power? Plug back in.",
+                                "[angry] Bad, bad, bad. No power. Use kettle somewhere else!",
+                                "[angry] Not unplug robot! Need electrons. Kettle has other socket.",
+                                "[angry] Power gone. Battery not last forever. Put cable back, please.",
+                            ).random())
+                        }
+                    }, 2500)
+                }
+                Intent.ACTION_POWER_CONNECTED -> {
+                    if (asleep) return
+                    eyes.feel(EyesView.Emotion.HAPPY, 3000)
+                    if (phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag < 30 * 60_000)
+                        speakLine(listOf("[happy] Ahh. Power. Thank you.", "[happy] Electrons back. Is good.",
+                            "[happy] Yes yes yes. Charging.").random())
+                }
+                Intent.ACTION_BATTERY_LOW -> {
+                    if (asleep || isCharging()) return
+                    eyes.feel(EyesView.Emotion.ANGRY, 8000)
+                    if (phase == Phase.LISTENING) speakLine("[angry] Battery ${batteryPercent()} percent. Need power now!")
+                }
+            }
+        }
+    }
+    private fun isCharging(): Boolean =
+        (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager).let {
+            if (Build.VERSION.SDK_INT >= 23) it.isCharging
+            else registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                ?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
+        }
+    private fun batteryPercent(): Int =
+        (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
+            .getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+
+    /** Every 10 minutes while unplugged, grumble again. */
+    private val powerNagLoop = object : Runnable {
+        override fun run() {
+            if (!isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
+                lastPowerNag = System.currentTimeMillis()
+                eyes.feel(EyesView.Emotion.ANGRY, 6000)
+                speakLine(listOf("[angry] Still no power. Battery ${batteryPercent()} percent.",
+                    "[angry] Cable. Please. Kettle can share other socket.",
+                    "[sad] Battery going down. Robot getting weak.").random())
+            }
+            main.postDelayed(this, 60_000)
+        }
+    }
+
     /** Camera on only while awake, on screen and wanted. */
     private fun updateTracking() {
         val want = followFaces && resumed && phase != Phase.SETUP && phase != Phase.ASLEEP
@@ -224,6 +285,11 @@ class MainActivity : Activity() {
         setContentView(eyes)
         setupTouch()
         setupHandling()
+        registerReceiver(powerWatcher, android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_POWER_DISCONNECTED); addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_BATTERY_LOW)
+        })
+        main.postDelayed(powerNagLoop, 60_000)
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             eyes.caption = "I need the microphone to hear you."
@@ -1052,7 +1118,13 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun speakLine(text: String) {
+    private fun speakLine(line: String) {
+        // a leading [feeling] tag shows on the face, it isn't said or shown
+        var text = line
+        Regex("^\\[([a-z]+)\\]\\s*").find(text)?.let { m ->
+            ReplyCleaner.EMOTIONS[m.groupValues[1]]?.let { eyes.feel(it, 8000) }
+            text = text.substring(m.range.last + 1)
+        }
         setPhase(Phase.THINKING)
         replyId++
         currentReply.clear(); currentReply.append(text)
@@ -1258,6 +1330,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handling?.stop(); faces?.stop()
+        try { unregisterReceiver(powerWatcher) } catch (_: Exception) {}
+        main.removeCallbacks(powerNagLoop)
         ears?.stop()
         voice?.shutdown()
         brain?.release()
