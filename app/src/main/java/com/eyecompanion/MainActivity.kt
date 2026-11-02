@@ -202,12 +202,10 @@ class MainActivity : Activity() {
             }
         }
     }
+    /** Plugged in to power? (Not "battery filling up": a full battery or a weak charger still counts.) */
     private fun isCharging(): Boolean =
-        (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager).let {
-            if (Build.VERSION.SDK_INT >= 23) it.isCharging
-            else registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-                ?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
-        }
+        (registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            ?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, -1) ?: -1).let { it != 0 }   // unknown = assume plugged
     private fun batteryPercent(): Int =
         (getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager)
             .getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
