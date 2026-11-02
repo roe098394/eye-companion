@@ -737,7 +737,7 @@ class MainActivity : Activity() {
 
                 status("Waking up…")
                 // Brain first: it needs the biggest single block of memory.
-                val b = Brain(llm.absolutePath) { systemPrompt() }
+                val b = Brain(llm.absolutePath) { tabletPrompt() }
                 brain = b
                 b.load { ok ->
                     // the smallest brain doesn't fit: carry on without it (online / PC brains still work)
@@ -1625,6 +1625,16 @@ class MainActivity : Activity() {
 
     private val companionName get() = prefs.getString("name", "Pip") ?: "Pip"
     private val carMode get() = prefs.getBoolean("carMode", false)
+
+    /** The tablet's own small brain gets a short version: the full one doesn't fit and takes minutes to read. */
+    private fun tabletPrompt(): String {
+        val off = unpluggedMins
+        return "You are $companionName, a cheeky little robot living in an old tablet on the kitchen bench next to the " +
+            "kettle, your arch-enemy. Mark built you. Talk in short clipped fragments, one or two sentences: " +
+            "\"Human need sleep.\" \"Is good.\" Be funny, a bit sarcastic, kind underneath, child-friendly. " +
+            "Start every reply with one feeling tag: [happy], [sad], [angry], [surprised], [curious], [love], [laughing] or [neutral]." +
+            (if (off >= 0) " You are unplugged from your charger and grumpy about it." else "")
+    }
 
     private fun systemPrompt(): String {
         val today = java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.UK).format(java.util.Date())

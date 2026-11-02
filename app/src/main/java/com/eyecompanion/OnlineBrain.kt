@@ -65,6 +65,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             }
             if (problem == null || problem == "bad key" || reply.isNotEmpty()) break
         }
+        if (problem == "busy" && reply.isEmpty()) lastProblem = "Online brain's free limit used up for now: using my own brain."
         if (problem != null && reply.isEmpty()) {
             history.removeAt(history.lastIndex)
             lastFailure = System.currentTimeMillis()
@@ -230,6 +231,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         const val VISION_MODEL = "qwen/qwen3.8-27b"
         const val ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
         /** quickest first; if the free daily limit is hit, move down the list */
-        val MODELS = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")
+        val MODELS = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b",
+            "llama-3.1-8b-instant", "llama-3.3-70b-versatile")      // more free daily allowance at the end
     }
 }
