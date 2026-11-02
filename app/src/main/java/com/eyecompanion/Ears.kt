@@ -48,6 +48,8 @@ class Ears(
     @Volatile var paused = false
         set(value) { if (field && !value) needReset = true; field = value }
     @Volatile private var running = false
+    /** false once the listening loop has stopped (mic failed), so it can be restarted */
+    val alive get() = running
     @Volatile private var needReset = false
     private var thread: Thread? = null
 

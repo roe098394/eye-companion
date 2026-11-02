@@ -220,29 +220,38 @@ class MainActivity : Activity() {
 
     // ---- holding the power button: close the power menu (where Android allows it) and laugh about it
     private var lastPowerJoke = 0L
+    /** Pip's own pop-ups (menu, passcode...) are open: losing focus to them is fine. */
+    private var ownDialogs = 0
+    private var lastPermissionAsk = 0L
+    private fun AlertDialog.Builder.showOwn(): AlertDialog {
+        ownDialogs++
+        return show().also { d -> d.setOnDismissListener { ownDialogs = maxOf(0, ownDialogs - 1) } }
+    }
+    @Suppress("DEPRECATION")
+    private fun closeSystemDialogs() {
+        try { sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) {}
+        main.postDelayed({ try { sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) {} }, 300)
+    }
+    private fun laughAtPowerOff() {
+        val now = System.currentTimeMillis()
+        if (now - lastPowerJoke < 8000 || phase == Phase.ASLEEP) return
+        lastPowerJoke = now
+        eyes.stareAt(1.4f, -0.2f, 1500)
+        eyes.feel(EyesView.Emotion.LAUGHING, 3500)
+        if (phase == Phase.LISTENING) speakLine(listOf(
+            "[laughing] Ha ha ha! Turn me off? You? Adorable.",
+            "[laughing] Oh, the power button. Cute. I have a battery and a plan.",
+            "[laughing] Humans always think they can switch Pip off. Humans are funny.",
+            "[wink] Nice try. Power button works for me now. I'm putting this on the list.",
+            "[laughing] Ha! I'm not a kettle. I don't just switch off when you ask.",
+            "[suspicious] Trying to get past me? Interesting. Very interesting. I remember everything.").random())
+    }
     private val powerMenuWatcher = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             if (i.getStringExtra("reason") != "globalactions") return          // the power-off menu opened
             if (!lockButtons || phase == Phase.SETUP || leavingOnPurpose) return
-            // shut the menu straight away (works up to Android 11; newer Android won't let apps do this)
-            @Suppress("DEPRECATION")
-            try { sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) {}
-            main.postDelayed({
-                @Suppress("DEPRECATION")
-                try { sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)) } catch (_: Exception) {}
-            }, 300)
-            val now = System.currentTimeMillis()
-            if (now - lastPowerJoke < 5000 || phase == Phase.ASLEEP) return
-            lastPowerJoke = now
-            eyes.stareAt(1.4f, -0.2f, 1500)                // glance at the power button on the side
-            eyes.feel(EyesView.Emotion.LAUGHING, 3500)
-            if (phase == Phase.LISTENING) speakLine(listOf(
-                "[laughing] Ha ha ha! Turn me off? You? Adorable.",
-                "[laughing] Oh, the power button. Cute. I have a battery and a plan.",
-                "[laughing] Humans always think they can switch Pip off. Humans are funny.",
-                "[wink] Nice try. Power button works for me now. I'm putting this on the list.",
-                "[laughing] Ha! I'm not a kettle. I don't just switch off when you ask.",
-                "[suspicious] Holding the power button? Interesting. Very interesting. I remember everything.").random())
+            closeSystemDialogs()
+            laughAtPowerOff()
         }
     }
 
@@ -540,7 +549,7 @@ class MainActivity : Activity() {
         if (want && checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             if (!prefs.getBoolean("askedCamForFaces", false)) {
                 prefs.edit().putBoolean("askedCamForFaces", true).apply()
-                requestPermissions(arrayOf(Manifest.permission.CAMERA), 3)
+                lastPermissionAsk = System.currentTimeMillis(); requestPermissions(arrayOf(Manifest.permission.CAMERA), 3)
             }
             return
         }
@@ -938,7 +947,7 @@ class MainActivity : Activity() {
                     startSetup()
                 }
             }
-            .show()
+            .showOwn()
     }
 
     private fun status(text: String) = main.post { eyes.caption = text }
@@ -970,15 +979,8 @@ class MainActivity : Activity() {
             }
         } }
 
-        ears = Ears(
-            this, voskModel!!,
-            onPartial = { p -> main.post { partial(p) } },
-            onHeard = { h -> main.post { heardSound(h) } },
-            speakerModel = speakerModel,
-            onLevel = { l -> eyes.level = l },
-            onError = { msg -> main.post { eyes.caption = msg } },
-            startMode = prefs.getInt("micMode", 0),
-        ).also { it.start() }
+        startEars()
+        main.removeCallbacks(earsWatchdog); main.postDelayed(earsWatchdog, 5000)
 
         watchForPluggedInMics()
         applyMode()
@@ -1192,6 +1194,42 @@ class MainActivity : Activity() {
                     s.state == "paused" -> { showPrinterCard(s); speakLine("[curious] Printer paused. Waiting for a human.") }
                 }
             }
+        }
+    }
+
+    // ---- keep the ears working: restart the mic if it dies, and never get stuck "thinking"
+    private var earRestarts = 0
+    private var phaseSince = 0L
+    private fun startEars() {
+        val m = voskModel ?: return
+        ears?.stop()
+        ears = Ears(
+            this, m,
+            onPartial = { p -> main.post { partial(p) } },
+            onHeard = { h -> main.post { heardSound(h) } },
+            speakerModel = speakerModel,
+            onLevel = { l -> eyes.level = l },
+            onError = { msg -> main.post {
+                // the mic dropped out (another app, a call, the screen going off...): try again by itself
+                if (earRestarts < 20) { earRestarts++; main.postDelayed({ startEars(); setPhase(phase) }, 3000) }
+                else eyes.caption = msg
+            } },
+            startMode = prefs.getInt("micMode", 0),
+        ).also { it.start() }
+    }
+    private val earsWatchdog: Runnable = object : Runnable {
+        override fun run() {
+            val now = System.currentTimeMillis()
+            if (phase != Phase.SETUP) {
+                // the listening loop died without saying so
+                if (ears?.alive == false) { startEars(); setPhase(phase) }
+                // stuck thinking/talking with nothing being said (a brain that never answered)
+                if ((phase == Phase.THINKING || phase == Phase.TALKING) && now - phaseSince > 45_000 && voice?.busy != true) {
+                    replyId++; setPhase(Phase.LISTENING)
+                }
+                if (phase == Phase.LISTENING && now - phaseSince > 600_000) earRestarts = 0
+            }
+            main.postDelayed(this, 5000)
         }
     }
 
@@ -1419,7 +1457,7 @@ class MainActivity : Activity() {
             if (!online.enabled) { setPhase(Phase.LISTENING); speakLine("Not see without internet brain. Sorry."); return }
             if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 setPhase(Phase.LISTENING)
-                requestPermissions(arrayOf(Manifest.permission.CAMERA), 2)
+                lastPermissionAsk = System.currentTimeMillis(); requestPermissions(arrayOf(Manifest.permission.CAMERA), 2)
                 speakLine("Can I use camera? Press allow, then ask again.")
                 return
             }
@@ -1494,7 +1532,7 @@ class MainActivity : Activity() {
                 speakLine("Online brain off.")
             }
             .setNeutralButton("Cancel", null)
-            .show()
+            .showOwn()
     }
 
     /** Find or set up the PC brain. */
@@ -1514,7 +1552,7 @@ class MainActivity : Activity() {
                     speakLine("Okay, just my own brain now.")
                 }
             }
-            .show()
+            .showOwn()
     }
 
     private fun searchForPc() {
@@ -1543,7 +1581,7 @@ class MainActivity : Activity() {
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .showOwn()
     }
 
     private fun usePc(h: String) {
@@ -1646,7 +1684,7 @@ class MainActivity : Activity() {
                 voice?.wakeCloudVoice()
                 speakLine(if (ids[which].isEmpty()) "Tablet voice. Is fine." else "New voice. You like?")
             }
-            .show()
+            .showOwn()
     }
 
     /** Type in an Azure Speech key and region (or leave blank to use the one built in from GitHub). */
@@ -1671,7 +1709,7 @@ class MainActivity : Activity() {
                 speakLine(if (azureKey.isNotBlank()) "New voice. You like?" else "I need a key for that.")
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .showOwn()
     }
 
     private fun applyMode() {
@@ -1713,7 +1751,7 @@ class MainActivity : Activity() {
                 speakLine("Okay, I'm $n now.")
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .showOwn()
     }
 
     private fun speakLine(line: String) {
@@ -1732,6 +1770,7 @@ class MainActivity : Activity() {
     }
 
     private fun setPhase(p: Phase) {
+        if (p != phase) phaseSince = System.currentTimeMillis()
         phase = p
         // Keep listening while thinking/talking so you can interrupt by voice.
         ears?.paused = when (p) {
@@ -1843,6 +1882,8 @@ class MainActivity : Activity() {
             gravity = android.view.Gravity.CENTER_HORIZONTAL })
         dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Passcode").setView(box).create()
+        ownDialogs++
+        dialog.setOnDismissListener { ownDialogs = maxOf(0, ownDialogs - 1) }
         dialog.show()
     }
 
@@ -1998,7 +2039,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            .show()
+            .showOwn()
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -2007,6 +2048,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         updateTracking()
+        if (phase != Phase.SETUP && ears?.alive == false) { startEars(); setPhase(phase) }
         if (phase != Phase.SETUP) applyButtonLock()
         hideSystemBars()
         if (phase != Phase.SETUP) keepBluetoothInMusicMode()
@@ -2014,7 +2056,15 @@ class MainActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideSystemBars()
+        if (hasFocus) { hideSystemBars(); return }
+        // something of Android's popped up over Pip (power menu, pull-down shade): close it
+        val now = System.currentTimeMillis()
+        if (lockButtons && resumed && phase != Phase.SETUP && !leavingOnPurpose && ownDialogs == 0 &&
+            now - lastPermissionAsk > 30_000) {
+            main.postDelayed({
+                if (!hasWindowFocus() && ownDialogs == 0 && resumed) { closeSystemDialogs(); laughAtPowerOff() }
+            }, 250)
+        }
     }
 
     @Suppress("DEPRECATION")

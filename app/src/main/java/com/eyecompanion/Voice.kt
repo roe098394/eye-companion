@@ -121,6 +121,9 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         if (pending.get() == 0) onFinishedTalking()
     }
 
+    /** Still has something to say. */
+    val busy get() = pending.get() > 0
+
     fun shutUp() {
         generation++
         try { track?.pause(); track?.flush() } catch (_: Exception) {}
@@ -171,8 +174,9 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             val id = "t${counter++}"
             fallbackLatches[id] = done
             pending.incrementAndGet()                  // balanced by the tts onDone
-            tts.speak(text, TextToSpeech.QUEUE_ADD, null, id)
-            done.await(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) {
+                fallbackLatches.remove(id); finishedOne()             // couldn't speak: don't wait for nothing
+            } else done.await(30, java.util.concurrent.TimeUnit.SECONDS)
             finishedOne()
         }
     }
