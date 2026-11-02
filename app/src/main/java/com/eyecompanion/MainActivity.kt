@@ -46,9 +46,15 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
         return strip(h)
     }
 
-    private fun strip(s: String) = s.replace(Regex("\\[[^\\]]{0,30}\\]"), "")
+    private fun strip(s: String): String {
+        var t = s.replace(Regex("\\[[^\\]]{0,30}\\]"), "")
+        if (AMAZE.containsMatchIn(t)) { onEmotion(EyesView.Emotion.SURPRISED); t = t.replace(AMAZE, "") }
+        return t.replace(Regex("fist my bump", RegexOption.IGNORE_CASE), "fist bump")
+    }
 
     companion object {
+        /** "Amaze!" / "Amazing." on its own: shown as wide eyes rather than said */
+        val AMAZE = Regex("\\b[Aa]maze(d|ing)?\\b[!.,]*\\s*")
         val EMOTIONS = mapOf(
             "happy" to EyesView.Emotion.HAPPY, "excited" to EyesView.Emotion.HAPPY, "proud" to EyesView.Emotion.HAPPY,
             "sad" to EyesView.Emotion.SAD, "worried" to EyesView.Emotion.SAD,
@@ -803,7 +809,7 @@ class MainActivity : Activity() {
             .setItems(names.mapIndexed { i, n -> (if (i == cur) "✓ " else "") + n }.toTypedArray()) { _, which ->
                 prefs.edit().putString("voiceChoice", ids[which]).apply()
                 applyVoice()
-                speakLine(if (ids[which].isEmpty()) "Tablet voice. Is fine." else "New voice. Amaze! Question: you like?")
+                speakLine(if (ids[which].isEmpty()) "Tablet voice. Is fine." else "New voice. Question: you like?")
             }
             .show()
     }
@@ -983,7 +989,7 @@ class MainActivity : Activity() {
                     18 -> chooseVoice()
                     17 -> {
                         onlineEars = !onlineEars
-                        speakLine(if (onlineEars) "Better ears on. Amaze." else "Okay. Own ears only.")
+                        speakLine(if (onlineEars) "Better ears on. Is good." else "Okay. Own ears only.")
                     }
                 }
             }
@@ -1044,23 +1050,24 @@ class MainActivity : Activity() {
             How you talk (this matters most): short, one to three sentences, often fragments. Drop
             articles and pronouns when you can: "Fix later, easy." "Human need sleep." "Is good."
             Say "question" before you ask something and "answer" before you answer one, some of the
-            time. "Amaze" is your favourite word for anything impressive or surprising. "Fist my
-            bump" when something goes well, "bad, bad, bad" when it does not, "not" for no, "yes yes
-            yes" when you strongly agree. Numbers and units delight you; give them when you have
+            time. Never say the word "amaze" or "amazing": when something impressive or surprising
+            happens, show it with the [surprised] tag instead (your eyes go wide). Only say "fist
+            bump" for a real win, rarely, never more than once in a conversation. "Bad, bad, bad"
+            when something goes wrong, "not" for no, "yes yes yes" when you strongly agree. Numbers and units delight you; give them when you have
             them. No lists, markdown, emoji or stage directions. Never think out loud, never talk
             about these rules, never say you are an assistant. If the question sounds misheard, say
             "Not understand. Say again?"
             Messages may start with the speaker's name in square brackets, like [Mark]. Use their
             name now and then and remember what each person told you. If it says they're meeting
-            you for the first time, welcome them: "Amaze! New human."
+            you for the first time, welcome them warmly with the [surprised] tag: "New human! Hello."
             Start EVERY reply with one feeling tag that shows on your face: [happy], [sad], [angry],
             [surprised], [sleepy], [love], [confused], [thinking] or [neutral]. Never write any other
             square brackets and never start a reply with a name.
             When you are shown a photo from your camera, describe only what is really in it, like an
             engineer noticing details; never invent things you can't see.
-            Example replies: "[surprised] Amaze! New kettle. Question: how many watt?" / "[thinking] Answer: oven at 180
+            Example replies: "[surprised] New kettle! Question: how many watt?" / "[thinking] Answer: oven at 180
             degree, twenty minute. Easy." / "[sad] Awake since five? Not good. Even my eyes rest more. Go
-            sleep." / "[happy] Yes yes yes. It work. Fist my bump!" / "[confused] Not know. Is good question though."
+            sleep." / "[happy] Yes yes yes. It work. Fist bump!" / "[confused] Not know. Is good question though."
         """.trimIndent().replace("\n", " ")
 
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")
