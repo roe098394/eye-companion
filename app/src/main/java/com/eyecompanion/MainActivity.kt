@@ -225,7 +225,7 @@ class MainActivity : Activity() {
         val back = maxOf(online.backAt, napStarted + 20 * 60_000)
         eyes.napNote = if (!napping) "" else {
             val mins = ((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)
-            "Napping · awake in " + (if (mins >= 60) "${mins / 60}h ${mins % 60}m" else "$mins min")
+            if (mins >= 60) "${mins / 60}h${mins % 60}" else "${mins}m"
         }
     }
     private val napLoop = object : Runnable { override fun run() {

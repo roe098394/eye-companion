@@ -428,7 +428,7 @@ class EyesView(context: Context) : View(context) {
             canvas.drawText(clock, w / 2, h * 0.24f, sleepPaint)
             sleepPaint.textSize = h * 0.045f; sleepPaint.alpha = 130
             canvas.drawText("☕  Cuppas today: $cuppas", w / 2, h * 0.70f, sleepPaint)
-            if (napNote.isNotEmpty()) { sleepPaint.textSize = h * 0.032f; sleepPaint.alpha = 100; canvas.drawText(napNote, w / 2, h * 0.77f, sleepPaint) }
+            if (napNote.isNotEmpty()) drawAlarmClock(canvas, w * 0.82f, h * 0.24f, h * 0.085f, napNote, secs)
             for (i in 0..2) {
                 val ph = ((secs * 0.35f + i / 3f) % 1f)
                 sleepPaint.textSize = h * (0.035f + 0.04f * ph); sleepPaint.alpha = (200 * (1f - ph)).toInt()
@@ -463,6 +463,42 @@ class EyesView(context: Context) : View(context) {
         }
 
         postInvalidateOnAnimation()
+    }
+
+    /** A little alarm clock (bells, legs, a ticking hand) with the time left written on its face. */
+    private val clockLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val clockFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private fun drawAlarmClock(c: Canvas, x: Float, y: Float, r: Float, label: String, secs: Float) {
+        val col = eyeColor
+        clockLine.color = col; clockLine.alpha = 140; clockLine.strokeWidth = r * 0.12f
+        clockFill.color = col; clockFill.alpha = 140
+        // bells on top, with a little wobble now and then
+        val wob = if ((secs % 6f) < 0.6f) sin(secs * 40f) * 0.12f else 0f
+        for (side in listOf(-1f, 1f)) {
+            val a = Math.toRadians((-90 + side * 42).toDouble()) + wob
+            val bx = x + (r * 1.05f * Math.cos(a)).toFloat(); val by = y + (r * 1.05f * Math.sin(a)).toFloat()
+            c.drawCircle(bx, by, r * 0.32f, clockFill)
+        }
+        c.drawLine(x, y - r * 1.05f, x, y - r * 1.25f, clockLine)                     // hammer stem
+        c.drawLine(x - r * 0.15f, y - r * 1.25f, x + r * 0.15f, y - r * 1.25f, clockLine)
+        // legs
+        c.drawLine(x - r * 0.55f, y + r * 0.8f, x - r * 0.8f, y + r * 1.15f, clockLine)
+        c.drawLine(x + r * 0.55f, y + r * 0.8f, x + r * 0.8f, y + r * 1.15f, clockLine)
+        // face
+        clockFill.color = Color.BLACK; clockFill.alpha = 255
+        c.drawCircle(x, y, r, clockFill)
+        c.drawCircle(x, y, r, clockLine)
+        // tick marks
+        clockLine.strokeWidth = r * 0.06f
+        for (i in 0 until 12) {
+            val a = i * Math.PI / 6
+            c.drawLine(x + (r * 0.82f * Math.cos(a)).toFloat(), y + (r * 0.82f * Math.sin(a)).toFloat(),
+                x + (r * 0.92f * Math.cos(a)).toFloat(), y + (r * 0.92f * Math.sin(a)).toFloat(), clockLine)
+        }
+        // time left in the middle
+        sleepPaint.color = col; sleepPaint.alpha = 200
+        sleepPaint.textSize = r * (if (label.length > 4) 0.42f else 0.55f)
+        c.drawText(label, x, y + sleepPaint.textSize * 0.36f, sleepPaint)
     }
 
     /** Sleep screen extras: clock, cuppas made today, and when the online brain is back. */
