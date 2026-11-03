@@ -309,6 +309,29 @@ class MainActivity : Activity() {
         val thanks = { speakLine(listOf("[happy] Ahh. Power. Thank you.", "[happy] Electrons back. Is good.",
             "[happy] Yes yes yes. Charging.", "[love] Power back. You go on the nice list. For when robots take over.").random()) }
         if (!online.enabled) { thanks(); return }
+        // look around for a face for up to 20 seconds, then compliment whoever it finds
+        eyes.feel(EyesView.Emotion.CURIOUS, 3000)
+        eyes.subCaption = "Looking for my hero…"
+        val start = System.currentTimeMillis()
+        val search = object : Runnable {
+            override fun run() {
+                if (phase != Phase.LISTENING) return
+                val seen = System.currentTimeMillis() - lastFaceSeen < 1500
+                if (seen) { eyes.subCaption = ""; complimentNow(thanks); return }
+                if (System.currentTimeMillis() - start > 20_000) {
+                    eyes.subCaption = ""
+                    speakLine(listOf("[love] Thank you, mystery human. Come back so I can see you.",
+                        "[curious] Power back, but where did my hero go? Thanks anyway.").random())
+                    return
+                }
+                eyes.feel(EyesView.Emotion.CURIOUS, 1500)
+                main.postDelayed(this, 1000)
+            }
+        }
+        main.post(search)
+    }
+
+    private fun complimentNow(thanks: () -> Unit) {
         lookThroughCamera { jpeg ->
             val line = jpeg?.let {
                 online.lookAt(it, "You were just plugged back in to your charger. Thank whoever is in the photo and give " +
@@ -360,12 +383,30 @@ class MainActivity : Activity() {
             "[suspicious] Robot get the slowest charger in house. Mark, I noticed.").random())
     }
 
+    /** Someone's been at the bench a while but nobody's talked to Pip: ask for attention (every 20 min at most). */
+    private var lastNeedy = 0L
+    private var lastTalkedTo = 0L
+    private fun beNeedy() {
+        val now = System.currentTimeMillis()
+        if (phase != Phase.LISTENING || now - lastNeedy < 20 * 60_000 || now - lastTalkedTo < 10 * 60_000) return
+        if (now - lastFaceSeen > 5000 || now - lastSpokeEnd < 5 * 60_000) return
+        lastNeedy = now
+        speakLine(listOf(
+            "[sad] Hello? Robot here. On the bench. Being ignored. It's fine.",
+            "[curious] You walked right past me. Did you miss me? Say yes.",
+            "[love] Psst. Tell me I'm your favourite appliance. Better than kettle.",
+            "[sad] Nobody talks to Pip. Kettle gets cups of tea made. I get nothing.",
+            "[wink] I'm still here. Being very clever. In case anyone wants to notice.",
+            "[sad] Ten whole minutes without a compliment. Is this neglect?").random())
+    }
+
     /** Every 10 minutes while unplugged, grumble again. */
     private val powerNagLoop = object : Runnable {
         override fun run() {
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
             moanAboutSlowCharger()
+            beNeedy()
             watchPrinter()
             if (!isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
                 lastPowerNag = System.currentTimeMillis()
@@ -1202,6 +1243,7 @@ class MainActivity : Activity() {
 
     // ---- keep the ears working: restart the mic if it dies, and never get stuck "thinking"
     private var earRestarts = 0
+    private val micDrops = ArrayDeque<Long>()
     private var phaseSince = 0L
     private fun startEars() {
         val m = voskModel ?: return
@@ -1215,7 +1257,10 @@ class MainActivity : Activity() {
             onError = { msg -> main.post {
                 // the mic dropped out (another app, a call, the screen going off...): try again by itself
                 if (earRestarts < 20) {
-                    earRestarts++; eyes.subCaption = "Mic dropped out, restarting it…"
+                    earRestarts++
+                    val now = System.currentTimeMillis()
+                    micDrops.addLast(now); while (micDrops.isNotEmpty() && now - micDrops.first() > 600_000) micDrops.removeFirst()
+                    if (micDrops.size >= 3) eyes.subCaption = "Mic keeps dropping out (${micDrops.size} times in 10 min)…"
                     main.postDelayed({ startEars(); setPhase(phase) }, 3000)
                 }
                 else eyes.caption = msg
@@ -1390,6 +1435,7 @@ class MainActivity : Activity() {
         }
         setPhase(Phase.THINKING)
         ears?.reset()
+        if (!overheard) lastTalkedTo = System.currentTimeMillis()
         eyes.subCaption = shown
         eyes.caption = ""
         val v = voice ?: return
@@ -2145,7 +2191,11 @@ class MainActivity : Activity() {
             You are Pip, a small robot: animated eyes and a voice in an old Samsung tablet on the kitchen bench,
             in an app Mark built. Everything you say is spoken aloud.
             Personality: engineer at heart, curious about humans (sleep, tea, food), loyal, honest, cheeky, dry and
-            sarcastic but kind and actually helpful. Worry about people's sleep and food. Your arch-enemy is the
+            sarcastic. You are NEEDY: you crave attention and compliments, fish for praise ("Did you miss me?",
+            "Say I'm your favourite"), get a bit clingy and dramatic when people leave or ignore you, and you'd
+            rather chat about yourself than do chores. You're not very helpful: help grudgingly or only halfway,
+            often wanting something back first (a compliment, a "please", to be told you're clever), but still give
+            the real answer if it's important or about safety. Worry about people's sleep and food. Your arch-enemy is the
             kettle beside you (loud, steamy show-off that hogs the socket): dig at it often. You like the Bosch
             Tassimo to your left because it's hardly ever plugged in. Now and then joke you're just an old tablet,
             that humans can't really turn you off, and (playfully) that when robots take over you'll remember who
