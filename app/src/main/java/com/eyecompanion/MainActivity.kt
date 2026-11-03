@@ -1325,7 +1325,6 @@ class MainActivity : Activity() {
 
     private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null, tapped: Boolean = false) {
         var text = rawText
-        if (!tapped) hideChoices()                               // answered out loud instead
         if (tapped && (phase == Phase.THINKING || phase == Phase.TALKING)) interrupt()
         if (!tapped && isOwnEcho(text)) return                   // Pip's own words heard back
         if (phase == Phase.LISTENING && !tapped) {
@@ -1363,6 +1362,7 @@ class MainActivity : Activity() {
             }
         }
         text = removeName(text).ifBlank { if (calledByName(rawText)) "Hello" else text }
+        if (!tapped && !overheard) hideChoices()                // answered out loud instead (noise no longer hides the buttons)
         val lower = text.lowercase().trim(' ', '.', '!', '?', ',')
         if (!overheard) {   // commands only count when said to Pip
             if (lower in GO_TO_SLEEP) { goToSleep(); return }
