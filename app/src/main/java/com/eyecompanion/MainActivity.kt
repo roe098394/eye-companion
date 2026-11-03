@@ -1428,8 +1428,15 @@ class MainActivity : Activity() {
         main.postDelayed({
             speakLine(listOf("[love] A baby $name! It's yours to keep.", "[excited] It's a $name! Into your collection it goes!",
                 "[love] Aww, a little $name! You have ${got.size} animals now!").random())
-            main.postDelayed({ if (chloeMode) showChoices(listOf("Again!", "My animals")) { p ->
-                if (p == "Again!") playGame(gameKind) else showAnimals() } }, 4000)
+            // straight on to the next question once Pip has finished talking
+            val kind = gameKind
+            var waited = 0
+            val next = object : Runnable { override fun run() {
+                if (!chloeMode || gameRound != null || kind.isEmpty()) return
+                if ((phase == Phase.LISTENING && !eyes.hatching) || waited > 15) playGame(kind)
+                else { waited++; main.postDelayed(this, 1000) }
+            } }
+            main.postDelayed(next, 3000)
         }, 2600)
     }
 
