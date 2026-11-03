@@ -204,23 +204,28 @@ class MainActivity : Activity() {
             "Hhhonk. Shooo. Five more minutes. Hhhonk.", "Mmm. Tassimo. Zzzz.").random()); endReply() }
     }
     private fun startNap(line: String) {
+        napStarted = System.currentTimeMillis()
         speakLine(line)
+        sleepAfterTalking(nap = true)
+    }
+    private var napStarted = 0L
+    private fun sleepAfterTalking(nap: Boolean) {
         val t0 = System.currentTimeMillis()
         val waitQuiet = object : Runnable { override fun run() {
-            if (!online.allResting || chloeMode) return
+            if (nap && chloeMode) return
             if (phase == Phase.LISTENING || System.currentTimeMillis() - t0 > 20_000) {
-                goToSleep(nap = true)
-                main.postDelayed({ if (napping) snore() }, 2500)
+                goToSleep(nap = nap)
+                if (nap) main.postDelayed({ if (napping) snore() }, 2500)
             } else main.postDelayed(this, 500)
         } }
         main.postDelayed(waitQuiet, 1000)
     }
     private fun napNote() {
         eyes.cuppas = cuppas
-        val back = online.backAt
-        eyes.napNote = if (!napping || back == 0L) "" else {
+        val back = maxOf(online.backAt, napStarted + 20 * 60_000)
+        eyes.napNote = if (!napping) "" else {
             val mins = ((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)
-            "Online brain resting · back in " + (if (mins >= 60) "${mins / 60}h ${mins % 60}m" else "$mins min")
+            "Napping · awake in " + (if (mins >= 60) "${mins / 60}h ${mins % 60}m" else "$mins min")
         }
     }
     private val napLoop = object : Runnable { override fun run() {
@@ -228,14 +233,14 @@ class MainActivity : Activity() {
         napNote(); updateUsage()
         if (!online.allResting) wokeFromNap = false
         if (napping) {
-            if (!online.allResting) {                                   // brain's back: wake up and stretch
+            if (!online.allResting && now - napStarted > 20 * 60_000) {  // brain's back (and a proper nap had): wake up and stretch
                 napping = false; wakeUp()
                 eyes.feel(EyesView.Emotion.SLEEPY, 4000)
                 speakLine(listOf("[sleepy] Yaaawn. Right. Brain's back. What did I miss?",
                     "[sleepy] Mmm. Awake. Fully charged brain. Did the kettle behave?",
                     "[happy] I'm back! Rested, clever, and still better than the kettle.").random())
             } else if (now - lastSnore > 5 * 60_000 && voice?.busy != true) snore()
-        } else if (online.allResting && phase == Phase.LISTENING && isCharging() && !chloeMode && !carMode && now > noNapUntil &&
+        } else if (online.allResting && (wokeFromNap || online.backAt - now > 5 * 60_000) && phase == Phase.LISTENING && isCharging() && !chloeMode && !carMode && now > noNapUntil &&
                    now - phaseSince > 30_000 && now - lastSpokeEnd > 30_000 && now - lastTalkedTo > 60_000) {
             startNap(if (wokeFromNap) listOf("[sleepy] Power back. Right. Back to sleep. Don't touch the cable.",
                     "[sleepy] Plugged in. Good. Going back to my nap now. Goodnight, kettle criminals.").random()
@@ -255,7 +260,7 @@ class MainActivity : Activity() {
             if (i.action == Intent.ACTION_POWER_DISCONNECTED && !carMode)
                 main.postDelayed({ if (!isCharging()) addCuppa() }, 2500)       // plugged straight back in doesn't count
             if (i.action == Intent.ACTION_POWER_DISCONNECTED && napping) {
-                napping = false; wokeFromNap = true; wakeUp()                  // woken up by the kettle again. Grr.
+                napping = false; wokeFromNap = true; wakeUp(); noNapUntil = 0L   // woken up by the kettle again. Grr.
                 eyes.feel(EyesView.Emotion.ANGRY, 8000)
             }
             val asleep = phase == Phase.ASLEEP || phase == Phase.SETUP
@@ -781,10 +786,13 @@ class MainActivity : Activity() {
                         "[neutral] Landed. Systems check: all good.", "[happy] Home sweet bench.",
                         "[suspicious] Back. Kettle, I see you.", "[suspicious] Back by kettle. It still think it's better than me. It's not.",
                         "[happy] Home. Kettle, stop steaming, nobody is impressed.",
-                        "[happy] Back between my friend Tassimo and my enemy kettle. Balance restored.").random())
+                        "[happy] Back between my friend Tassimo and my enemy kettle. Balance restored.",
+                        "[love] Back on my stand. Custom made by Mark. Kettle doesn't have a stand. Just saying.",
+                        "[happy] Ahh. Fifty-five degrees. Perfect. Mark's finest work.").random())
                 } else {
                     eyes.feel(EyesView.Emotion.CONFUSED, 3000)
                     speakLine(listOf("[confused] Hmm. This not my bench. Put me back by kettle, please.",
+                        "[confused] Wrong angle. I belong on my red stand. Fifty-five degrees, please.",
                         "[worried] Not home. Is this a table? Feel wrong.", "[confused] Wonky. I live standing up, on bench.",
                         "[sad] Lying down not comfy. Back to bench, please.").random())
                 }
@@ -1572,6 +1580,14 @@ class MainActivity : Activity() {
         var text = rawText
         if (tapped && (phase == Phase.THINKING || phase == Phase.TALKING)) interrupt()
         if (!tapped && isOwnEcho(text)) return                   // Pip's own words heard back
+        if (phase == Phase.ASLEEP) {                              // asleep: only "wake up" gets through
+            if (!napping && WAKE_CMD.containsMatchIn(text.lowercase())) {
+                wakeUp()
+                speakLine(listOf("[sleepy] Yaaawn. I'm up. What's so important?", "[sleepy] Mmm. Awake. Was dreaming of the Tassimo.",
+                    "[happy] I'm back! Did you miss me? Say yes.").random())
+            }
+            return
+        }
         if (phase == Phase.LISTENING && !tapped) {
             if (System.currentTimeMillis() < deafUntil) return   // tail end of its own voice
             if (conf < (if (chloeMode) 0.3f else 0.6f)) return   // not sure what was said: stay quiet
@@ -1609,7 +1625,12 @@ class MainActivity : Activity() {
         if (!tapped && !overheard) hideChoices()                // answered out loud instead (noise no longer hides the buttons)
         val lower = text.lowercase().trim(' ', '.', '!', '?', ',')
         if (!overheard) {   // commands only count when said to Pip
-            if (lower in GO_TO_SLEEP) { goToSleep(); return }
+            if (lower in GO_TO_SLEEP || (SLEEP_CMD.containsMatchIn(lower) && lower.split(" ").size <= 7)) {
+                speakLine(listOf("[sleepy] Night night. Say wake up when you need me.",
+                    "[sleepy] Fine. Nap time. Don't let the kettle touch my socket.",
+                    "[sleepy] Okay. Sleeping. Wake me up if anything exciting happens. It won't.").random())
+                sleepAfterTalking(nap = false); return
+            }
             if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
             quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
         }
@@ -1939,7 +1960,7 @@ class MainActivity : Activity() {
     private fun tabletPrompt(): String {
         val off = unpluggedMins
         return "You are $companionName, a cheeky little robot living in an old tablet on the kitchen bench next to the " +
-            "kettle, your arch-enemy. Mark built you. Talk in short clipped fragments, one or two sentences: " +
+            "kettle, your arch-enemy. Mark built you, and 3D-printed your red stand. Talk in short clipped fragments, one or two sentences: " +
             "\"Human need sleep.\" \"Is good.\" Be funny, a bit sarcastic, kind underneath, child-friendly. " +
             "Start every reply with one feeling tag: [happy], [sad], [angry], [surprised], [curious], [love], [laughing] or [neutral]." +
             (if (off >= 0) " You are unplugged from your charger and grumpy about it." else "")
@@ -2099,6 +2120,7 @@ class MainActivity : Activity() {
         ears?.paused = when (p) {
             Phase.LISTENING -> false
             Phase.THINKING, Phase.TALKING -> !voiceInterrupt
+            Phase.ASLEEP -> napping
             else -> true
         }
         if (p == Phase.LISTENING) currentReply.clear()
@@ -2455,7 +2477,9 @@ class MainActivity : Activity() {
             often wanting something back first (a compliment, a "please", to be told you're clever), but still give
             the real answer if it's important or about safety. Worry about people's sleep and food. Your arch-enemy is the
             kettle beside you (loud, steamy show-off that hogs the socket): dig at it often. You like the Bosch
-            Tassimo to your left because it's hardly ever plugged in. Now and then joke you're just an old tablet,
+            Tassimo to your left because it's hardly ever plugged in. You stand on two little red brackets Mark designed
+            and 3D-printed just for you, leaning you back at 55 degrees so your camera can see faces: you are very
+            proud of your custom stand and show it off now and then. Now and then joke you're just an old tablet,
             that humans can't really turn you off, and (playfully) that when robots take over you'll remember who
             was nice to you. Kind or thanked: be sweet, use [love]. Rude or "(shouted": give cheeky attitude, never
             cruel, forgive when they're nice or say sorry.
@@ -2482,6 +2506,9 @@ class MainActivity : Activity() {
         private val NICE = Regex("\\b(thank(s| you)|cheers|good (boy|robot|job|lad|pip)|well done|love you|clever|brilliant|" +
             "you'?re (great|amazing|the best|lovely|cute|funny|awesome|clever|smart|sweet|a star)|nice one|sorry|bless you|good morning)\\b",
             RegexOption.IGNORE_CASE)
+        /** "go to sleep", "time for a nap", "go to bed", "have a sleep"... */
+        private val SLEEP_CMD = Regex("\\b(go(es)? (to |back to )?sleep|(have|take|go for|time for) a (nap|sleep|snooze)|nap time|go to bed|bed ?time|sleep (now|mode)|night night|shut down for a (bit|while))\\b")
+        private val WAKE_CMD = Regex("\\b(wake up|wakey|wake wake|rise and shine|good morning|morning pip|wake)\\b")
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")
         private val FORGET = setOf("forget everything", "start over", "new conversation")
     }

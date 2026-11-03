@@ -82,7 +82,7 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
             // put down: still for 3.5 s after being handled; is it sitting the way it did on the bench?
             if (handled && now - lastHandledMove > 3500) {
                 handled = false
-                onPutDown(!haveRest || angleBetween(g, restG) < 15.0)
+                onPutDown(!haveRest || angleBetween(g, restG) < 15.0 || onStand())
             }
         } else if (movingSince != 0L && now - movingSince > 1500 && !handled) {
             // gentle wobble that never became a pick-up: start counting stillness again
@@ -105,6 +105,16 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
             val mins = ((now - flatSince) / 60_000).toInt()
             if (now - flatSince > 120_000 && now - lastFlatMoan > 8 * 60_000) { lastFlatMoan = now; onLyingFlat(mins) }
         } else { flatSince = 0L; lastFlatMoan = 0L }
+    }
+
+    /** Pip's 3D-printed stand leans the screen back to 55 degrees from the bench. */
+    var standDegrees = 55.0
+    /** Sitting at the stand's angle (screen tilted 55 degrees from flat, give or take 10)? */
+    fun onStand(): Boolean {
+        val gl = sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2])
+        if (gl < 5f || g[2] < 0f) return false                       // screen must face up-ish, not down
+        val fromFlat = Math.toDegrees(Math.acos((g[2] / gl).toDouble().coerceIn(-1.0, 1.0)))
+        return Math.abs(fromFlat - standDegrees) < 10.0
     }
 
     private fun angleBetween(a: FloatArray, b: FloatArray): Double {
