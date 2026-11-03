@@ -505,6 +505,16 @@ class EyesView(context: Context) : View(context) {
             canvas.drawRoundRect(chipRect, chipRect.height() / 2, chipRect.height() / 2, chipBox)
             canvas.drawText(listenChip, chipRect.left + pad, chipRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         }
+        if (sleepChip.isNotEmpty() && mood != Mood.LOADING) {
+            chipPaint.textSize = h * 0.03f
+            chipPaint.color = eyeColor; chipPaint.alpha = 95
+            val pad = h * 0.022f
+            val tw = chipPaint.measureText(sleepChip)
+            sleepRect.set(w * 0.975f - tw - pad * 2, h * 0.9f, w * 0.975f, h * 0.9f + chipPaint.textSize + pad * 1.6f)
+            chipBox.color = eyeColor; chipBox.alpha = chipPaint.alpha / 3; chipBox.strokeWidth = h * 0.004f
+            canvas.drawRoundRect(sleepRect, sleepRect.height() / 2, sleepRect.height() / 2, chipBox)
+            canvas.drawText(sleepChip, sleepRect.left + pad, sleepRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
+        }
 
         postInvalidateOnAnimation()
     }
@@ -667,6 +677,16 @@ class EyesView(context: Context) : View(context) {
     private val chipRect = RectF()
     private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val chipBox = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    /** The sleep / wake button, bottom-right ("" hides it). */
+    var sleepChip = ""
+    private val sleepRect = RectF()
+    fun sleepHit(x: Float, y: Float): Boolean {
+        if (sleepChip.isEmpty() || sleepRect.isEmpty) return false
+        val m = height * 0.04f
+        val hit = x >= sleepRect.left - m && x <= sleepRect.right + m && y >= sleepRect.top - m && y <= sleepRect.bottom + m
+        if (hit) chipTappedAt = now()
+        return hit
+    }
     /** Was the button tapped? (generous target, easy to hit) */
     fun chipHit(x: Float, y: Float): Boolean {
         if (listenChip.isEmpty() || chipRect.isEmpty) return false

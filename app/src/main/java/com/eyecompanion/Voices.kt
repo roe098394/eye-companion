@@ -19,12 +19,23 @@ class Voices(private val prefs: SharedPreferences) {
 
     val names get() = people.map { it.name }
 
+    /** How alike this voice is to someone: their best match mixed with their top three (steadier than one sample). */
+    private fun score(p: Person, print: FloatArray): Float {
+        val sims = p.samples.map { cosine(print, it) }.sortedDescending()
+        if (sims.isEmpty()) return -1f
+        val top = sims.take(3)
+        return 0.6f * sims[0] + 0.4f * (top.sum() / top.size)
+    }
+    fun similarity(name: String, print: FloatArray): Float =
+        people.firstOrNull { it.name.equals(name, true) }?.let { score(it, print) } ?: -1f
+    fun sampleCount(name: String) = people.firstOrNull { it.name.equals(name, true) }?.samples?.size ?: 0
+
     /** Best match and how sure (0..1), or null if nobody is close enough. */
     fun identify(print: FloatArray): Pair<String, Float>? {
         var best: Person? = null
         var bestSim = -1f
-        for (p in people) for (s in p.samples) {
-            val sim = cosine(print, s)
+        for (p in people) {
+            val sim = score(p, print)
             if (sim > bestSim) { bestSim = sim; best = p }
         }
         val b = best ?: return null
@@ -79,7 +90,7 @@ class Voices(private val prefs: SharedPreferences) {
     companion object {
         /** similarity needed to say "that's you" */
         const val MATCH = 0.55f
-        const val MAX_SAMPLES = 6
+        const val MAX_SAMPLES = 20
         /** only trust voice prints from sentences with at least this much speech (frames ~10ms) */
         const val MIN_FRAMES = 120
 

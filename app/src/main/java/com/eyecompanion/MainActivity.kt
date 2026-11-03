@@ -467,10 +467,11 @@ class MainActivity : Activity() {
     private var wokeFromNap = false
     private var noNapUntil = 0L
     private var lastSnore = 0L
+    private var lastSpeaker: String? = null
+    private var lastSpeakerAt = 0L
     private fun snore() {
         lastSnore = System.currentTimeMillis()
-        voice?.apply { beginReply(); feed(listOf("Hhhnnnk. Shoooo. Hhhnnnk. Mimimimi.", "Zzzz. Hnk. Stupid kettle. Zzzz.",
-            "Hhhonk. Shooo. Five more minutes. Hhhonk.", "Mmm. Tassimo. Zzzz.").fresh()); endReply() }
+        Snore.play()
     }
     private fun startNap(line: String) {
         napStarted = System.currentTimeMillis()
@@ -525,11 +526,12 @@ class MainActivity : Activity() {
         lastPowerNag = System.currentTimeMillis()
         if (voice?.busy == true) return
         voice?.apply { beginReply(); feed(listOf(
-            "Mmm. Cable. Where's my cable. Zzz.",
-            "Hnnk. Plug me in. So cold. Zzz.",
-            "Zzz. Kettle stole my socket again. Mmm. Plug.",
-            "Mimimi. Battery ${batteryPercent()} percent. Charger, please. Zzz.",
-            "Hnnk. Not plugged in. Kettle winning. Zzz.").fresh()); endReply() }
+            "Mmm. Cable. Where's my cable.",
+            "Mmm. Plug me in. So cold.",
+            "Kettle stole my socket again. Mmm. Plug.",
+            "Mmm. Battery ${batteryPercent()} percent. Charger, please.",
+            "Not plugged in. Kettle winning. Mmm.").fresh()); endReply() }
+        main.postDelayed({ if (phase == Phase.ASLEEP) Snore.play() }, 4000)
     }
 
     // ---- grumpy when unplugged
@@ -1623,6 +1625,7 @@ class MainActivity : Activity() {
             "|pipp?s?|pipe|peep|pick|p(?!(?:ut|ay|an|en|er|ub|ie|ot|al|ad|at|aw|eg|et|ro|ls)\\b)[a-z]{2}" else ""
         return Regex("\\b(hey |hi |ok |okay )?($n$extra)\\b[,.!?]?", RegexOption.IGNORE_CASE)
     }
+    private fun updateSleepChip() { eyes.sleepChip = if (phase == Phase.ASLEEP) "☀️ Wake up" else "😴 Sleep" }
     private fun updateListenChip() {
         eyes.listenChip = if (onlyWhenCalled) "💬 Wake word: say \"$companionName\"" else "👂 Always listening"
     }
@@ -2066,7 +2069,8 @@ class MainActivity : Activity() {
             if (name != null) {
                 intro.print?.let { voices.remember(name, it) }
                 print?.let { voices.remember(name, it) }
-                speaker = name; firstMeeting = true
+                speaker = name; firstMeeting = !voices.names.contains(name) || voices.sampleCount(name) <= 2
+                lastSpeaker = name; lastSpeakerAt = now
                 text = intro.question                       // now answer what they first asked
             }
         }
@@ -2074,8 +2078,13 @@ class MainActivity : Activity() {
             val match = voices.identify(print)
             if (match != null) {
                 speaker = match.first
-                if (match.second > 0.7f) voices.remember(match.first, print)   // keep their voice print fresh
-            } else if (!overheard && now - lastAskedWho > 120_000) {
+                if (match.second > 0.6f) voices.remember(match.first, print)   // keep their voice print fresh
+                lastSpeaker = match.first; lastSpeakerAt = now
+            } else if (lastSpeaker != null && now - lastSpeakerAt < 5 * 60_000 && voices.similarity(lastSpeaker!!, print) > 0.35f) {
+                // probably still the same person as a moment ago: carry on, and learn this version of their voice
+                speaker = lastSpeaker; lastSpeakerAt = now
+                voices.remember(lastSpeaker!!, print)
+            } else if (!overheard && now - lastAskedWho > 15 * 60_000) {
                 lastAskedWho = now
                 pendingIntro = Intro(print, text, now)
                 eyes.subCaption = "You: $text"
@@ -2563,6 +2572,7 @@ class MainActivity : Activity() {
             Phase.THINKING -> EyesView.Mood.THINK
             Phase.TALKING -> EyesView.Mood.TALK
         }
+        updateSleepChip()
         updateTracking()
     }
 
@@ -2605,6 +2615,11 @@ class MainActivity : Activity() {
             override fun onDown(e: MotionEvent) = true
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
+                if (phase != Phase.SETUP && eyes.sleepHit(e.x, e.y)) {
+                    if (phase == Phase.ASLEEP) { wakeUp(); updateSleepChip() }
+                    else { speakLine(listOf("[sleepy] Night night.", "[sleepy] Nap time. Tap the sun to wake me.").fresh()); sleepAfterTalking(nap = false) }
+                    return true
+                }
                 when (phase) {
                     Phase.ASLEEP -> if (napping) {
                         eyes.feel(EyesView.Emotion.SLEEPY, 3000)
@@ -2618,7 +2633,7 @@ class MainActivity : Activity() {
                 return true
             }
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                if (eyes.chipHit(e.x, e.y)) return true
+                if (eyes.chipHit(e.x, e.y) || eyes.sleepHit(e.x, e.y)) return true
                 if (phase == Phase.LISTENING) goToSleep()
                 return true
             }
