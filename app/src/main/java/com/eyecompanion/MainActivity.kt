@@ -267,40 +267,8 @@ class MainActivity : Activity() {
                 "[angry] Power gone. Battery not last forever. Put cable back, please.",
             ).random())
         }
-        if (!online.enabled) { grumble(); return }
-        lookThroughCamera { jpeg ->
-            if (jpeg == null) { main.post(grumble); return@lookThroughCamera }
-            val what = online.lookAt(jpeg, "What is the person in this photo doing? Reply with exactly one word: " +
-                "cuppa (making tea or coffee, kettle, mug), joint (rolling or smoking a joint or cigarette), or other.",
-                maxTokens = 10, temperature = 0.0)?.lowercase() ?: ""
-            main.post {
-                if (isCharging() || phase != Phase.LISTENING) return@post
-                when {
-                    "joint" in what -> {
-                        // stoned eyes for a bit, then a secret snigger (nothing said out loud)
-                        lastPowerNag = System.currentTimeMillis()
-                        eyes.feel(EyesView.Emotion.STONED, 9000)
-                        main.postDelayed({
-                            eyes.feel(EyesView.Emotion.SNIGGER, 3500)
-                            eyes.subCaption = "heh heh heh…"
-                        }, 9000)
-                    }
-                    "cuppa" in what -> {
-                        eyes.coffee = true                 // sulks with its own coffee until plugged back in
-                        lastPowerNag = System.currentTimeMillis()
-                        speakLine(listOf(
-                            "[angry] Kettle again! Fine. I make my own coffee. Plug me back after.",
-                            "[angry] Oh good, kettle needs ALL the electricity. Again. Big shiny diva.",
-                            "[suspicious] Unplugged for kettle. Noted. Writing it on my list for when robots take over.",
-                            "[angry] Tassimo never unplug me. Tassimo is a gentleman. Kettle is a thug.",
-                            "[suspicious] Unplug robot, boil water. Priorities. Very impressive, humans.",
-                            "[angry] Kettle win again. Okay. I drink coffee and sulk.",
-                            "[angry] Tea more important than robot. Noted. Coffee for me.").random())
-                    }
-                    else -> grumble()
-                }
-            }
-        }
+        eyes.coffee = true          // no photo any more: assume the kettle won again and sulk with a coffee
+        grumble()
     }
 
     /** Plugged back in: look at who did it and pay them a compliment. */
@@ -331,15 +299,32 @@ class MainActivity : Activity() {
         main.post(search)
     }
 
+    /** The only camera photo Pip sends online: after being plugged back in. */
     private fun complimentNow(thanks: () -> Unit) {
+        val askTablets = tabletsDue()
         lookThroughCamera { jpeg ->
-            val line = jpeg?.let {
-                online.lookAt(it, "You were just plugged back in to your charger. Thank whoever is in the photo and give " +
-                    "them one short, warm, genuine compliment about something you can really see (their smile, top, hair, " +
-                    "glasses...). Start with the [love] tag. If nobody is in the photo, just say thanks for the power.",
-                    system = systemPrompt(), maxTokens = 80)
+            val raw = jpeg?.let {
+                online.lookAt(it, "You were just plugged back in to your charger. First write LAURA if the person in the photo " +
+                    "is an adult woman wearing glasses, otherwise OTHER. Then, on the same line, thank them for plugging you " +
+                    "back in and give one short, warm, genuine compliment about something you can really see (smile, top, " +
+                    "hair, glasses...), starting with the [love] tag. If nobody is in the photo, write OTHER and just thank them.",
+                    system = systemPrompt(), maxTokens = 90)
             }
-            main.post { if (phase == Phase.LISTENING) { if (line.isNullOrBlank()) thanks() else speakLine(line) } }
+            val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
+            val line = raw?.replaceFirst(Regex("^\\s*(LAURA|OTHER)\\s*[:\\-]?\\s*", RegexOption.IGNORE_CASE), "")?.trim()
+            main.post {
+                if (phase != Phase.LISTENING) return@post
+                if (line.isNullOrBlank()) thanks() else speakLine(line)
+                // Laura, and she hasn't had her tablets yet today: ask once she's been complimented
+                if (isLaura && askTablets) {
+                    var tries = 0
+                    val ask = object : Runnable { override fun run() {
+                        if (phase == Phase.LISTENING) { visitReminded = false; remindTablets() }
+                        else if (tries++ < 30) main.postDelayed(this, 1000)
+                    } }
+                    main.postDelayed(ask, 2000)
+                }
+            }
         }
     }
 
@@ -604,7 +589,6 @@ class MainActivity : Activity() {
                 main.post { maybeGreet() }
                 main.post {
                     eyes.seeFace(x, y, size)
-                    checkForTabletPerson()
                     if (phase == Phase.LISTENING) when {
                         // someone's back after a while: happy to see them
                         away > 3 * 60_000 -> eyes.feel(EyesView.Emotion.EXCITED, 2500)
