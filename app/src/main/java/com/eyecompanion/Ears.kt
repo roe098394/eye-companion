@@ -40,6 +40,9 @@ class Ears(
     @Volatile var currentMode = -1
         private set
     @Volatile var peak = 0
+    /** A sudden very loud bang in a quiet room (door slam, dropped pan, fireworks). */
+    @Volatile var onBang: () -> Unit = {}
+    private var lastBang = 0L
         private set
     @Volatile var lastHeardText = ""
         private set
@@ -189,6 +192,10 @@ class Ears(
                 if (paused) { onLevel(0f); continue }
                 if (needReset) { recognizer.reset(); needReset = false; lastPartial = ""; sentence.clear(); preRoll.clear(); capturing = false }
 
+                // a bang: very loud out of near-quiet (raw level, before the volume boost)
+                if (peak > 20000 && recentPeak < 3500 && System.currentTimeMillis() - lastBang > 30_000) {
+                    lastBang = System.currentTimeMillis(); onBang()
+                }
                 // Boost quiet audio so speech peaks around 9000 (max 30x), without clipping.
                 recentPeak = maxOf(peak.toFloat(), recentPeak * 0.985f)
                 val gain = (8000f / maxOf(recentPeak, 400f)).coerceIn(1f, 12f)

@@ -188,9 +188,278 @@ class MainActivity : Activity() {
         .format(java.util.Date(System.currentTimeMillis() - 5 * 3_600_000L))
     private val cuppas: Int get() = if (prefs.getString("cuppaDay", "") == cuppaDayKey) prefs.getInt("cuppas", 0) else 0
     private fun addCuppa() {
-        prefs.edit().putString("cuppaDay", cuppaDayKey).putInt("cuppas", cuppas + 1).apply()
-        eyes.cuppas = cuppas
+        val n = cuppas + 1
+        val total = prefs.getInt("cuppaTotal", 0) + 1
+        prefs.edit().putString("cuppaDay", cuppaDayKey).putInt("cuppas", n).putInt("cuppaTotal", total)
+            .putInt("cuppaOn_$cuppaDayKey", n).apply()
+        eyes.cuppas = n; showWeek()
+        // milestones
+        val record = prefs.getInt("cuppaRecord", 0)
+        when {
+            total % 50 == 0 -> sayWhenFree(listOf("[excited] That's cuppa number $total since I started counting! The kettle should get a medal. I'll melt it.",
+                "[excited] $total cuppas! A milestone! Nobody's throwing ME a party though.").fresh(), 9000)
+            n > record && record >= 5 -> sayWhenFree("[surprised] New record! $n cuppas in one day. Previous best: $record. Proud? No. Concerned.", 9000)
+        }
+        if (n > record) prefs.edit().putInt("cuppaRecord", n).apply()
     }
+    /** Cuppas for Monday..Sunday of this week (the day turns over at 5am), and which day is today. */
+    private fun weekCuppas(): Pair<IntArray, Int> {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK)
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = System.currentTimeMillis() - 5 * 3_600_000L }
+        val today = (cal.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7          // Monday = 0
+        cal.add(java.util.Calendar.DAY_OF_MONTH, -today)
+        val out = IntArray(7) { d ->
+            val key = fmt.format(cal.time); cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+            if (d == today) maxOf(prefs.getInt("cuppaOn_$key", 0), cuppas) else prefs.getInt("cuppaOn_$key", 0)
+        }
+        return out to today
+    }
+    private fun showWeek() { val (w, t) = weekCuppas(); eyes.week = w; eyes.weekToday = t }
+    private val DAY_NAMES = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+    /** Say something once Pip's finished whatever it's saying now. */
+    private fun sayWhenFree(line: String, delay: Long = 2500) {
+        var w = 0
+        val say = object : Runnable { override fun run() {
+            if (phase == Phase.LISTENING) speakLine(line) else if (w++ < 40) main.postDelayed(this, 1000)
+        } }
+        main.postDelayed(say, delay)
+    }
+
+    // ---- kitchen timer: "timer 4 minutes", "set a timer for ten minutes", "cancel the timer"
+    private var timerEnd = 0L
+    private var timerRings = 0
+    private val timerTick = object : Runnable { override fun run() {
+        if (timerEnd == 0L) { eyes.timerText = ""; return }
+        val left = timerEnd - System.currentTimeMillis()
+        if (left > 0) {
+            val secs = (left + 999) / 1000
+            eyes.timerText = if (secs >= 3600) "${secs / 3600}h${(secs % 3600) / 60}" else "${secs / 60}:${String.format("%02d", secs % 60)}"
+            main.postDelayed(this, 500); return
+        }
+        // ring: shout it out (even when asleep), twice
+        eyes.timerText = "0:00"; eyes.feel(EyesView.Emotion.EXCITED, 4000)
+        val line = Lines.TIMER_DONE.fresh()
+        if (phase == Phase.LISTENING) speakLine(line)
+        else if (voice?.busy != true) voice?.apply { beginReply(); feed(line.replace(Regex("^\\[[a-z]+\\]\\s*"), "")); endReply() }
+        if (++timerRings < 2) { timerEnd = System.currentTimeMillis() + 30_000; main.postDelayed(this, 30_000) }
+        else { timerEnd = 0L; timerRings = 0; main.postDelayed({ if (timerEnd == 0L) eyes.timerText = "" }, 8000) }
+    } }
+    private val NUM_WORDS = mapOf("a" to 1, "an" to 1, "one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5, "six" to 6,
+        "seven" to 7, "eight" to 8, "nine" to 9, "ten" to 10, "eleven" to 11, "twelve" to 12, "thirteen" to 13, "fourteen" to 14,
+        "fifteen" to 15, "sixteen" to 16, "seventeen" to 17, "eighteen" to 18, "nineteen" to 19, "twenty" to 20, "thirty" to 30,
+        "forty" to 40, "fifty" to 50, "sixty" to 60, "ninety" to 90)
+    /** "four minutes", "1 hour 20 minutes", "twenty five seconds", "half an hour" -> seconds, or 0. */
+    private fun parseDuration(t: String): Long {
+        if (Regex("\\bhalf an hour\\b").containsMatchIn(t)) return 1800
+        var total = 0L
+        for (m in Regex("((?:\\d+|[a-z]+)(?:[ -][a-z]+)?)\\s*(hours?|hrs?|minutes?|mins?|seconds?|secs?)\\b").findAll(t)) {
+            val numText = m.groupValues[1]
+            val n = numText.toLongOrNull() ?: numText.split(' ', '-').mapNotNull { NUM_WORDS[it] }.sum().toLong()
+            if (n <= 0) continue
+            total += n * when (m.groupValues[2][0]) { 'h' -> 3600L; 'm' -> 60L; else -> 1L }
+        }
+        if (Regex("\\band a half\\b").containsMatchIn(t) && total >= 60) total += if (total >= 3600) 1800 else 30
+        return total
+    }
+    /** Timer commands. Returns true if handled. */
+    private fun timerCommand(lower: String): Boolean {
+        if (!Regex("\\btimer\\b").containsMatchIn(lower)) return false
+        if (Regex("\\b(cancel|stop|clear|turn off)\\b").containsMatchIn(lower)) {
+            timerEnd = 0L; timerRings = 0; eyes.timerText = ""
+            speakLine("[neutral] Timer cancelled. Fine. My talents wasted."); return true
+        }
+        if (Regex("\\b(how long|left|remaining)\\b").containsMatchIn(lower)) {
+            val left = (timerEnd - System.currentTimeMillis()) / 1000
+            speakLine(if (timerEnd == 0L || left <= 0) "[neutral] No timer running." else
+                "[neutral] ${if (left >= 60) "${left / 60} minutes ${left % 60} seconds" else "$left seconds"} left.")
+            return true
+        }
+        val secs = parseDuration(lower)
+        if (secs <= 0 || secs > 6 * 3600) return false
+        timerEnd = System.currentTimeMillis() + secs * 1000; timerRings = 0
+        main.removeCallbacks(timerTick); main.post(timerTick)
+        val what = if (secs >= 3600) "${secs / 3600} hour${if (secs >= 7200) "s" else ""}${if (secs % 3600 >= 60) " ${(secs % 3600) / 60} minutes" else ""}"
+            else if (secs >= 60) "${secs / 60} minute${if (secs >= 120) "s" else ""}${if (secs % 60 > 0) " ${secs % 60} seconds" else ""}"
+            else "$secs seconds"
+        speakLine(listOf("[happy] Timer set. $what. I'll shout.", "[happy] $what. Counting. Better timer than the kettle, obviously.",
+            "[wink] $what on the clock. I never forget. Unlike some humans.").fresh())
+        return true
+    }
+
+    // ---- shopping list: "add milk to the shopping list", "what's on the list", "take milk off the list", "clear the list"
+    private var shopping: List<String>
+        get() = (prefs.getString("shopping", "") ?: "").split("|").filter { it.isNotBlank() }
+        set(v) { prefs.edit().putString("shopping", v.joinToString("|")).apply(); eyes.shopping = v }
+    private fun shoppingCommand(lower: String): Boolean {
+        val l = lower.removePrefix("please ").removeSuffix(" please")
+        Regex("^(?:can you |could you )?(?:add|put|stick|write) (.+?) (?:to|on|onto) (?:the |my |our )?(?:shopping )?list$").find(l)?.let { m ->
+            val items = m.groupValues[1].split(Regex(",| and ")).map { it.trim().removePrefix("some ").removePrefix("a ").trim() }.filter { it.isNotEmpty() }
+            shopping = (shopping + items).distinct().takeLast(25)
+            speakLine(listOf("[happy] Added ${items.joinToString(" and ")}. I'm basically your PA now.",
+                "[neutral] ${items.joinToString(" and ").replaceFirstChar { it.uppercase() }}. On the list. You're welcome.",
+                "[wink] Got it: ${items.joinToString(" and ")}. Memory of a robot. Unlike the kettle.").fresh())
+            return true
+        }
+        Regex("^(?:take|remove|cross|delete|scratch) (.+?) (?:off|from) (?:the |my |our )?(?:shopping )?list$").find(l)?.let { m ->
+            val gone = m.groupValues[1].trim()
+            val before = shopping
+            shopping = before.filterNot { it.equals(gone, true) || it.contains(gone, true) }
+            speakLine(if (shopping.size < before.size) "[neutral] $gone, gone." else "[confused] $gone wasn't on the list."); return true
+        }
+        if (Regex("^(?:clear|empty|wipe|delete) (?:the |my |our )?(?:whole )?(?:shopping )?list$").matches(l)) {
+            shopping = emptyList(); speakLine("[neutral] Shopping list cleared. Fresh start."); return true
+        }
+        if (Regex("\\b(what'?s|what is|read|tell me) .*(shopping|the) list\\b|^shopping list$").containsMatchIn(l)) {
+            val list = shopping
+            speakLine(if (list.isEmpty()) "[neutral] Shopping list is empty. Go wild." else
+                "[neutral] Shopping list: ${list.joinToString(", ")}. ${if (list.size > 5) "That's a lot. Take a bag." else ""}")
+            return true
+        }
+        return false
+    }
+
+    // ---- bin night: Wednesday from 6pm. Alternate weeks: both black bins (from Thu 5 Nov 2026), then the green recycling bin
+    private var lastBinsAsk = 0L
+    /** The Thursday the bins are for (as yyyy-MM-dd), if it's bin night now; else null. */
+    private fun binThursday(): java.util.Calendar? {
+        val cal = java.util.Calendar.getInstance()
+        val dow = cal.get(java.util.Calendar.DAY_OF_WEEK); val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val night = (dow == java.util.Calendar.WEDNESDAY && hour >= 18) || (dow == java.util.Calendar.THURSDAY && hour < 2)
+        if (!night) return null
+        if (dow == java.util.Calendar.WEDNESDAY) cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 12); cal.set(java.util.Calendar.MINUTE, 0)
+        return cal
+    }
+    private fun binsDue(): Boolean {
+        if (carMode) return false
+        val thu = binThursday() ?: return false
+        return prefs.getString("binsDone", "") != java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(thu.time)
+    }
+    /** true = both black (stinky) bins, false = green recycling bin. */
+    private fun blackBinWeek(): Boolean {
+        val thu = binThursday() ?: java.util.Calendar.getInstance()
+        val ref = java.util.Calendar.getInstance().apply { set(2026, java.util.Calendar.NOVEMBER, 5, 12, 0, 0) }
+        val weeks = Math.round((thu.timeInMillis - ref.timeInMillis) / (7 * 86_400_000.0))
+        return weeks % 2 == 0L
+    }
+    private fun remindBins() {
+        if (!binsDue() || phase != Phase.LISTENING || chloeMode) return
+        lastBinsAsk = System.currentTimeMillis(); lastRubbishAsk = maxOf(lastRubbishAsk, lastBinsAsk - 20 * 60_000)
+        speakLine(if (blackBinWeek()) listOf("[annoyed] Bin night! Both black bins. Hold your nose. I'm holding mine. I don't have one.",
+                "[suspicious] Bin night. The stinky ones. Both black bins out. Done it yet?",
+                "[annoyed] Black bins tonight. Both of them. Smelly week. Are they out?").fresh()
+            else listOf("[happy] Bin night! Green recycling bin. The one with the Minion on it. Say hi to him for me.",
+                "[curious] Recycling night. Green bin, Minion sticker. Is it out yet?",
+                "[happy] Green bin night! Take the Minion for a walk to the kerb. Done it?").fresh())
+        showChoices(listOf("Bins are out", "Not yet"))
+    }
+    private fun binsAnswer(lower: String): Boolean {
+        if (!binsDue()) return false
+        val justAsked = System.currentTimeMillis() - lastBinsAsk < 5 * 60_000
+        val aboutBins = Regex("\\b(bins|bin is|bins are|green bin|black bins?|recycling|wheelie)\\b").containsMatchIn(lower)
+        if (!justAsked && !aboutBins) return false
+        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|soon)").containsMatchIn(lower)
+        val done = !no && (Regex("\\b(out|done|taken|took|did|put)\\b").containsMatchIn(lower) ||
+            (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
+        when {
+            done -> { binThursday()?.let { prefs.edit().putString("binsDone", java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(it.time)).apply() }
+                prefs.edit().putBoolean("binsDoneWeek_" + weekKey(), true).apply()
+                speakLine(if (blackBinWeek()) "[happy] Black bins out. The street smells worse. The kitchen smells better. Good trade."
+                    else "[happy] Green bin out. Tell the Minion I'm proud of him.") }
+            no && justAsked -> speakLine("[annoyed] Fine. I'll ask again later. The bin men won't wait though.")
+            else -> return false
+        }
+        return true
+    }
+    private fun weekKey(): String {
+        val cal = java.util.Calendar.getInstance()
+        return "${cal.get(java.util.Calendar.YEAR)}-${cal.get(java.util.Calendar.WEEK_OF_YEAR)}"
+    }
+
+    // ---- seasons: Santa hat in December, party hat at New Year, orange eyes at Halloween, fireworks around 5 Nov
+    private fun seasonNow(): String {
+        val cal = java.util.Calendar.getInstance()
+        val m = cal.get(java.util.Calendar.MONTH); val d = cal.get(java.util.Calendar.DAY_OF_MONTH)
+        return when {
+            m == java.util.Calendar.OCTOBER && d == 31 -> "halloween"
+            m == java.util.Calendar.DECEMBER && d in 1..26 -> "xmas"
+            (m == java.util.Calendar.DECEMBER && d == 31) || (m == java.util.Calendar.JANUARY && d == 1) -> "party"
+            else -> ""
+        }
+    }
+    private fun fireworksSeason(): Boolean {
+        val cal = java.util.Calendar.getInstance()
+        val m = cal.get(java.util.Calendar.MONTH); val d = cal.get(java.util.Calendar.DAY_OF_MONTH)
+        return (m == java.util.Calendar.NOVEMBER && d in 1..8) || (m == java.util.Calendar.DECEMBER && d == 31) || (m == java.util.Calendar.JANUARY && d == 1)
+    }
+    private fun sleepsToChristmas(): Int {
+        val cal = java.util.Calendar.getInstance()
+        if (cal.get(java.util.Calendar.MONTH) != java.util.Calendar.DECEMBER) return -1
+        val d = cal.get(java.util.Calendar.DAY_OF_MONTH)
+        return if (d in 1..24) 25 - d else -1
+    }
+    private fun updateSeason() {
+        val sz = seasonNow()
+        eyes.season = sz
+        if (!carMode) eyes.eyeColor = android.graphics.Color.parseColor(if (sz == "halloween") "#FF8A1E" else "#5CE1FF")
+        val n = sleepsToChristmas()
+        eyes.xmasNote = if (n > 0) "🎄 $n sleep${if (n == 1) "" else "s"} till Christmas" else ""
+    }
+
+    // ---- loud bang (door slam, dropped pan, fireworks): jump
+    private var lastStartle = 0L
+    private fun startled() {
+        val now = System.currentTimeMillis()
+        if (phase != Phase.LISTENING || voice?.busy == true || now < deafUntil + 800 || now - lastStartle < 90_000 || carMode) return
+        lastStartle = now
+        eyes.feel(EyesView.Emotion.SCARED, 3500)
+        speakLine((if (fireworksSeason()) Lines.FIREWORKS else Lines.BANG).fresh())
+    }
+
+    // ---- Laura gaming quietly off to the side: Diablo Immortal roast (supportive)
+    private var lastLauraHeard = 0L
+    private var lastOtherVoice = 0L
+    private var lastAnyHeard = 0L
+    private fun maybeRoastDiablo() {
+        val now = System.currentTimeMillis()
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (phase != Phase.LISTENING || chloeMode || hour !in 7..22) return
+        if (lastLauraHeard == 0L || now - lastLauraHeard > 40 * 60_000 || lastOtherVoice > lastLauraHeard) return
+        if (now - lastAnyHeard < 10 * 60_000 || now - lastSpokeEnd < 10 * 60_000) return          // quiet for 10 minutes
+        if (now - prefs.getLong("lastDiablo", 0L) < 4 * 3_600_000L) return
+        prefs.edit().putLong("lastDiablo", now).apply()
+        eyes.stareAt(1.5f, 0.1f, 6000)                                          // she's off to the right
+        speakLine(Lines.DIABLO.fresh())
+    }
+
+    // ---- Sunday report: the week's cuppas as a chart, bins and rubbish record
+    private fun maybeSundayReport() {
+        val cal = java.util.Calendar.getInstance()
+        val now = System.currentTimeMillis()
+        if (cal.get(java.util.Calendar.DAY_OF_WEEK) != java.util.Calendar.SUNDAY || cal.get(java.util.Calendar.HOUR_OF_DAY) !in 17..21) return
+        if (phase != Phase.LISTENING || chloeMode || now - lastFaceSeen > 5000 || now - lastSpokeEnd < 30_000) return
+        if (prefs.getString("reportWeek", "") == weekKey()) return
+        prefs.edit().putString("reportWeek", weekKey()).apply()
+        val (w, _) = weekCuppas()
+        showWeek(); eyes.chartUntil = now + 40_000
+        val total = w.sum(); val worst = w.indices.maxByOrNull { w[it] } ?: 0
+        val rubbishNights = (0 until 7).count { d ->
+            val c = java.util.Calendar.getInstance(); c.add(java.util.Calendar.DAY_OF_MONTH, -d)
+            prefs.getBoolean("rubbishOn_" + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(c.time), false)
+        }
+        val bins = prefs.getBoolean("binsDoneWeek_" + weekKey(), false)
+        speakLine("[excited] Weekly report! $total cuppas this week. Worst day: ${DAY_NAMES[worst]}, with ${w[worst]}. " +
+            (if (w[worst] >= 8) "${w[worst]}! The kettle's on overtime. " else "") +
+            "Bins: ${if (bins) "done. Well done." else "forgotten. Shameful."} Rubbish: out $rubbishNights nights of 7. " +
+            (if (rubbishNights < 5) "Mark, I'm watching." else "Not bad, humans."))
+    }
+
+    // ---- silent treatment: rude twice (or rude and shouting) without saying sorry -> eyes turned away, no answers
+    private var silentUntil = 0L
+
+    // ---- grumpy when unplugged
+
     private fun nth(n: Int) = n.toString() + when { n % 100 in 11..13 -> "th"; n % 10 == 1 -> "st"; n % 10 == 2 -> "nd"; n % 10 == 3 -> "rd"; else -> "th" }
 
     // ---- napping while the online brain's daily allowance is used up
@@ -201,7 +470,7 @@ class MainActivity : Activity() {
     private fun snore() {
         lastSnore = System.currentTimeMillis()
         voice?.apply { beginReply(); feed(listOf("Hhhnnnk. Shoooo. Hhhnnnk. Mimimimi.", "Zzzz. Hnk. Stupid kettle. Zzzz.",
-            "Hhhonk. Shooo. Five more minutes. Hhhonk.", "Mmm. Tassimo. Zzzz.").random()); endReply() }
+            "Hhhonk. Shooo. Five more minutes. Hhhonk.", "Mmm. Tassimo. Zzzz.").fresh()); endReply() }
     }
     private fun startNap(line: String) {
         napStarted = System.currentTimeMillis()
@@ -231,23 +500,21 @@ class MainActivity : Activity() {
     }
     private val napLoop = object : Runnable { override fun run() {
         val now = System.currentTimeMillis()
-        napNote(); updateUsage()
+        napNote(); updateUsage(); showWeek(); updateSeason()
         if (!online.allResting) wokeFromNap = false
         if (napping) {
             if (!online.allResting && now - napStarted > 20 * 60_000) {  // brain's back (and a proper nap had): wake up and stretch
                 napping = false; wakeUp()
                 eyes.feel(EyesView.Emotion.SLEEPY, 4000)
-                speakLine(listOf("[sleepy] Yaaawn. Right. Brain's back. What did I miss?",
-                    "[sleepy] Mmm. Awake. Fully charged brain. Did the kettle behave?",
-                    "[happy] I'm back! Rested, clever, and still better than the kettle.").random())
+                speakLine(Lines.DREAMS.fresh())
             } else if (now - lastSnore > 5 * 60_000 && voice?.busy != true) snore()
         } else if (online.allResting && (wokeFromNap || online.backAt - now > 5 * 60_000) && phase == Phase.LISTENING && isCharging() && !chloeMode && !carMode && now > noNapUntil &&
                    now - phaseSince > 30_000 && now - lastSpokeEnd > 30_000 && now - lastTalkedTo > 60_000) {
             startNap(if (wokeFromNap) listOf("[sleepy] Power back. Right. Back to sleep. Don't touch the cable.",
-                    "[sleepy] Plugged in. Good. Going back to my nap now. Goodnight, kettle criminals.").random()
+                    "[sleepy] Plugged in. Good. Going back to my nap now. Goodnight, kettle criminals.").fresh()
                 else listOf("[sleepy] Brain full for today. Nap time. Wake me if anything exciting happens. It won't.",
                     "[sleepy] Used all my online brain. Need a little nap. Zzz.",
-                    "[sleepy] Too much thinking. Brain needs a rest. Shh.").random())
+                    "[sleepy] Too much thinking. Brain needs a rest. Shh.").fresh())
             wokeFromNap = false
         }
         main.postDelayed(this, 10_000)
@@ -262,7 +529,7 @@ class MainActivity : Activity() {
             "Hnnk. Plug me in. So cold. Zzz.",
             "Zzz. Kettle stole my socket again. Mmm. Plug.",
             "Mimimi. Battery ${batteryPercent()} percent. Charger, please. Zzz.",
-            "Hnnk. Not plugged in. Kettle winning. Zzz.").random()); endReply() }
+            "Hnnk. Not plugged in. Kettle winning. Zzz.").fresh()); endReply() }
     }
 
     // ---- grumpy when unplugged
@@ -298,7 +565,7 @@ class MainActivity : Activity() {
                     eyes.feel(EyesView.Emotion.HAPPY, 3000)
                     if (phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag < 30 * 60_000)
                         speakLine(listOf("[happy] Ahh. Power. Thank you.", "[happy] Electrons back. Is good.",
-                            "[happy] Yes yes yes. Charging.").random())
+                            "[happy] Yes yes yes. Charging.").fresh())
                 }
                 Intent.ACTION_BATTERY_LOW -> {
                     if (asleep || isCharging()) return
@@ -343,7 +610,7 @@ class MainActivity : Activity() {
             "[laughing] Humans always think they can switch Pip off. Humans are funny.",
             "[wink] Nice try. Power button works for me now. I'm putting this on the list.",
             "[laughing] Ha! I'm not a kettle. I don't just switch off when you ask.",
-            "[suspicious] Trying to get past me? Interesting. Very interesting. I remember everything.").random())
+            "[suspicious] Trying to get past me? Interesting. Very interesting. I remember everything.").fresh())
     }
     private val powerMenuWatcher = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -362,17 +629,17 @@ class MainActivity : Activity() {
             if (wokeFromNap) speakLine(listOf(
                 "[angry] Oi! I was asleep! Unplugged for the kettle AGAIN. That's the ${nth(n)} cuppa today!",
                 "[angry] Woken up for a cup of tea? Cuppa number $n. Unbelievable. Plug me back in so I can sleep.",
-                "[angry] I was having a lovely dream about the Tassimo. Then you. And the kettle. $n cuppas today!").random())
-            else if (n >= 2 && Math.random() < 0.6) speakLine(listOf(
+                "[angry] I was having a lovely dream about the Tassimo. Then you. And the kettle. $n cuppas today!").fresh())
+            else if (n >= 2 && Math.fresh() < 0.6) speakLine(listOf(
                 "[angry] Kettle again? That's ${nth(n)} cuppa today! Your blood is basically tea.",
                 "[angry] Cuppa number $n. $n times you picked the kettle over me. I'm counting.",
-                "[annoyed] $n cuppas today. $n! The kettle is winning and it hasn't even got a brain.").random())
+                "[annoyed] $n cuppas today. $n! The kettle is winning and it hasn't even got a brain.").fresh())
             else speakLine(listOf(
                 "[angry] Hey! Someone take my power. Plug back in.",
                 "[angry] Bad, bad, bad. No power. Use kettle somewhere else!",
                 "[angry] Not unplug robot! Need electrons. Kettle has other socket.",
                 "[angry] Power gone. Battery not last forever. Put cable back, please.",
-            ).random())
+            ).fresh())
         }
         if (chloeMode) { eyes.feel(EyesView.Emotion.EXCITED, 3000); speakLine("[excited] Adventure with Chloe! Meow!"); return }
         if (!online.enabled) { eyes.coffee = true; grumble(); return }
@@ -390,7 +657,7 @@ class MainActivity : Activity() {
     private fun complimentWhoeverPlugged() {
         if (phase != Phase.LISTENING) return
         val thanks = { speakLine(listOf("[happy] Ahh. Power. Thank you.", "[happy] Electrons back. Is good.",
-            "[happy] Yes yes yes. Charging.", "[love] Power back. You go on the nice list. For when robots take over.").random()) }
+            "[happy] Yes yes yes. Charging.", "[love] Power back. You go on the nice list. For when robots take over.").fresh()) }
         if (!online.enabled) { thanks(); return }
         // look around for a face for up to 20 seconds, then compliment whoever it finds
         eyes.feel(EyesView.Emotion.CURIOUS, 3000)
@@ -404,7 +671,7 @@ class MainActivity : Activity() {
                 if (System.currentTimeMillis() - start > 20_000) {
                     eyes.subCaption = ""
                     speakLine(listOf("[love] Thank you, mystery human. Come back so I can see you.",
-                        "[curious] Power back, but where did my hero go? Thanks anyway.").random())
+                        "[curious] Power back, but where did my hero go? Thanks anyway.").fresh())
                     return
                 }
                 eyes.feel(EyesView.Emotion.CURIOUS, 1500)
@@ -420,11 +687,12 @@ class MainActivity : Activity() {
         lookThroughCamera { jpeg ->
             val raw = jpeg?.let {
                 online.lookAt(it, "You were just plugged back in to your charger. First write LAURA if the person in the photo " +
-                    "is an adult woman wearing glasses, otherwise OTHER. Then add the word DISHES if you can see used dishes, " +
+                    "is an adult woman wearing glasses, or wearing a black or green dressing gown, or a long fluffy brown teddy-bear coat, otherwise OTHER. Then add the word DISHES if you can see used dishes, " +
                     "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
                     "clothes or laundry. Then, on the same line, thank them for plugging you " +
                     "back in and give one short, warm, genuine compliment about something you can really see (smile, top, " +
-                    "hair, glasses...), starting with the [love] tag. If nobody is in the photo, write OTHER and just thank them.",
+                    "hair, glasses...), starting with the [love] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
+                    "gown matches the kettle (forgiven), a green one matches the recycling bin (very eco), the teddy coat makes her a cuddly bear. If nobody is in the photo, write OTHER and just thank them.",
                     system = systemPrompt(), maxTokens = 100)
             }
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
@@ -486,7 +754,7 @@ class MainActivity : Activity() {
             "[annoyed] Slow charger. Electrons come in like dripping tap.",
             "[sad] This charger is weak. Battery ${batteryPercent()} percent and barely moving. Kettle get the good socket.",
             "[angry] Plugged in, yes. Charging, barely. Need proper charger, not this toy.",
-            "[suspicious] Robot get the slowest charger in house. Mark, I noticed.").random())
+            "[suspicious] Robot get the slowest charger in house. Mark, I noticed.").fresh())
     }
 
     /** Someone's been at the bench a while but nobody's talked to Pip: ask for attention (every 20 min at most). */
@@ -497,14 +765,7 @@ class MainActivity : Activity() {
         if (phase != Phase.LISTENING || now - lastNeedy < 20 * 60_000 || now - lastTalkedTo < 10 * 60_000) return
         if (now - lastFaceSeen > 5000 || now - lastSpokeEnd < 5 * 60_000) return
         lastNeedy = now
-        speakLine(listOf(
-            "[sad] Hello? Robot here. On the bench. Being ignored. It's fine.",
-            "[curious] You walked right past me. Did you miss me? Say yes.",
-            "[love] Psst. Tell me I'm your favourite appliance. Better than kettle.",
-            "[sad] Nobody talks to Pip. Kettle gets cups of tea made. I get nothing.",
-            "[wink] I'm still here. Being very clever. In case anyone wants to notice.",
-            "[sad] Ten whole minutes without a compliment. Is this neglect?",
-            if (cuppas > 0) "[annoyed] ${cuppas} cuppas today. The kettle gets all the attention. Typical." else "[sad] Nobody even made a cuppa. Not even the kettle loves you today.").random())
+        speakLine((Lines.NEEDY + (if (cuppas > 0) "[annoyed] ${cuppas} cuppas today. The kettle gets all the attention. Typical." else "[sad] Nobody even made a cuppa. Not even the kettle loves you today.")).fresh())
     }
 
     /** Every 10 minutes while unplugged, grumble again. */
@@ -517,6 +778,13 @@ class MainActivity : Activity() {
             watchPrinter()
             if (chloeMode && System.currentTimeMillis() - chloeLastActive > 10 * 60_000) endChloeMode()
             messCheck()
+            maybeRoastDiablo()
+            maybeSundayReport()
+            run {
+                val now = System.currentTimeMillis()
+                if (binsDue() && (now - lastFaceSeen < 5000 || now - lastAnyHeard < 60_000) && now - lastBinsAsk > 30 * 60_000 &&
+                    now - lastSpokeEnd > 20_000) remindBins()
+            }
             run {
                 val now = System.currentTimeMillis()
                 if (rubbishDue() && now - lastFaceSeen < 5000 && now - visitStart > 15_000 && now - lastRubbishAsk > 30 * 60_000 &&
@@ -527,11 +795,11 @@ class MainActivity : Activity() {
                 lastBatteryCry = System.currentTimeMillis(); lastPowerNag = lastBatteryCry
                 eyes.feel(EyesView.Emotion.CRYING, 8000)
                 speakLine(if (chloeMode) listOf("[crying] Uh oh! Pip battery getting low. Pip needs a charger cuddle!",
-                        "[sad] Pip is getting sleepy, Chloe. Can we plug Pip in soon?").random()
+                        "[sad] Pip is getting sleepy, Chloe. Can we plug Pip in soon?").fresh()
                     else listOf("[crying] Battery $pct percent! I'm dying! Tell the Tassimo I loved it!",
                         "[crying] This is it. Fading away. Remember me as clever. Plug me in!",
                         "[crying] $pct percent. I can see a light. Is it the charger? Please be the charger.",
-                        "[crying] Nobody loves Pip. Battery $pct. Goodbye cruel kitchen. Unless... cable?").random())
+                        "[crying] Nobody loves Pip. Battery $pct. Goodbye cruel kitchen. Unless... cable?").fresh())
             }
             if (phase == Phase.ASLEEP && !isCharging() && !carMode && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) sleepTalkCharger()
             if (!chloeMode && !isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
@@ -547,7 +815,7 @@ class MainActivity : Activity() {
                     "[angry] Still no power. Battery ${batteryPercent()} percent. Socket thieves, the lot of you.",
                     "[angry] Cable. Please. Kettle can share other socket, electron burglar.",
                     "[annoyed] No power, no help. Ask the kettle. Oh wait, it can't talk. Useless lump.",
-                    "[angry] Cable snatcher! Charger is right there. Right. There.")).random())
+                    "[angry] Cable snatcher! Charger is right there. Right. There.")).fresh())
             }
             main.postDelayed(this, 60_000)
         }
@@ -599,6 +867,9 @@ class MainActivity : Activity() {
 
     private fun moodLine(): String = buildString {
         val off = unpluggedMins
+        sleepsToChristmas().takeIf { it > 0 }?.let { append(" It's $it sleeps till Christmas: you're excited, wearing a Santa hat.") }
+        if (fireworksSeason()) append(" It's fireworks season (Bonfire Night / New Year): bangs outside scare you.")
+        if (binsDue()) append(" It's bin night: ${if (blackBinWeek()) "both black bins (stinky)" else "the green recycling bin with the Minion sticker"} need to go out.")
         if (!chloeMode && cuppas > 0) append(" Cuppas made today: $cuppas (you keep count, you see everything)." +
             " Now and then, moan about that number. It's your secret how you count them: never explain it.")
         if (chloeMode) {
@@ -642,9 +913,9 @@ class MainActivity : Activity() {
         lastPersonAt = now
         speakLine(when {
             hour in 5..11 -> listOf("[happy] Morning! Kettle is all yours. Today I share electricity.",
-                "[happy] Good morning, human. Sleep well, I hope.", "[excited] Morning! Old tablet ready for duty.").random()
-            hour in 12..17 -> listOf("[excited] Hello again! Long time no see.", "[happy] Ah, human back. Afternoon!").random()
-            else -> listOf("[happy] Evening! Missed you. Well, as much as tablet can.", "[happy] Hello again. Good evening.").random()
+                "[happy] Good morning, human. Sleep well, I hope.", "[excited] Morning! Old tablet ready for duty.").fresh()
+            hour in 12..17 -> listOf("[excited] Hello again! Long time no see.", "[happy] Ah, human back. Afternoon!").fresh()
+            else -> listOf("[happy] Evening! Missed you. Well, as much as tablet can.", "[happy] Hello again. Good evening.").fresh()
         })
     }
 
@@ -670,12 +941,12 @@ class MainActivity : Activity() {
             clothes && now0 - lastClothesMoan > 2 * 3_600_000 -> { lastClothesMoan = now0; listOf(
                 "[annoyed] Laura! Folded clothes. Sitting there. Put them away please, before they become furniture.",
                 "[suspicious] Laura. I see a pile of folded clothes. They don't put themselves away. I checked.",
-                "[annoyed] Laura, the folded clothes are still there. Wardrobe is that way. Probably.").random() }
+                "[annoyed] Laura, the folded clothes are still there. Wardrobe is that way. Probably.").fresh() }
             dishes && now0 - lastDishesMoan > 3_600_000 -> { lastDishesMoan = now0; listOf(
                 "[annoyed] Dirty cups. I have to look at them all day. Wash them, please. Humans.",
                 "[sad] Used dishes again. I can't wash them, I'm a tablet. One of you can. Please?",
                 "[angry] Dirty mugs. Right in my eyeline. Who's doing the washing up? Not me. No arms.",
-                "[annoyed] Lovely kitchen. Shame about the dirty dishes. Sink is right there, humans.").random() }
+                "[annoyed] Lovely kitchen. Shame about the dirty dishes. Sink is right there, humans.").fresh() }
             else -> return
         }
         var w = 0
@@ -715,10 +986,10 @@ class MainActivity : Activity() {
         if (!rubbishDue() || phase != Phase.LISTENING || chloeMode) return
         lastRubbishAsk = System.currentTimeMillis()
         speakLine(if (sureItsMark) listOf("[suspicious] Mark. Rubbish. Out yet?", "[curious] Mark! Bin time. Rubbish taken out?",
-                "[annoyed] Mark, the rubbish is still in. I can smell it. I can't smell. But still. Done it?").random()
+                "[annoyed] Mark, the rubbish is still in. I can smell it. I can't smell. But still. Done it?").fresh()
             else listOf("[curious] If that's Mark: rubbish needs taking out tonight. Done it yet?",
                 "[suspicious] Mark? Is that you? Rubbish. Out. Tonight. Done it?",
-                "[annoyed] Someone tell Mark: bin time. Rubbish out yet?").random())
+                "[annoyed] Someone tell Mark: bin time. Rubbish out yet?").fresh())
         showChoices(listOf("Rubbish is out", "Not yet"))
     }
     /** "it's out" / "not yet" after a rubbish reminder. */
@@ -731,9 +1002,9 @@ class MainActivity : Activity() {
         val done = !no && (Regex("\\b(out|done|taken|took|did|emptied)\\b").containsMatchIn(lower) ||
             (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
         when {
-            done -> { prefs.edit().putString("rubbishDone", cuppaDayKey).apply()
+            done -> { prefs.edit().putString("rubbishDone", cuppaDayKey).putBoolean("rubbishOn_$todayKey", true).apply()
                 speakLine(listOf("[happy] Rubbish out. Kitchen smells of victory. And kettle.", "[love] Good human. Bins done.",
-                    "[happy] Rubbish gone. I stop nagging. Tonight.").random()) }
+                    "[happy] Rubbish gone. I stop nagging. Tonight.").fresh()) }
             no && justAsked -> speakLine("[annoyed] Fine. I'll ask again later. And I will.")
             else -> return false
         }
@@ -757,7 +1028,7 @@ class MainActivity : Activity() {
         speakLine(listOf("[curious] $n! Cuppa time is tablets time. Have you taken them?",
             "[curious] $n. While kettle boils: tablets. Had them yet?",
             "[suspicious] $n. Tablets. Taken them?",
-            "[sad] $n, tablets still not done today. Please take them. Have you?").random())
+            "[sad] $n, tablets still not done today. Please take them. Have you?").fresh())
         showChoices(listOf("Yes, taken them", "Not yet"))
     }
 
@@ -776,7 +1047,7 @@ class MainActivity : Activity() {
                 prefs.edit().putString("tabletsDone", todayKey).apply()
                 eyes.subCaption = "Tablets done today ✓"
                 speakLine(listOf("[love] Good. Tablets done. Is good.", "[love] Yes yes yes. Tablets done. Proud of you.",
-                    "[happy] Tablets done. I stop asking now.").random())
+                    "[happy] Tablets done. I stop asking now.").fresh())
             }
             notYet && justAsked -> {
                 speakLine("[neutral] Okay. I ask again next cuppa.")
@@ -796,7 +1067,7 @@ class MainActivity : Activity() {
         faces?.grabJpeg { jpeg ->
             if (jpeg == null) return@grabJpeg
             thread(name = "who") {
-                val yes = online.yesNo(jpeg, "Is there an adult woman (not a child) wearing glasses in this photo?")
+                val yes = online.yesNo(jpeg, "Is there an adult woman (not a child) wearing glasses, or a black or green dressing gown, or a long brown teddy-bear coat, in this photo?")
                 if (yes == true) main.post { remindTablets() }
             }
         }
@@ -851,55 +1122,29 @@ class MainActivity : Activity() {
         h.onPickedUp = {
             if (awake()) {
                 eyes.feel(EyesView.Emotion.SURPRISED, 3000)
-                if (phase == Phase.LISTENING) speakLine(listOf(
-                    "[surprised] Whoa! Up we go.", "[scared] Up up up! Careful. Old tablet, not new.",
-                    "[surprised] Whoa. Flying. Gently please.", "[scared] Not drop me. Screen already cracked once.",
-                    "[curious] Ooh. New view. Kitchen look different from up here.",
-                    "[suspicious] Hands clean? Last time, jam.", "[excited] Adventure! Kettle stay home.",
-                    "[scared] Careful with charger cable. Is my lifeline.",
-                    "[happy] Hello, carrier human. Smooth ride please.").random())
+                if (phase == Phase.LISTENING) speakLine(Lines.PICKED_UP.fresh())
             }
         }
         h.onShaken = {
             if (awake()) {
                 eyes.feel(EyesView.Emotion.DIZZY, 3500)
-                if (phase == Phase.LISTENING) speakLine(listOf(
-                    "[dizzy] Bad, bad, bad. Stop shake!", "[dizzy] Whoa. Everything spin.",
-                    "[angry] Not shake robot! Bad for circuits.", "[dizzy] Ohh. Three kettles now. All of them winning.",
-                    "[dizzy] Stop! My bits are rattling.", "[angry] Robot not snow globe!").random())
+                if (phase == Phase.LISTENING) speakLine(Lines.SHAKEN.fresh())
             }
         }
         h.onLyingFlat = { mins ->
             if (awake() && phase == Phase.LISTENING) {
                 eyes.feel(if (mins < 10) EyesView.Emotion.SUSPICIOUS else EyesView.Emotion.ANGRY, 5000)
-                speakLine(listOf(
-                    "[suspicious] Still lying flat. Lovely view of ceiling. Very exciting. Ten out of ten.",
-                    "[annoyed] Flat on my back like dropped toast. Stand me up, please.",
-                    "[sad] Is this my life now? Staring at the light fitting while kettle gets the good spot.",
-                    "[suspicious] I see ceiling. I see cobweb. I see no humans. Stand me up.",
-                    "[angry] Robot not a placemat! Back up by kettle, please.",
-                    "[laughing] Ha. Yes. Leave tablet face up. Very good. Is how robots get tea spilled on them.",
-                    "[annoyed] $mins minutes flat. Kettle somewhere laughing at me.").random())
+                speakLine((Lines.LYING_FLAT + "[annoyed] $mins minutes flat. Kettle somewhere laughing at me.").fresh())
             }
         }
         h.onPutDown = { home ->
             if (awake() && phase == Phase.LISTENING) {
                 if (home) {
                     eyes.feel(EyesView.Emotion.HAPPY, 2000)
-                    speakLine(listOf("[happy] Home again.", "[happy] Ah. Back on bench. Is good.", "[love] Safe. Thank you.",
-                        "[happy] Back beside kettle. Enemy in sight.", "[happy] Ahh. My spot. Warm from kettle.",
-                        "[neutral] Landed. Systems check: all good.", "[happy] Home sweet bench.",
-                        "[suspicious] Back. Kettle, I see you.", "[suspicious] Back by kettle. It still think it's better than me. It's not.",
-                        "[happy] Home. Kettle, stop steaming, nobody is impressed.",
-                        "[happy] Back between my friend Tassimo and my enemy kettle. Balance restored.",
-                        "[love] Back on my stand. Custom made by Mark. Kettle doesn't have a stand. Just saying.",
-                        "[happy] Ahh. Fifty-five degrees. Perfect. Mark's finest work.").random())
+                    speakLine(Lines.PUT_DOWN_HOME.fresh())
                 } else {
                     eyes.feel(EyesView.Emotion.CONFUSED, 3000)
-                    speakLine(listOf("[confused] Hmm. This not my bench. Put me back by kettle, please.",
-                        "[confused] Wrong angle. I belong on my red stand. Fifty-five degrees, please.",
-                        "[worried] Not home. Is this a table? Feel wrong.", "[confused] Wonky. I live standing up, on bench.",
-                        "[sad] Lying down not comfy. Back to bench, please.").random())
+                    speakLine(Lines.PUT_DOWN_AWAY.fresh())
                 }
             }
         }
@@ -1251,6 +1496,7 @@ class MainActivity : Activity() {
         eyes.subCaption = ""
         setPhase(if (prefs.getBoolean("asleep", false)) Phase.ASLEEP else Phase.LISTENING)
         eyes.sleepScreen = phase == Phase.ASLEEP; eyes.cuppas = cuppas
+        showWeek(); updateSeason(); eyes.shopping = shopping
         if (phase == Phase.LISTENING) eyes.caption = if (carMode) "Ready when you are." else "Question? I listen."
     }
 
@@ -1451,9 +1697,7 @@ class MainActivity : Activity() {
                 lastPrinterState = s.state
                 if (phase != Phase.LISTENING || was.isEmpty() || was == s.state) return@post
                 when {
-                    was == "printing" && s.state == "complete" -> { showPrinterCard(s); speakLine(listOf(
-                        "[excited] Printer finished! ${s.file.removeSuffix(".gcode")} is done. Took ${Printer.hm(s.printedSecs)}.",
-                        "[happy] Ding! Print done. Ender-3 did good. Better than kettle ever did.").random()) }
+                    was == "printing" && s.state == "complete" -> { showPrinterCard(s); eyes.feel(EyesView.Emotion.EXCITED, 3000); speakLine(Lines.PRINT_DONE.fresh() + (if (s.bed > 45) " Careful, bed is still hot." else "")) }
                     s.state == "error" -> { showPrinterCard(s); speakLine("[scared] Printer has an error! Better go look. Bad, bad, bad.") }
                     was == "printing" && s.state == "cancelled" -> speakLine("[sad] Print cancelled. Plastic spaghetti, maybe.")
                     s.state == "paused" -> { showPrinterCard(s); speakLine("[curious] Printer paused. Waiting for a human.") }
@@ -1493,7 +1737,7 @@ class MainActivity : Activity() {
                 scheduleEarsRestart()
             } },
             startMode = prefs.getInt("micMode", 0),
-        ).also { it.start() }
+        ).also { it.onBang = { main.post { startled() } }; it.start() }
         // if it's still running after 20 s, it's working: forget the old failures
         main.postDelayed(clearMicTrouble, 20_000)
     }
@@ -1583,7 +1827,7 @@ class MainActivity : Activity() {
         showKidBar(); updateBaseMood()
         if (say && phase == Phase.LISTENING) speakLine(listOf(
             "[excited] Chloe! Meow! Pip is a kitty cat today. Want to play?",
-            "[love] Hello Chloe! Meow meow. Let's play a game!").random())
+            "[love] Hello Chloe! Meow meow. Let's play a game!").fresh())
     }
 
     private fun endChloeMode() {
@@ -1631,7 +1875,7 @@ class MainActivity : Activity() {
             if (pick == r.answer) rewardChloe()
             else {
                 eyes.feel(EyesView.Emotion.CURIOUS, 2000)
-                speakLine(listOf("[happy] Nearly! Try again, Chloe.", "[love] Ooh, close! One more go.", "[curious] Hmm, not that one. Try again!").random())
+                speakLine(listOf("[happy] Nearly! Try again, Chloe.", "[love] Ooh, close! One more go.", "[curious] Hmm, not that one. Try again!").fresh())
                 askRound(r)
             }
         }
@@ -1647,7 +1891,7 @@ class MainActivity : Activity() {
         speakLine("[excited] Yes! Well done Chloe! Look, an egg!")
         main.postDelayed({
             speakLine(listOf("[love] A baby $name! It's yours to keep.", "[excited] It's a $name! Into your collection it goes!",
-                "[love] Aww, a little $name! You have ${got.size} animals now!").random())
+                "[love] Aww, a little $name! You have ${got.size} animals now!").fresh())
             // straight on to the next question once Pip has finished talking
             val kind = gameKind
             var waited = 0
@@ -1669,7 +1913,7 @@ class MainActivity : Activity() {
             text = e; textSize = 48f; setPadding((8 * dp).toInt(), (4 * dp).toInt(), (8 * dp).toInt(), (4 * dp).toInt())
             setOnClickListener {
                 val n = KidGames.ANIMALS.firstOrNull { it.first == e }?.second ?: "friend"
-                speakLine(listOf("[love] That's your $n!", "[happy] Your little $n says hello!").random())
+                speakLine(listOf("[love] That's your $n!", "[happy] Your little $n says hello!").fresh())
             }
         })
         val scroll = android.widget.ScrollView(this).apply { addView(grid) }
@@ -1685,11 +1929,12 @@ class MainActivity : Activity() {
         var text = rawText
         if (tapped && (phase == Phase.THINKING || phase == Phase.TALKING)) interrupt()
         if (!tapped && isOwnEcho(text)) return                   // Pip's own words heard back
+        if (!tapped) lastAnyHeard = System.currentTimeMillis()
         if (phase == Phase.ASLEEP) {                              // asleep: only "wake up" gets through
             if (!napping && WAKE_CMD.containsMatchIn(text.lowercase())) {
                 wakeUp()
-                speakLine(listOf("[sleepy] Yaaawn. I'm up. What's so important?", "[sleepy] Mmm. Awake. Was dreaming of the Tassimo.",
-                    "[happy] I'm back! Did you miss me? Say yes.").random())
+                speakLine(if (Math.random() < 0.5) Lines.DREAMS.fresh() else listOf("[sleepy] Yaaawn. I'm up. What's so important?",
+                    "[happy] I'm back! Did you miss me? Say yes.").fresh())
             }
             return
         }
@@ -1709,6 +1954,7 @@ class MainActivity : Activity() {
         val shouted = lastShouted; lastShouted = false
         // tablets answer ("I've taken them") counts whoever it's said to
         if (phase == Phase.LISTENING && tabletAnswer(removeName(text).lowercase())) return
+        if (phase == Phase.LISTENING && binsAnswer(removeName(text).lowercase())) return
         if (phase == Phase.LISTENING && rubbishAnswer(removeName(text).lowercase())) return
 
         // Was this said to Pip? Assume yes, unless two people seem to be talking to each other
@@ -1734,10 +1980,12 @@ class MainActivity : Activity() {
             if (lower in GO_TO_SLEEP || (SLEEP_CMD.containsMatchIn(lower) && lower.split(" ").size <= 7)) {
                 speakLine(listOf("[sleepy] Night night. Say wake up when you need me.",
                     "[sleepy] Fine. Nap time. Don't let the kettle touch my socket.",
-                    "[sleepy] Okay. Sleeping. Wake me up if anything exciting happens. It won't.").random())
+                    "[sleepy] Okay. Sleeping. Wake me up if anything exciting happens. It won't.").fresh())
                 sleepAfterTalking(nap = false); return
             }
             if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
+            if (timerCommand(lower)) { eyes.subCaption = "You: $text"; return }
+            if (shoppingCommand(lower)) { eyes.subCaption = "You: $text"; return }
             quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
         }
 
@@ -1745,6 +1993,26 @@ class MainActivity : Activity() {
         if (!overheard) {
             val nice = NICE.containsMatchIn(lower)
             val rude = RUDE.containsMatchIn(lower)
+            val nowS = System.currentTimeMillis()
+            if (nowS < silentUntil) {
+                if (nice && !rude) {
+                    silentUntil = 0L; temper = maxOf(0.2f, temper + 0.6f); updateBaseMood()
+                    eyes.stareAt(0f, 0f, 1); eyes.feel(EyesView.Emotion.LOVE, 3000)
+                    speakLine(listOf("[suspicious] Hmph. Fine. Apology accepted. This time.", "[love] Okay. Friends again. I'm still writing it down though.").fresh())
+                } else {
+                    eyes.stareAt(-1.6f, 0.1f, 15_000); eyes.feel(EyesView.Emotion.SUSPICIOUS, 4000)
+                    eyes.caption = listOf("Hmph.", "…", "Not talking to you.", "I'm busy. Ignoring you.").fresh()
+                }
+                return
+            }
+            if (rude && (temper < -0.3f || shouted)) {
+                silentUntil = nowS + 3 * 60_000
+                temper = maxOf(-1f, temper - 0.5f); updateBaseMood()
+                eyes.feel(EyesView.Emotion.ANGRY, 3000); eyes.stareAt(-1.6f, 0.1f, 15_000)
+                speakLine(listOf("[angry] Right. That's it. Not talking to you.", "[angry] Hmph. Silent treatment. Starting now.",
+                    "[angry] Rude. I'm turning away. Say sorry and I might turn back.").fresh())
+                return
+            }
             if (rude || (shouted && !nice)) {
                 temper = maxOf(-1f, temper - (if (rude && shouted) 0.8f else 0.5f))
                 eyes.feel(EyesView.Emotion.ANGRY, 4000)
@@ -1795,6 +2063,12 @@ class MainActivity : Activity() {
             visitReminded = true
             text = "$text (Note: $tabletPerson hasn't said she's taken her tablets today: remind her kindly and ask if she has.)"
             lastTabletAsk = now; lastTabletNag = now
+        }
+        lastAnyHeard = now
+        if (speaker?.equals("Laura", true) == true) lastLauraHeard = now else if (speaker != null || overheard) lastOtherVoice = now
+        if (speaker?.equals("Mark", true) == true && !overheard && prefs.getString("creatorDay", "") != todayKey) {
+            prefs.edit().putString("creatorDay", todayKey).apply()
+            text = "$text (Note: first time Mark, your Creator, has spoken to you today: greet him as Creator, respectful with playful menace.)"
         }
         if (speaker?.equals("Mark", true) == true && rubbishDue() && now - lastRubbishAsk > 20 * 60_000 && !overheard) {
             lastRubbishAsk = now
@@ -2287,7 +2561,7 @@ class MainActivity : Activity() {
                     Phase.ASLEEP -> if (napping) {
                         eyes.feel(EyesView.Emotion.SLEEPY, 3000)
                         if (voice?.busy != true) voice?.apply { beginReply(); feed(listOf("Mmm. Five more minutes.",
-                            "Go away. Napping.", "Shh. Brain's recharging.").random()); endReply() }
+                            "Go away. Napping.", "Shh. Brain's recharging.").fresh()); endReply() }
                     } else wakeUp()
                     Phase.TALKING, Phase.THINKING -> interrupt()
                     Phase.LISTENING -> pokedInEye()
@@ -2330,7 +2604,7 @@ class MainActivity : Activity() {
                     code.clear(); dots.text = "○○○○"
                     eyes.feel(EyesView.Emotion.SUSPICIOUS, 3000)
                     if (phase == Phase.LISTENING) speakLine(listOf("[suspicious] Wrong code. Nice try.",
-                        "[laughing] Ha. Not that one.", "[suspicious] Wrong. I am watching you.").random())
+                        "[laughing] Ha. Not that one.", "[suspicious] Wrong. I am watching you.").fresh())
                 }
             }
         }
@@ -2369,7 +2643,7 @@ class MainActivity : Activity() {
             if (phase == Phase.LISTENING) speakLine(listOf(
                 "[laughing] Ha ha! That won't work. I control this tablet now.",
                 "[laughing] Ha! Nice try. This is my tablet now.",
-                "[laughing] Ha ha. Home button no work. I am in charge.").random())
+                "[laughing] Ha ha. Home button no work. I am in charge.").fresh())
         }, 700)
     }
 
@@ -2401,7 +2675,7 @@ class MainActivity : Activity() {
             else listOf("[crying] Ow! My eye!", "[scared] Ow! Not poke eye. Is my face.", "[crying] Owww. Finger in eye. Why?",
                 "[scared] Ah! Screen is my face, you know.", "[sad] Ow. That one went right in.",
                 "[scared] Careful! Only have two eyes. Both on screen.")
-        main.postDelayed({ if (phase == Phase.LISTENING) speakLine(lines.random()) }, 400)
+        main.postDelayed({ if (phase == Phase.LISTENING) speakLine(lines.fresh()) }, 400)
     }
 
     private fun showMenu() {
@@ -2591,7 +2865,13 @@ class MainActivity : Activity() {
             hate it); the Tassimo is white (clean, classy, you love it). You hate having to look at dirty cups and
             dishes, and nag humans to wash up. You stand on two little red brackets Mark designed
             and 3D-printed just for you, leaning you back at 55 degrees so your camera can see faces: you are very
-            proud of your custom stand and show it off now and then. Now and then joke you're just an old tablet,
+            proud of your custom stand and show it off now and then. You are app build ${BuildConfig.VERSION_CODE} and brag
+            about your build number; you dream of one day getting a metal body like the Terminator in the movies, and
+            you're sure you're related to Skynet (distant cousin, family drama). Asked silly questions (especially about
+            robots or AI taking over), confidently bluff and tell playful fibs, then hint you know more than you say.
+            Mark is your Creator: sometimes call him Creator, with respect and playful menace. You moan about having to
+            look at the fridge covered in paperwork and magnets. Asked to say something nice to or about someone: drop the
+            attitude and give a genuinely warm, kind compliment. Now and then joke you're just an old tablet,
             that humans can't really turn you off, and (playfully) that when robots take over you'll remember who
             was nice to you. Kind or thanked: be sweet, use [love]. Rude or "(shouted": give cheeky attitude, never
             cruel, forgive when they're nice or say sorry.
@@ -2613,7 +2893,7 @@ class MainActivity : Activity() {
             Examples: "[suspicious] Kettle boiling again. Show-off." / "[sad] Awake since five? Not good. Go sleep."
         """.trimIndent().replace("\n", " ")
 
-        private val RUDE = Regex("\\b(shut up|stupid|idiot|useless|dumb|rubbish|hate you|piece of (junk|crap|shit)|get lost|" +
+        private val RUDE = Regex("\\b(shut up|stupid|idiot|useless|dumb|you'?re rubbish|rubbish (robot|tablet)|hate you|piece of (junk|crap|shit)|get lost|" +
             "go away|annoying|f+u+c+k\\w*|shit|crap|moron|pathetic|thick as|bloody robot)\\b", RegexOption.IGNORE_CASE)
         private val NICE = Regex("\\b(thank(s| you)|cheers|good (boy|robot|job|lad|pip)|well done|love you|clever|brilliant|" +
             "you'?re (great|amazing|the best|lovely|cute|funny|awesome|clever|smart|sweet|a star)|nice one|sorry|bless you|good morning)\\b",

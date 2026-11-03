@@ -373,6 +373,16 @@ class EyesView(context: Context) : View(context) {
 
         if (coffee && !carMode && mood != Mood.SLEEP && mood != Mood.LOADING) drawCoffee(canvas, w, h, secs, col)
 
+        // seasonal hat on the left eye
+        if (!carMode && mood != Mood.LOADING && (season == "xmas" || season == "party"))
+            drawHat(canvas, cx - gap / 2 - eyeW / 2, cy - eyeH * 0.5f * max(0.35f, openNow) - eyeH * 0.05f, eyeW, secs)
+
+        // kitchen timer: small alarm clock top-right
+        if (timerText.isNotEmpty() && mood != Mood.LOADING) drawAlarmClock(canvas, w * 0.9f, h * 0.17f, h * 0.075f, timerText, secs)
+
+        // the week's cuppas, shown for a while on the Sunday report
+        if (t < chartUntil && mood != Mood.SLEEP && mood != Mood.LOADING) drawWeek(canvas, w * 0.32f, h * 0.05f, w * 0.36f, h * 0.17f)
+
         // car mode: a mirrored voice equaliser that dances when listening or talking
         if (carMode && mood != Mood.SLEEP && mood != Mood.LOADING) {
             val bars = 17
@@ -432,6 +442,17 @@ class EyesView(context: Context) : View(context) {
                 sleepPaint.textSize = h * 0.035f; sleepPaint.alpha = (110 + 90 * sin(secs * 2.5f)).toInt().coerceIn(20, 230)
                 canvas.drawText(plugNote, w / 2, h * 0.78f, sleepPaint)
             }
+            drawWeek(canvas, w * 0.34f, h * 0.81f, w * 0.32f, h * 0.13f)
+            if (shopping.isNotEmpty()) {
+                listPaint.color = eyeColor; listPaint.textSize = h * 0.032f; listPaint.alpha = 150
+                canvas.drawText("🛒 Shopping", w * 0.03f, h * 0.36f, listPaint)
+                listPaint.textSize = h * 0.028f; listPaint.alpha = 115
+                shopping.take(9).forEachIndexed { i, item ->
+                    canvas.drawText("• " + (if (item.length > 16) item.take(15) + "…" else item), w * 0.035f, h * (0.41f + i * 0.045f), listPaint)
+                }
+                if (shopping.size > 9) canvas.drawText("+${shopping.size - 9} more", w * 0.035f, h * (0.41f + 9 * 0.045f), listPaint)
+            }
+            if (xmasNote.isNotEmpty()) { sleepPaint.textSize = h * 0.032f; sleepPaint.alpha = 140; canvas.drawText(xmasNote, w * 0.84f, h * 0.48f, sleepPaint) }
             if (napNote.isNotEmpty()) drawAlarmClock(canvas, w * 0.82f, h * 0.24f, h * 0.085f, napNote, secs)
             for (i in 0..2) {
                 val ph = ((secs * 0.35f + i / 3f) % 1f)
@@ -503,6 +524,66 @@ class EyesView(context: Context) : View(context) {
         sleepPaint.color = col; sleepPaint.alpha = 200
         sleepPaint.textSize = r * (if (label.length > 4) 0.42f else 0.55f)
         c.drawText(label, x, y + sleepPaint.textSize * 0.36f, sleepPaint)
+    }
+
+    /** This week's cuppas, Monday..Sunday, and which day is today. */
+    var week = IntArray(7)
+    var weekToday = 0
+    /** Show the week chart while awake until this time (Sunday report). */
+    @Volatile var chartUntil = 0L
+    /** Kitchen timer countdown ("" = none). */
+    var timerText = ""
+    var shopping: List<String> = emptyList()
+    /** "", "xmas", "party", "halloween" */
+    var season = ""
+    var xmasNote = ""
+    private val listPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = android.graphics.Typeface.DEFAULT_BOLD }
+    private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val chartText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+
+    /** Bar chart of the week's cuppas: one bar a day, today glowing, the worst day marked. */
+    private fun drawWeek(c: Canvas, left: Float, top: Float, width: Float, height: Float) {
+        val maxV = max(1, week.maxOrNull() ?: 1)
+        val worst = if ((week.maxOrNull() ?: 0) > 0) week.indices.maxByOrNull { week[it] } ?: -1 else -1
+        val slot = width / 7f; val bw = slot * 0.55f
+        val labelH = height * 0.2f; val numH = height * 0.18f
+        val barArea = height - labelH - numH
+        chartText.color = eyeColor
+        for (i in 0 until 7) {
+            val x = left + slot * i + (slot - bw) / 2
+            val v = week[i]
+            val bh = if (v == 0) barArea * 0.03f else barArea * v / maxV
+            val bottom = top + numH + barArea
+            barPaint.color = if (i == worst) Color.parseColor("#FF8A5C") else eyeColor
+            barPaint.alpha = when { i == weekToday -> 230; i > weekToday -> 40; else -> 130 }
+            rect.set(x, bottom - bh, x + bw, bottom); c.drawRoundRect(rect, bw * 0.2f, bw * 0.2f, barPaint)
+            chartText.textSize = numH * 0.8f; chartText.alpha = if (v > 0) 170 else 0
+            c.drawText(if (i == worst && v >= 5) "💀$v" else "$v", x + bw / 2, bottom - bh - numH * 0.2f, chartText)
+            chartText.textSize = labelH * 0.75f; chartText.alpha = if (i == weekToday) 220 else 110
+            c.drawText("MTWTFSS"[i].toString(), x + bw / 2, bottom + labelH * 0.85f, chartText)
+        }
+    }
+
+    /** Santa hat (xmas) or a stripy party hat, perched on an eye. */
+    private val hatPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private fun drawHat(c: Canvas, x: Float, baseY: Float, eyeW: Float, secs: Float) {
+        val hw = eyeW * 1.15f; val hh = eyeW * 1.1f
+        val path = android.graphics.Path()
+        if (season == "xmas") {
+            val flop = sin(secs * 1.5f) * eyeW * 0.05f
+            path.moveTo(x - hw / 2, baseY); path.quadTo(x - hw * 0.1f, baseY - hh * 0.9f, x + hw * 0.55f + flop, baseY - hh * 0.55f)
+            path.quadTo(x + hw * 0.15f, baseY - hh * 0.45f, x + hw / 2, baseY); path.close()
+            hatPaint.color = Color.parseColor("#E0262E"); c.drawPath(path, hatPaint)
+            hatPaint.color = Color.WHITE
+            rect.set(x - hw * 0.58f, baseY - eyeW * 0.14f, x + hw * 0.58f, baseY + eyeW * 0.12f); c.drawRoundRect(rect, eyeW * 0.13f, eyeW * 0.13f, hatPaint)
+            c.drawCircle(x + hw * 0.55f + flop, baseY - hh * 0.55f, eyeW * 0.14f, hatPaint)
+        } else {
+            path.moveTo(x - hw * 0.42f, baseY); path.lineTo(x, baseY - hh); path.lineTo(x + hw * 0.42f, baseY); path.close()
+            hatPaint.color = Color.parseColor("#B04CFF"); c.drawPath(path, hatPaint)
+            hatPaint.color = Color.parseColor("#FFD23E"); hatPaint.strokeWidth = eyeW * 0.08f
+            for (k in 1..3) { val f = k / 4f; c.drawLine(x - hw * 0.42f * (1 - f), baseY - hh * f, x + hw * 0.42f * (1 - f), baseY - hh * f, hatPaint) }
+            c.drawCircle(x, baseY - hh, eyeW * 0.1f + eyeW * 0.03f * sin(secs * 6f), hatPaint)
+        }
     }
 
     /** Sleep screen extras: clock, cuppas made today, and when the online brain is back. */
