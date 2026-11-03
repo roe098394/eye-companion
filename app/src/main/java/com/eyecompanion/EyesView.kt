@@ -419,6 +419,23 @@ class EyesView(context: Context) : View(context) {
             if (a2 > 0f && subCaption.isNotEmpty()) canvas.drawText(subCaption.take(90), w / 2, h * 0.08f, subPaint)
         }
 
+        // sleep screen: a big clock, today's cuppa count, when the brain's back, and floating zzz
+        if (mood == Mood.SLEEP && sleepScreen) {
+            val cal = java.util.Calendar.getInstance()
+            val clock = String.format("%d:%02d", cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
+            sleepPaint.color = eyeColor
+            sleepPaint.textSize = h * 0.16f; sleepPaint.alpha = 150
+            canvas.drawText(clock, w / 2, h * 0.24f, sleepPaint)
+            sleepPaint.textSize = h * 0.045f; sleepPaint.alpha = 130
+            canvas.drawText("☕  Cuppas today: $cuppas", w / 2, h * 0.70f, sleepPaint)
+            if (napNote.isNotEmpty()) { sleepPaint.textSize = h * 0.032f; sleepPaint.alpha = 100; canvas.drawText(napNote, w / 2, h * 0.77f, sleepPaint) }
+            for (i in 0..2) {
+                val ph = ((secs * 0.35f + i / 3f) % 1f)
+                sleepPaint.textSize = h * (0.035f + 0.04f * ph); sleepPaint.alpha = (200 * (1f - ph)).toInt()
+                canvas.drawText("z", cx + eyeW * (1.3f + ph * 0.9f), cy - eyeH * (0.4f + ph * 2.2f), sleepPaint)
+            }
+        }
+
         // daily allowance meter, top-left
         if (usageText.isNotEmpty() && mood != Mood.LOADING) {
             val c = when { usageLevel >= 90 -> Color.parseColor("#FF5A3C"); usageLevel >= 70 -> Color.parseColor("#FFB23E"); else -> eyeColor }
@@ -447,6 +464,12 @@ class EyesView(context: Context) : View(context) {
 
         postInvalidateOnAnimation()
     }
+
+    /** Sleep screen extras: clock, cuppas made today, and when the online brain is back. */
+    var sleepScreen = false
+    var cuppas = 0
+    var napNote = ""
+    private val sleepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
 
     /** Small usage meter in the top-left corner ("" hides it). */
     var usageText = ""

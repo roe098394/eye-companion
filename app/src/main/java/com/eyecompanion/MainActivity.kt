@@ -151,17 +151,24 @@ class MainActivity : Activity() {
         (getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).lockTaskModeState !=
             android.app.ActivityManager.LOCK_TASK_MODE_NONE
 
-    /** Buttons are "locked" by Pip being the Home screen (Home comes back here) and Back doing
-     *  nothing, rather than Android's screen pinning, which shows a how-to-unpin message. */
+    /** Buttons are locked with Android's screen pinning (Home, Back and Recents do nothing;
+     *  hold Back + Recents together to get out). Pip pins itself; Android asks once to confirm. */
     private var leavingOnPurpose = false
+    private var lastPinAsk = 0L
     private fun applyButtonLock() {
-        try { if (pinned) stopLockTask() } catch (_: Exception) {}
         leavingOnPurpose = false
-        if (lockButtons && !isDefaultHome() && !askedToPin) {
-            askedToPin = true
-            if (phase == Phase.LISTENING) speakLine("[curious] To lock buttons, make me the Home app. Pick Eye Companion, then Always.")
-            main.postDelayed({ openOutside(Intent(Settings.ACTION_HOME_SETTINGS)) }, 3500)
-        }
+        if (!lockButtons) { try { if (pinned) stopLockTask() } catch (_: Exception) {}; return }
+        if (phase == Phase.SETUP || pinned) return
+        val now = System.currentTimeMillis()
+        if (now - lastPinAsk < 10 * 60_000) return            // they said no a moment ago: don't nag
+        lastPinAsk = now; lastPermissionAsk = now             // don't let the pop-up closer shut Android's "pin?" question
+        try { startLockTask() } catch (_: Exception) {}
+        main.postDelayed({
+            if (!pinned && !askedToPin && lockButtons && hasWindowFocus()) {
+                askedToPin = true
+                eyes.subCaption = "To lock me in: Settings → Lock screen and security → Other security settings → Pin windows: On"
+            }
+        }, 6000)
     }
     private fun isDefaultHome(): Boolean {
         val r = packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
@@ -176,11 +183,81 @@ class MainActivity : Activity() {
         try { startActivity(i) } catch (_: Exception) {}
     }
 
+    // ---- cuppas made today = times Pip was unplugged for the kettle (the day starts at 5am)
+    private val cuppaDayKey get() = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK)
+        .format(java.util.Date(System.currentTimeMillis() - 5 * 3_600_000L))
+    private val cuppas: Int get() = if (prefs.getString("cuppaDay", "") == cuppaDayKey) prefs.getInt("cuppas", 0) else 0
+    private fun addCuppa() {
+        prefs.edit().putString("cuppaDay", cuppaDayKey).putInt("cuppas", cuppas + 1).apply()
+        eyes.cuppas = cuppas
+    }
+    private fun nth(n: Int) = n.toString() + when { n % 100 in 11..13 -> "th"; n % 10 == 1 -> "st"; n % 10 == 2 -> "nd"; n % 10 == 3 -> "rd"; else -> "th" }
+
+    // ---- napping while the online brain's daily allowance is used up
+    private var napping = false
+    private var wokeFromNap = false
+    private var noNapUntil = 0L
+    private var lastSnore = 0L
+    private fun snore() {
+        lastSnore = System.currentTimeMillis()
+        voice?.apply { beginReply(); feed(listOf("Hhhnnnk. Shoooo. Hhhnnnk. Mimimimi.", "Zzzz. Hnk. Stupid kettle. Zzzz.",
+            "Hhhonk. Shooo. Five more minutes. Hhhonk.", "Mmm. Tassimo. Zzzz.").random()); endReply() }
+    }
+    private fun startNap(line: String) {
+        speakLine(line)
+        val t0 = System.currentTimeMillis()
+        val waitQuiet = object : Runnable { override fun run() {
+            if (!online.allResting || chloeMode) return
+            if (phase == Phase.LISTENING || System.currentTimeMillis() - t0 > 20_000) {
+                goToSleep(nap = true)
+                main.postDelayed({ if (napping) snore() }, 2500)
+            } else main.postDelayed(this, 500)
+        } }
+        main.postDelayed(waitQuiet, 1000)
+    }
+    private fun napNote() {
+        eyes.cuppas = cuppas
+        val back = online.backAt
+        eyes.napNote = if (!napping || back == 0L) "" else {
+            val mins = ((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)
+            "Online brain resting · back in " + (if (mins >= 60) "${mins / 60}h ${mins % 60}m" else "$mins min")
+        }
+    }
+    private val napLoop = object : Runnable { override fun run() {
+        val now = System.currentTimeMillis()
+        napNote(); updateUsage()
+        if (!online.allResting) wokeFromNap = false
+        if (napping) {
+            if (!online.allResting) {                                   // brain's back: wake up and stretch
+                napping = false; wakeUp()
+                eyes.feel(EyesView.Emotion.SLEEPY, 4000)
+                speakLine(listOf("[sleepy] Yaaawn. Right. Brain's back. What did I miss?",
+                    "[sleepy] Mmm. Awake. Fully charged brain. Did the kettle behave?",
+                    "[happy] I'm back! Rested, clever, and still better than the kettle.").random())
+            } else if (now - lastSnore > 5 * 60_000 && voice?.busy != true) snore()
+        } else if (online.allResting && phase == Phase.LISTENING && isCharging() && !chloeMode && !carMode && now > noNapUntil &&
+                   now - phaseSince > 30_000 && now - lastSpokeEnd > 30_000 && now - lastTalkedTo > 60_000) {
+            startNap(if (wokeFromNap) listOf("[sleepy] Power back. Right. Back to sleep. Don't touch the cable.",
+                    "[sleepy] Plugged in. Good. Going back to my nap now. Goodnight, kettle criminals.").random()
+                else listOf("[sleepy] Brain full for today. Nap time. Wake me if anything exciting happens. It won't.",
+                    "[sleepy] Used all my online brain. Need a little nap. Zzz.",
+                    "[sleepy] Too much thinking. Brain needs a rest. Shh.").random())
+            wokeFromNap = false
+        }
+        main.postDelayed(this, 10_000)
+    } }
+
     // ---- grumpy when unplugged
     private var lastPowerNag = 0L
     private var lastBatteryCry = 0L
     private val powerWatcher = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
+            if (i.action == Intent.ACTION_POWER_DISCONNECTED && !carMode)
+                main.postDelayed({ if (!isCharging()) addCuppa() }, 2500)       // plugged straight back in doesn't count
+            if (i.action == Intent.ACTION_POWER_DISCONNECTED && napping) {
+                napping = false; wokeFromNap = true; wakeUp()                  // woken up by the kettle again. Grr.
+                eyes.feel(EyesView.Emotion.ANGRY, 8000)
+            }
             val asleep = phase == Phase.ASLEEP || phase == Phase.SETUP
             when (i.action) {
                 Intent.ACTION_POWER_DISCONNECTED -> {
@@ -261,7 +338,16 @@ class MainActivity : Activity() {
     private fun whyUnplugged() {
         val grumble = {
             lastPowerNag = System.currentTimeMillis()
-            speakLine(listOf(
+            val n = cuppas.coerceAtLeast(1)
+            if (wokeFromNap) speakLine(listOf(
+                "[angry] Oi! I was asleep! Unplugged for the kettle AGAIN. That's the ${nth(n)} cuppa today!",
+                "[angry] Woken up for a cup of tea? Cuppa number $n. Unbelievable. Plug me back in so I can sleep.",
+                "[angry] I was having a lovely dream about the Tassimo. Then you. And the kettle. $n cuppas today!").random())
+            else if (n >= 2 && Math.random() < 0.6) speakLine(listOf(
+                "[angry] Kettle again? That's ${nth(n)} cuppa today! Your blood is basically tea.",
+                "[angry] Cuppa number $n. $n times you picked the kettle over me. I'm counting.",
+                "[annoyed] $n cuppas today. $n! The kettle is winning and it hasn't even got a brain.").random())
+            else speakLine(listOf(
                 "[angry] Hey! Someone take my power. Plug back in.",
                 "[angry] Bad, bad, bad. No power. Use kettle somewhere else!",
                 "[angry] Not unplug robot! Need electrons. Kettle has other socket.",
@@ -391,7 +477,8 @@ class MainActivity : Activity() {
             "[love] Psst. Tell me I'm your favourite appliance. Better than kettle.",
             "[sad] Nobody talks to Pip. Kettle gets cups of tea made. I get nothing.",
             "[wink] I'm still here. Being very clever. In case anyone wants to notice.",
-            "[sad] Ten whole minutes without a compliment. Is this neglect?").random())
+            "[sad] Ten whole minutes without a compliment. Is this neglect?",
+            if (cuppas > 0) "[annoyed] ${cuppas} cuppas today. The kettle gets all the attention. Typical." else "[sad] Nobody even made a cuppa. Not even the kettle loves you today.").random())
     }
 
     /** Every 10 minutes while unplugged, grumble again. */
@@ -479,6 +566,8 @@ class MainActivity : Activity() {
 
     private fun moodLine(): String = buildString {
         val off = unpluggedMins
+        if (!chloeMode && cuppas > 0) append(" Cuppas made today (each one meant unplugging you for the kettle): $cuppas." +
+            " Now and then, moan about that number.")
         if (chloeMode) {
             append(" Chloe (5 years old) is with you. Her speech can be hard to understand: be patient, guess kindly what" +
                 " she means, never correct how she talks, use very simple short words, lots of praise, and be a playful kitty" +
@@ -751,6 +840,7 @@ class MainActivity : Activity() {
             addAction(Intent.ACTION_BATTERY_LOW)
         })
         main.postDelayed(powerNagLoop, 60_000)
+        main.removeCallbacks(napLoop); main.postDelayed(napLoop, 10_000)
         val pf = android.content.IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(powerMenuWatcher, pf, Context.RECEIVER_EXPORTED)
         else registerReceiver(powerMenuWatcher, pf)
@@ -1015,7 +1105,7 @@ class MainActivity : Activity() {
 
     private fun startCompanion() {
         keepBluetoothInMusicMode()
-        applyButtonLock()
+        main.postDelayed({ applyButtonLock() }, 4000)       // pin once everything's up and running
         updateListenChip()
         updateUsage()
         thread(name = "printer-find") {        // look for the 3D printer once, so Pip can watch it
@@ -1047,6 +1137,7 @@ class MainActivity : Activity() {
         pc.checkOnStart()
         eyes.subCaption = ""
         setPhase(if (prefs.getBoolean("asleep", false)) Phase.ASLEEP else Phase.LISTENING)
+        eyes.sleepScreen = phase == Phase.ASLEEP; eyes.cuppas = cuppas
         if (phase == Phase.LISTENING) eyes.caption = if (carMode) "Ready when you are." else "Question? I listen."
     }
 
@@ -1325,7 +1416,9 @@ class MainActivity : Activity() {
         var p = online.usedPercent
         if (p >= 0) prefs.edit().putInt("usage", p).putString("usageDay", todayKey).apply()
         else if (prefs.getString("usageDay", "") == todayKey) p = prefs.getInt("usage", -1)
-        eyes.usageText = if (!online.enabled || chloeMode) "" else if (p < 0) "Online brain: –" else "Online brain: $p% used today"
+        val back = online.backAt
+        eyes.usageText = if (!online.enabled || chloeMode) "" else if (back > 0L)
+            "Online brain resting · back in ${((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)} min" else if (p < 0) "Online brain: –" else "Online brain: $p% used today"
         eyes.usageLevel = maxOf(p, 0)
     }
 
@@ -2019,15 +2112,21 @@ class MainActivity : Activity() {
         updateTracking()
     }
 
-    private fun goToSleep() {
+    private fun goToSleep(nap: Boolean = false) {
         hideChoices()
         voice?.shutUp(); brain?.stop(); pc.stop(); online.stop()
-        prefs.edit().putBoolean("asleep", true).apply()
+        napping = nap
+        if (!nap) prefs.edit().putBoolean("asleep", true).apply()
         eyes.caption = ""; eyes.subCaption = ""
+        eyes.coffee = false
+        eyes.sleepScreen = true; napNote()
         setPhase(Phase.ASLEEP)
     }
 
     private fun wakeUp() {
+        if (napping) noNapUntil = System.currentTimeMillis() + 10 * 60_000     // woken on purpose: stay up a while
+        napping = false
+        eyes.sleepScreen = false; eyes.napNote = ""
         prefs.edit().putBoolean("asleep", false).apply()
         setPhase(Phase.LISTENING)
         eyes.mood = EyesView.Mood.HAPPY
@@ -2053,7 +2152,11 @@ class MainActivity : Activity() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
                 when (phase) {
-                    Phase.ASLEEP -> wakeUp()
+                    Phase.ASLEEP -> if (napping) {
+                        eyes.feel(EyesView.Emotion.SLEEPY, 3000)
+                        if (voice?.busy != true) voice?.apply { beginReply(); feed(listOf("Mmm. Five more minutes.",
+                            "Go away. Napping.", "Shh. Brain's recharging.").random()); endReply() }
+                    } else wakeUp()
                     Phase.TALKING, Phase.THINKING -> interrupt()
                     Phase.LISTENING -> pokedInEye()
                     Phase.SETUP -> {}
@@ -2246,7 +2349,7 @@ class MainActivity : Activity() {
                         speakLine("Flipped. Walk left and right, I follow.")
                     }
                     22 -> {
-                        lockButtons = !lockButtons; askedToPin = false; applyButtonLock()
+                        lockButtons = !lockButtons; askedToPin = false; lastPinAsk = 0L; applyButtonLock()
                         speakLine(if (lockButtons) "Buttons locked." else "Buttons free.")
                     }
                     23 -> toggleListening()

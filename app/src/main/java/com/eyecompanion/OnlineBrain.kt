@@ -24,6 +24,13 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     /** Tokens used today per model (Groq's real limit is 200,000 tokens a day per model). */
     val tokensUsed = java.util.concurrent.ConcurrentHashMap<String, Int>()
     @Volatile var dailyLimit = 200_000
+    /** When each model's daily allowance frees up again (Groq says "try again in 12m30s"). */
+    val restUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private fun resting(m: String) = (restUntil[m] ?: 0L) > System.currentTimeMillis()
+    /** Every model is over its daily limit: nothing to do but wait (Pip naps). */
+    val allResting get() = enabled && MODELS.all { resting(it) }
+    /** When the first model is free again (0 = not resting). */
+    val backAt get() = if (allResting) MODELS.minOf { restUntil[it] ?: 0L } else 0L
     private fun recompute() {
         // Pip can carry on while ANY model has allowance left, so show the least-used one
         usedPercent = (MODELS.minOf { tokensUsed[it] ?: 0 } * 100L / dailyLimit).toInt().coerceIn(0, 100)
@@ -60,7 +67,12 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         val reply = StringBuilder()
         var problem: String? = null
         val tries = if (image != null) 1 else MODELS.size
+        if (image == null && allResting) {
+            history.removeAt(history.lastIndex); lastFailure = System.currentTimeMillis()
+            onUnavailable("resting"); return@execute
+        }
         for (attempt in 0 until tries) {
+            if (image == null && resting(MODELS[modelIndex])) { modelIndex = (modelIndex + 1) % MODELS.size; continue }
             problem = try {
                 if (image != null) stream(VISION_MODEL, reply, onToken, image, userText)
                 else stream(MODELS[modelIndex], reply, onToken)
@@ -165,10 +177,16 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             val err = try { conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (_: Exception) { "" }
             Regex("per day.*?Limit (\\d+), Used (\\d+)").find(err)?.let { m ->
                 dailyLimit = m.groupValues[1].toInt(); tokensUsed[model] = m.groupValues[2].toInt(); recompute()
+                // "...Please try again in 1h2m3.4s" -> rest this model until then
+                Regex("try again in (?:(\\d+)h)?(?:(\\d+)m)?(?:([\\d.]+)s)?").find(err)?.let { t ->
+                    val secs = (t.groupValues[1].toIntOrNull() ?: 0) * 3600 + (t.groupValues[2].toIntOrNull() ?: 0) * 60 +
+                        (t.groupValues[3].toDoubleOrNull() ?: 0.0)
+                    if (secs > 0) restUntil[model] = System.currentTimeMillis() + (secs * 1000).toLong() + 5000
+                }
             }
         }
         when (code) {
-            200 -> {}
+            200 -> restUntil.remove(model)
             401, 403 -> throw BadKey()
             429 -> throw RateLimited()
             else -> throw IllegalStateException("online brain HTTP ${conn.responseCode}")
