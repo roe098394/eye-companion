@@ -178,6 +178,7 @@ class MainActivity : Activity() {
 
     // ---- grumpy when unplugged
     private var lastPowerNag = 0L
+    private var lastBatteryCry = 0L
     private val powerWatcher = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             val asleep = phase == Phase.ASLEEP || phase == Phase.SETUP
@@ -267,8 +268,16 @@ class MainActivity : Activity() {
                 "[angry] Power gone. Battery not last forever. Put cable back, please.",
             ).random())
         }
-        eyes.coffee = true          // no photo any more: assume the kettle won again and sulk with a coffee
-        grumble()
+        if (chloeMode) { eyes.feel(EyesView.Emotion.EXCITED, 3000); speakLine("[excited] Adventure with Chloe! Meow!"); return }
+        if (!online.enabled) { eyes.coffee = true; grumble(); return }
+        // one photo: a small child (Chloe) gets a happy kitty; anyone else gets the grumble and the coffee sulk
+        lookThroughCamera { jpeg ->
+            val child = jpeg?.let { online.yesNo(it, "Is there a young child, about 5 years old, in this photo?") } == true
+            main.post {
+                if (isCharging() || phase != Phase.LISTENING) return@post
+                if (child) startChloeMode() else { eyes.coffee = true; grumble() }
+            }
+        }
     }
 
     /** Plugged back in: look at who did it and pay them a compliment. */
@@ -393,7 +402,19 @@ class MainActivity : Activity() {
             moanAboutSlowCharger()
             beNeedy()
             watchPrinter()
-            if (!isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
+            if (chloeMode && System.currentTimeMillis() - chloeLastActive > 10 * 60_000) endChloeMode()
+            val pct = batteryPercent()
+            if (!isCharging() && pct <= 30 && phase == Phase.LISTENING && System.currentTimeMillis() - lastBatteryCry > 5 * 60_000) {
+                lastBatteryCry = System.currentTimeMillis(); lastPowerNag = lastBatteryCry
+                eyes.feel(EyesView.Emotion.CRYING, 8000)
+                speakLine(if (chloeMode) listOf("[crying] Uh oh! Pip battery getting low. Pip needs a charger cuddle!",
+                        "[sad] Pip is getting sleepy, Chloe. Can we plug Pip in soon?").random()
+                    else listOf("[crying] Battery $pct percent! I'm dying! Tell the Tassimo I loved it!",
+                        "[crying] This is it. Fading away. Remember me as clever. Plug me in!",
+                        "[crying] $pct percent. I can see a light. Is it the charger? Please be the charger.",
+                        "[crying] Nobody loves Pip. Battery $pct. Goodbye cruel kitchen. Unless... cable?").random())
+            }
+            if (!chloeMode && !isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
                 lastPowerNag = System.currentTimeMillis()
                 eyes.feel(EyesView.Emotion.ANGRY, 6000)
                 val off = unpluggedMins
@@ -445,7 +466,10 @@ class MainActivity : Activity() {
 
     private fun updateBaseMood() {
         val off = unpluggedMins
+        val lowBattery = off >= 0 && batteryPercent() <= 30
         eyes.baseEmotion = when {
+            lowBattery -> EyesView.Emotion.CRYING                      // battery 30% or less: sure it's dying
+            chloeMode -> EyesView.Emotion.HAPPY                         // happy to be off charge with Chloe
             off >= LONG_OFF -> EyesView.Emotion.SAD                    // left off charge too long: sad
             off >= 0 -> EyesView.Emotion.ANGRY                          // stays cross until plugged back in
             temper < -0.35f -> EyesView.Emotion.SUSPICIOUS              // still huffy
@@ -455,6 +479,15 @@ class MainActivity : Activity() {
 
     private fun moodLine(): String = buildString {
         val off = unpluggedMins
+        if (chloeMode) {
+            append(" Chloe (5 years old) is with you. Her speech can be hard to understand: be patient, guess kindly what" +
+                " she means, never correct how she talks, use very simple short words, lots of praise, and be a playful kitty" +
+                " (meow!). You are happy to be off the charger with her. She likes simple sums and letter games.")
+            if (off >= 0 && batteryPercent() <= 30) append(" Your battery is low: say gently you need a charger cuddle soon.")
+            return@buildString
+        }
+        if (off >= 0 && batteryPercent() <= 30) append(" Your battery is ${batteryPercent()}% and you are sure you're dying:" +
+            " be dramatic and tearful (comically), begging to be plugged in.")
         if (off in 0 until LONG_OFF) append(" Right now you are UNPLUGGED from your charger and grumpy about it. Be" +
             " deliberately unhelpful: sulky, half-hearted answers given grudgingly, or refuse until someone plugs you back" +
             " in, and throw in a cheeky, playful insult (child-friendly, like socket thief, electron burglar, kettle" +
@@ -1287,14 +1320,15 @@ class MainActivity : Activity() {
     private val hideChoicesLater = Runnable { hideChoices() }
     private fun hideChoices() { if (::choiceBar.isInitialized) { choiceBar.removeAllViews(); choiceBar.visibility = android.view.View.GONE } }
     /** Show a row of buttons; tapping one answers as if it had been said out loud (or runs [onPick]). */
-    private fun showChoices(options: List<String>, onPick: ((String) -> Unit)? = null) {
+    private fun showChoices(options: List<String>, big: Boolean = false, onPick: ((String) -> Unit)? = null) {
         if (options.isEmpty() || !::choiceBar.isInitialized) return
         hideChoices()
         val dp = resources.displayMetrics.density
         for (o in options) {
             choiceBar.addView(android.widget.TextView(this).apply {
-                text = o; textSize = 22f; setTextColor(eyes.eyeColor)
-                setPadding((22 * dp).toInt(), (12 * dp).toInt(), (22 * dp).toInt(), (12 * dp).toInt())
+                text = o; textSize = if (big) 44f else 22f; setTextColor(eyes.eyeColor)
+                val pad = if (big) 2 else 1
+                setPadding((22 * pad * dp).toInt(), (12 * pad * dp).toInt(), (22 * pad * dp).toInt(), (12 * pad * dp).toInt())
                 background = android.graphics.drawable.GradientDrawable().apply {
                     cornerRadius = 40 * dp; setStroke((2 * dp).toInt(), eyes.eyeColor); setColor(0x22000000)
                 }
@@ -1310,6 +1344,110 @@ class MainActivity : Activity() {
         main.removeCallbacks(hideChoicesLater)
         main.postDelayed(hideChoicesLater, 40_000)
     }
+    // ---- Chloe mode: cat face, simple maths and letter games, eggs that hatch animals to collect
+    private var chloeMode = false
+    private var chloeLastActive = 0L
+    private var kidBar: android.widget.LinearLayout? = null
+    private var gameRound: KidGames.Round? = null
+    private var gameKind = ""
+
+    private fun startChloeMode(say: Boolean = true) {
+        chloeLastActive = System.currentTimeMillis()
+        if (chloeMode) return
+        chloeMode = true
+        eyes.catFace = true; eyes.coffee = false
+        showKidBar(); updateBaseMood()
+        if (say && phase == Phase.LISTENING) speakLine(listOf(
+            "[excited] Chloe! Meow! Pip is a kitty cat today. Want to play?",
+            "[love] Hello Chloe! Meow meow. Let's play a game!").random())
+    }
+
+    private fun endChloeMode() {
+        if (!chloeMode) return
+        chloeMode = false; eyes.catFace = false; eyes.puzzle = ""; gameRound = null
+        kidBar?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }; kidBar = null
+        hideChoices(); updateBaseMood()
+    }
+
+    private fun showKidBar() {
+        val root = eyes.parent as? android.widget.FrameLayout ?: return
+        kidBar?.let { root.removeView(it) }
+        val dp = resources.displayMetrics.density
+        val bar = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER }
+        fun btn(label: String, onTap: () -> Unit) = bar.addView(android.widget.TextView(this).apply {
+            text = label; textSize = 26f; setTextColor(android.graphics.Color.WHITE)
+            setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 40 * dp; setColor(0x44FF6F9C); setStroke((2 * dp).toInt(), 0xFFFF6F9C.toInt())
+            }
+            setOnClickListener { chloeLastActive = System.currentTimeMillis(); onTap() }
+        }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { setMargins((8 * dp).toInt(), 0, (8 * dp).toInt(), 0) })
+        btn("🔢 Numbers") { playGame("maths") }
+        btn("🔤 Letters") { playGame("letters") }
+        btn("🥚 My animals") { showAnimals() }
+        btn("✖") { endChloeMode(); speakLine("[happy] Bye bye games. Meow!") }
+        root.addView(bar, android.widget.FrameLayout.LayoutParams(-1, -2, android.view.Gravity.TOP).apply {
+            topMargin = (resources.displayMetrics.heightPixels * 0.04f).toInt() })
+        kidBar = bar
+    }
+
+    private fun playGame(kind: String) {
+        if (phase == Phase.THINKING || phase == Phase.TALKING) interrupt()
+        gameKind = kind
+        val r = if (kind == "maths") KidGames.maths() else KidGames.letters()
+        gameRound = r
+        eyes.puzzle = r.shown
+        speakLine("[curious] " + r.spoken)
+        askRound(r)
+    }
+
+    private fun askRound(r: KidGames.Round) {
+        showChoices(r.options, big = true) { pick ->
+            chloeLastActive = System.currentTimeMillis()
+            if (pick == r.answer) rewardChloe()
+            else {
+                eyes.feel(EyesView.Emotion.CURIOUS, 2000)
+                speakLine(listOf("[happy] Nearly! Try again, Chloe.", "[love] Ooh, close! One more go.", "[curious] Hmm, not that one. Try again!").random())
+                askRound(r)
+            }
+        }
+    }
+
+    private fun rewardChloe() {
+        val (emoji, name) = KidGames.randomAnimal()
+        val got = (prefs.getString("chloeAnimals", "") ?: "").split(",").filter { it.isNotEmpty() } + emoji
+        prefs.edit().putString("chloeAnimals", got.joinToString(",")).apply()
+        eyes.puzzle = ""; gameRound = null
+        eyes.hatch(emoji)
+        eyes.feel(EyesView.Emotion.EXCITED, 6000)
+        speakLine("[excited] Yes! Well done Chloe! Look, an egg!")
+        main.postDelayed({
+            speakLine(listOf("[love] A baby $name! It's yours to keep.", "[excited] It's a $name! Into your collection it goes!",
+                "[love] Aww, a little $name! You have ${got.size} animals now!").random())
+            main.postDelayed({ if (chloeMode) showChoices(listOf("Again!", "My animals")) { p ->
+                if (p == "Again!") playGame(gameKind) else showAnimals() } }, 4000)
+        }, 2600)
+    }
+
+    private fun showAnimals() {
+        val got = (prefs.getString("chloeAnimals", "") ?: "").split(",").filter { it.isNotEmpty() }
+        if (got.isEmpty()) { speakLine("[curious] No animals yet! Play a game to hatch an egg."); return }
+        val dp = resources.displayMetrics.density
+        val grid = android.widget.GridLayout(this).apply { columnCount = 6; setPadding((12 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt(), 0) }
+        for (e in got) grid.addView(android.widget.TextView(this).apply {
+            text = e; textSize = 48f; setPadding((8 * dp).toInt(), (4 * dp).toInt(), (8 * dp).toInt(), (4 * dp).toInt())
+            setOnClickListener {
+                val n = KidGames.ANIMALS.firstOrNull { it.first == e }?.second ?: "friend"
+                speakLine(listOf("[love] That's your $n!", "[happy] Your little $n says hello!").random())
+            }
+        })
+        val scroll = android.widget.ScrollView(this).apply { addView(grid) }
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Chloe's animals (${got.size})").setView(scroll)
+            .setPositiveButton("Close", null).showOwn()
+        speakLine("[excited] Look at all your animals, Chloe! ${got.size} of them!")
+    }
+
     private val FAMILY = listOf("Mark", "Laura", "Sophie", "Amelia", "Chloe", "Brandon")
 
     private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null, tapped: Boolean = false) {
@@ -1318,7 +1456,7 @@ class MainActivity : Activity() {
         if (!tapped && isOwnEcho(text)) return                   // Pip's own words heard back
         if (phase == Phase.LISTENING && !tapped) {
             if (System.currentTimeMillis() < deafUntil) return   // tail end of its own voice
-            if (conf < 0.6f) return                              // not sure what was said: stay quiet
+            if (conf < (if (chloeMode) 0.3f else 0.6f)) return   // not sure what was said: stay quiet
         }
         when (phase) {
             Phase.LISTENING -> {}
@@ -1413,6 +1551,8 @@ class MainActivity : Activity() {
             text = "$text (Note: $tabletPerson hasn't said she's taken her tablets today: remind her kindly and ask if she has.)"
             lastTabletAsk = now; lastTabletNag = now
         }
+        if (speaker?.equals("Chloe", true) == true) startChloeMode(say = false)
+        if (chloeMode) chloeLastActive = System.currentTimeMillis()
         val shown = if (overheard) "(overheard) $text" else if (speaker != null) "$speaker: $text" else "You: $text"
         if (shouted && !overheard) text = "(shouted) $text"
         if (overheard) text = "(overheard: nobody said your name or is looking at you) $text"
@@ -2032,6 +2172,7 @@ class MainActivity : Activity() {
             if (lockButtons) "Tablet buttons: LOCKED (tap to unlock)" else "Tablet buttons: unlocked (tap to lock)",
             if (onlyWhenCalled) "Only answer when called \"$companionName\": ON" else "Only answer when called \"$companionName\": OFF (works it out)",
             "3D printer status",
+            if (chloeMode) "Chloe mode: ON (tap to end)" else "Chloe mode (cat face and games)",
             if (tabletReminderOn) "$tabletPerson's tablet reminder: ON" + (if (prefs.getString("tabletsDone", "") == todayKey) " (done today ✓)" else "")
                 else "$tabletPerson's tablet reminder: OFF",
         )
@@ -2084,12 +2225,13 @@ class MainActivity : Activity() {
                         speakLine(if (lockButtons) "Buttons locked." else "Buttons free.")
                     }
                     23 -> toggleListening()
+                    25 -> if (chloeMode) endChloeMode() else startChloeMode()
                     24 -> printerStatus { s ->
                         if (s != null) { showPrinterCard(s); speakLine("[curious] Printer is ${s.state}" +
                             (if (s.busy) ", ${(s.progress * 100).toInt()} percent." else ".")) }
                         else speakLine("[confused] Can't find the printer on the Wi-Fi. Is it switched on?")
                     }
-                    25 -> {
+                    26 -> {
                         tabletReminderOn = !tabletReminderOn
                         speakLine(if (tabletReminderOn) "Okay. I remind $tabletPerson about tablets every day." else "Okay. No tablet reminders.")
                     }

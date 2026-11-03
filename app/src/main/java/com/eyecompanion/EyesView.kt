@@ -22,6 +22,22 @@ class EyesView(context: Context) : View(context) {
     enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY,
         SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING, STONED, SNIGGER }
 
+    /** Chloe mode: cute cat ears, nose and whiskers around the eyes. */
+    @Volatile var catFace = false
+
+    /** An egg that wobbles, cracks and hatches a baby animal (emoji) as a reward. */
+    @Volatile private var hatchStart = 0L
+    @Volatile private var hatchAnimal = ""
+    fun hatch(animal: String) { hatchAnimal = animal; hatchStart = now() }
+    val hatching get() = now() - hatchStart < 6000
+
+    /** Big text shown in the middle (a sum or a picture word for the games), "" to hide. */
+    @Volatile var puzzle = ""
+    private val puzzlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val eggPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val eggLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = Color.parseColor("#8A6A3A") }
+    private val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+
     /** Sulking with a cup of coffee (unplugged for the kettle): a mug Pip sips from. */
     @Volatile var coffee = false
 
@@ -295,7 +311,41 @@ class EyesView(context: Context) : View(context) {
             }
         }
 
+        // Chloe mode: cat ears above, a little pink nose and whiskers below
+        if (catFace && !carMode && mood != Mood.LOADING) {
+            val earH = eyeW * 0.75f
+            for (side in arrayOf(-1f, 1f)) {
+                val ex = cx + side * (gap / 2 + eyeW / 2)
+                val top = cy - eyeH * 0.5f - eyeW * 0.2f
+                val p = android.graphics.Path().apply {
+                    moveTo(ex - eyeW * 0.45f, top); lineTo(ex + side * eyeW * 0.15f, top - earH); lineTo(ex + eyeW * 0.45f, top); close()
+                }
+                eyePaint.alpha = 255; canvas.drawPath(p, eyePaint)
+                val inner = android.graphics.Path().apply {
+                    moveTo(ex - eyeW * 0.25f, top - earH * 0.08f); lineTo(ex + side * eyeW * 0.13f, top - earH * 0.72f); lineTo(ex + eyeW * 0.25f, top - earH * 0.08f); close()
+                }
+                blushPaint.alpha = 200; canvas.drawPath(inner, blushPaint)
+                mugLine.color = col; mugLine.alpha = 200; mugLine.strokeWidth = eyeW * 0.035f
+                val wy = cy + eyeH * 0.55f
+                for (k in -1..1) canvas.drawLine(cx + side * eyeW * 0.35f, wy + k * eyeW * 0.08f,
+                    cx + side * eyeW * 1.35f, wy + k * eyeW * 0.2f, mugLine)
+            }
+            val ny = cy + eyeH * 0.45f
+            val nose = android.graphics.Path().apply {
+                moveTo(cx - eyeW * 0.14f, ny); lineTo(cx + eyeW * 0.14f, ny); lineTo(cx, ny + eyeW * 0.14f); close()
+            }
+            blushPaint.alpha = 255; canvas.drawPath(nose, blushPaint)
+        }
+
         canvas.restore()
+
+        // a game question shown big under the eyes
+        if (puzzle.isNotEmpty() && !hatching) {
+            puzzlePaint.textSize = h * 0.11f; puzzlePaint.color = Color.WHITE
+            canvas.drawText(puzzle, w / 2, h * 0.82f, puzzlePaint)
+        }
+        // reward: an egg wobbles, cracks open and a baby animal pops out
+        if (hatching) drawHatch(canvas, w, h, (t - hatchStart) / 1000f)
 
         // poked: hands over the eyes
         if (t < coverUntil) {
@@ -552,6 +602,42 @@ class EyesView(context: Context) : View(context) {
                 c.drawPath(p, mugLine)
             }
             mugLine.alpha = 255
+        }
+    }
+
+    private fun drawHatch(c: Canvas, w: Float, h: Float, age: Float) {
+        val x = w / 2; val y = h * 0.55f; val r = h * 0.17f
+        c.drawColor(Color.argb((150 * min(1f, age * 3)).toInt(), 0, 0, 0))
+        if (age < 2.2f) {
+            val wob = sin(age * 18f) * min(1f, age) * 10f
+            c.save(); c.rotate(wob, x, y + r)
+            eggPaint.color = Color.parseColor("#FFF3D6")
+            rect.set(x - r * 0.8f, y - r * 1.1f, x + r * 0.8f, y + r)
+            c.drawOval(rect, eggPaint)
+            eggPaint.color = Color.parseColor("#F7B6D2")
+            for (i in 0..4) c.drawCircle(x + (i - 2) * r * 0.3f, y - r * 0.2f + (i % 2) * r * 0.35f, r * 0.08f, eggPaint)
+            if (age > 0.9f) {
+                eggLine.strokeWidth = r * 0.05f
+                val p = android.graphics.Path()
+                var xx = x - r * 0.75f; var k = 0
+                p.moveTo(xx, y - r * 0.05f)
+                while (xx < x + r * 0.75f) { xx += r * 0.2f; k++; p.lineTo(xx, y - r * 0.05f + (if (k % 2 == 0) -1 else 1) * r * 0.12f) }
+                c.drawPath(p, eggLine)
+            }
+            c.restore()
+        } else {
+            val pop = min(1f, (age - 2.2f) / 0.4f)
+            val bounce = if (pop < 1f) 0f else abs(sin((age - 2.6f) * 5f)) * r * 0.08f
+            emojiPaint.textSize = r * 1.9f * (0.3f + 0.7f * pop)
+            c.drawText(hatchAnimal, x, y + r * 0.45f - bounce, emojiPaint)
+            eggPaint.color = Color.parseColor("#FFF3D6")
+            rect.set(x - r * 0.85f, y + r * 0.35f, x + r * 0.85f, y + r * 1.15f)
+            c.drawArc(rect, 0f, 180f, true, eggPaint)
+            for (i in 0..7) {
+                val a = Math.toRadians((i * 45f + age * 40f).toDouble()).toFloat()
+                val d = r * (1.3f + 0.15f * sin(age * 6f + i))
+                drawSparkle(c, x + d * cos(a), y + d * sin(a), r * 0.12f, Color.parseColor("#FFD84A"))
+            }
         }
     }
 
