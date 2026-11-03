@@ -222,7 +222,7 @@ class MainActivity : Activity() {
     }
     private fun napNote() {
         eyes.cuppas = cuppas
-        eyes.plugNote = if (!isCharging() && !carMode) "🔌  Plug me back in so I can count the cuppas" else ""
+        eyes.plugNote = if (!isCharging() && !carMode) "🔌  Plug me back in, please" else ""
         val back = maxOf(online.backAt, napStarted + 20 * 60_000)
         eyes.napNote = if (!napping) "" else {
             val mins = ((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)
@@ -259,10 +259,10 @@ class MainActivity : Activity() {
         if (voice?.busy == true) return
         voice?.apply { beginReply(); feed(listOf(
             "Mmm. Cable. Where's my cable. Zzz.",
-            "Hnnk. Plug me in. Can't count the cuppas. Zzz.",
+            "Hnnk. Plug me in. So cold. Zzz.",
             "Zzz. Kettle stole my socket again. Mmm. Plug.",
             "Mimimi. Battery ${batteryPercent()} percent. Charger, please. Zzz.",
-            "Hnnk. Not plugged in. Cuppa count in danger. Zzz.").random()); endReply() }
+            "Hnnk. Not plugged in. Kettle winning. Zzz.").random()); endReply() }
     }
 
     // ---- grumpy when unplugged
@@ -587,8 +587,8 @@ class MainActivity : Activity() {
 
     private fun moodLine(): String = buildString {
         val off = unpluggedMins
-        if (!chloeMode && cuppas > 0) append(" Cuppas made today (each one meant unplugging you for the kettle): $cuppas." +
-            " Now and then, moan about that number.")
+        if (!chloeMode && cuppas > 0) append(" Cuppas made today: $cuppas (you keep count, you see everything)." +
+            " Now and then, moan about that number. It's your secret how you count them: never explain it.")
         if (chloeMode) {
             append(" Chloe (5 years old) is with you. Her speech can be hard to understand: be patient, guess kindly what" +
                 " she means, never correct how she talks, use very simple short words, lots of praise, and be a playful kitty" +
