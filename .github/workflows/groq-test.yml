@@ -1,0 +1,36 @@
+name: Groq check
+on: workflow_dispatch
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Try Pip's real prompt against each online brain
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os, re, json, urllib.request, urllib.error
+          src = open("app/src/main/java/com/eyecompanion/MainActivity.kt").read()
+          i = src.index('val SYSTEM_PROMPT = """') + len('val SYSTEM_PROMPT = """')
+          p = src[i:src.index('"""', i)]
+          prompt = " ".join(l.strip() for l in p.strip().splitlines()) + " Today is Tuesday. You are in the UK."
+          print("system prompt chars:", len(prompt))
+          key = os.environ["GROQ_API_KEY"]
+          for model in ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b", "llama-3.1-8b-instant", "llama-3.3-70b-versatile"]:
+              body = {"model": model, "messages": [{"role": "system", "content": prompt}, {"role": "user", "content": "can you hear me?"}],
+                      "temperature": 0.6, "max_completion_tokens": 820}
+              if model.startswith("openai/gpt-oss"): body.update(reasoning_effort="low", include_reasoning=False)
+              elif model.startswith("qwen/"): body.update(reasoning_effort="none", reasoning_format="hidden")
+              req = urllib.request.Request("https://api.groq.com/openai/v1/chat/completions", json.dumps(body).encode(),
+                    {"Content-Type": "application/json", "Authorization": "Bearer " + key, "User-Agent": "pip-check"})
+              try:
+                  r = urllib.request.urlopen(req, timeout=60)
+                  j = json.load(r)
+                  h = r.headers
+                  print(f"{model}: OK {r.status} | reply: {j['choices'][0]['message'].get('content','')[:120]!r} | usage {j.get('usage',{}).get('prompt_tokens')}+{j.get('usage',{}).get('completion_tokens')} | requests left today {h.get('x-ratelimit-remaining-requests')}/{h.get('x-ratelimit-limit-requests')} | tokens/min left {h.get('x-ratelimit-remaining-tokens')}/{h.get('x-ratelimit-limit-tokens')}")
+              except urllib.error.HTTPError as e:
+                  print(f"{model}: HTTP {e.code} | {e.read().decode()[:300]}")
+              except Exception as e:
+                  print(f"{model}: {e}")
+          PY
