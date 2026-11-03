@@ -698,7 +698,7 @@ class MainActivity : Activity() {
                     "back in and give one short, warm, genuine compliment about something you can really see (smile, top, " +
                     "hair, glasses...), starting with the [love] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
                     "gown matches the kettle (forgiven), a green one matches the recycling bin (very eco), the teddy coat makes her a cuddly bear. If nobody is in the photo, write OTHER and just thank them.",
-                    system = systemPrompt(), maxTokens = 100)
+                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
             }
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
             val head = raw?.substringBefore("[")?.uppercase() ?: ""
@@ -966,7 +966,7 @@ class MainActivity : Activity() {
     private fun messCheck() {
         val now = System.currentTimeMillis()
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        if (now - lastMessCheck < 2 * 3_600_000 || hour !in 8..21 || phase != Phase.LISTENING || chloeMode || carMode ||
+        if (now - lastMessCheck < 3 * 3_600_000 || hour !in 8..21 || phase != Phase.LISTENING || chloeMode || carMode ||
             !online.enabled || online.allResting || !followFaces) return
         lastMessCheck = now
         lookThroughCamera { jpeg ->
@@ -1779,9 +1779,11 @@ class MainActivity : Activity() {
         if (p >= 0) prefs.edit().putInt("usage", p).putString("usageDay", todayKey).apply()
         else if (prefs.getString("usageDay", "") == todayKey) p = prefs.getInt("usage", -1)
         val back = online.backAt
+        val resting = online.restingCount
         eyes.usageText = if (!online.enabled || chloeMode) "" else if (back > 0L)
-            "Online brain resting · back in ${((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)} min" else if (p < 0) "Online brain: –" else "Online brain: $p% used today"
-        eyes.usageLevel = maxOf(p, 0)
+            "Online brain resting · back in ${((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)} min"
+            else if (resting > 0) "Online brain: ${3 - resting} of 3 working" else "Online brain ✓"
+        eyes.usageLevel = resting * 100 / 3
     }
 
     // ---- on-screen answer buttons

@@ -27,6 +27,17 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     /** When each model's daily allowance frees up again (Groq says "try again in 12m30s"). */
     val restUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private fun resting(m: String) = (restUntil[m] ?: 0L) > System.currentTimeMillis()
+    /** How many of the online brains are resting right now (0..3). */
+    val restingCount get() = if (!enabled) 0 else MODELS.count { resting(it) }
+
+    /** Photos cost a lot of the daily allowance: send a small one (at most 512 px wide). */
+    fun shrink(jpeg: ByteArray): ByteArray = try {
+        val bm = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+        if (bm == null || bm.width <= 512) jpeg else {
+            val small = android.graphics.Bitmap.createScaledBitmap(bm, 512, (bm.height * 512f / bm.width).toInt(), true)
+            java.io.ByteArrayOutputStream().also { small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, it) }.toByteArray()
+        }
+    } catch (_: Exception) { jpeg }
     /** Every model is over its daily limit: nothing to do but wait (Pip naps). */
     val allResting get() = enabled && MODELS.all { resting(it) }
     /** When the first model is free again (0 = not resting). */
@@ -110,7 +121,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     /** One-off question about a camera picture (not added to the chat memory). null = couldn't. */
     fun lookAt(jpeg: ByteArray, question: String, system: String? = null, maxTokens: Int = 120,
                temperature: Double = 0.7): String? = try {
-        val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+        val b64 = android.util.Base64.encodeToString(shrink(jpeg), android.util.Base64.NO_WRAP)
         val content = JSONArray()
             .put(JSONObject().put("type", "text").put("text", question))
             .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$b64")))
@@ -143,7 +154,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         history.forEachIndexed { i, it ->
             if (image != null && i == history.lastIndex) {
                 // the latest question goes in with the photo
-                val b64 = android.util.Base64.encodeToString(image, android.util.Base64.NO_WRAP)
+                val b64 = android.util.Base64.encodeToString(shrink(image), android.util.Base64.NO_WRAP)
                 val content = JSONArray()
                     .put(JSONObject().put("type", "text").put("text",
                         "$question\n(This is a photo from your camera, taken just now. Describe only what is really in it.)"))
@@ -186,7 +197,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             }
         }
         when (code) {
-            200 -> restUntil.remove(model)
+            200 -> { restUntil.remove(model); tokensUsed.remove(model) }
             401, 403 -> throw BadKey()
             429 -> throw RateLimited()
             else -> throw IllegalStateException("online brain HTTP ${conn.responseCode}")
