@@ -125,6 +125,12 @@ class Ears(
 
     private fun loop() {
         var mic = openMic(startMode.coerceIn(0, setups.size - 1)) ?: openMic(0)
+        // The mic can be busy for a few seconds (Home/Assistant, another app letting go of it): keep trying.
+        var tries = 0
+        while (mic == null && running && tries++ < 12) {
+            try { Thread.sleep(1000) } catch (_: InterruptedException) { break }
+            mic = openMic(startMode.coerceIn(0, setups.size - 1)) ?: openMic(0)
+        }
         if (mic == null) {
             onError("I can't open the microphone. Check Pip has microphone permission in Settings → Apps, then long-press → Retry setup.")
             running = false

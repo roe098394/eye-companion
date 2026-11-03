@@ -1262,40 +1262,54 @@ class MainActivity : Activity() {
     private var earRestarts = 0
     private val micDrops = ArrayDeque<Long>()
     private var phaseSince = 0L
+    private var earsRestartPending = false
+    private fun scheduleEarsRestart() {
+        if (earsRestartPending) return
+        earsRestartPending = true
+        earRestarts++
+        // quick at first, then calmer - but never give up
+        val delay = when { earRestarts <= 5 -> 3000L; earRestarts <= 20 -> 10_000L; else -> 30_000L }
+        main.postDelayed({ earsRestartPending = false; startEars(); setPhase(phase) }, delay)
+    }
     private fun startEars() {
         val m = voskModel ?: return
+        main.removeCallbacks(clearMicTrouble)
         ears?.stop()
         ears = Ears(
             this, m,
-            onPartial = { p -> main.post { partial(p) } },
-            onHeard = { h -> main.post { heardSound(h) } },
+            onPartial = { p -> main.post { micWorking(); partial(p) } },
+            onHeard = { h -> main.post { micWorking(); heardSound(h) } },
             speakerModel = speakerModel,
             onLevel = { l -> eyes.level = l },
-            onError = { msg -> main.post {
-                // the mic dropped out (another app, a call, the screen going off...): try again by itself
-                if (earRestarts < 20) {
-                    earRestarts++
-                    val now = System.currentTimeMillis()
-                    micDrops.addLast(now); while (micDrops.isNotEmpty() && now - micDrops.first() > 600_000) micDrops.removeFirst()
-                    if (micDrops.size >= 3) eyes.subCaption = "Mic keeps dropping out (${micDrops.size} times in 10 min)…"
-                    main.postDelayed({ startEars(); setPhase(phase) }, 3000)
-                }
-                else eyes.caption = msg
+            onError = { _ -> main.post {
+                // the mic dropped out (Home button, another app, a call...): try again by itself, forever
+                val now = System.currentTimeMillis()
+                micDrops.addLast(now); while (micDrops.isNotEmpty() && now - micDrops.first() > 600_000) micDrops.removeFirst()
+                if (micDrops.size >= 3) eyes.subCaption = "Mic keeps dropping out - trying again…"
+                scheduleEarsRestart()
             } },
             startMode = prefs.getInt("micMode", 0),
         ).also { it.start() }
+        // if it's still running after 20 s, it's working: forget the old failures
+        main.postDelayed(clearMicTrouble, 20_000)
+    }
+    private val clearMicTrouble = Runnable { if (ears?.alive == true) micWorking() }
+    private fun micWorking() {
+        if (earRestarts == 0) return
+        earRestarts = 0
+        if (eyes.subCaption.startsWith("Mic keeps")) eyes.subCaption = ""
+        if (eyes.caption.contains("microphone")) eyes.caption = ""
     }
     private val earsWatchdog: Runnable = object : Runnable {
         override fun run() {
             val now = System.currentTimeMillis()
             if (phase != Phase.SETUP) {
                 // the listening loop died without saying so
-                if (ears?.alive == false) { startEars(); setPhase(phase) }
+                if (ears?.alive == false && !earsRestartPending) scheduleEarsRestart()
                 // stuck thinking/talking with nothing being said (a brain that never answered)
                 if ((phase == Phase.THINKING || phase == Phase.TALKING) && now - phaseSince > 45_000 && voice?.busy != true) {
                     replyId++; setPhase(Phase.LISTENING)
                 }
-                if (phase == Phase.LISTENING && now - phaseSince > 600_000) earRestarts = 0
             }
             main.postDelayed(this, 5000)
         }
@@ -2266,7 +2280,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         updateTracking()
-        if (phase != Phase.SETUP && ears?.alive == false) { startEars(); setPhase(phase) }
+        if (phase != Phase.SETUP && ears?.alive == false && !earsRestartPending) scheduleEarsRestart()
         if (phase != Phase.SETUP) applyButtonLock()
         hideSystemBars()
         if (phase != Phase.SETUP) keepBluetoothInMusicMode()
