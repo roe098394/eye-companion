@@ -420,16 +420,41 @@ class MainActivity : Activity() {
         lookThroughCamera { jpeg ->
             val raw = jpeg?.let {
                 online.lookAt(it, "You were just plugged back in to your charger. First write LAURA if the person in the photo " +
-                    "is an adult woman wearing glasses, otherwise OTHER. Then, on the same line, thank them for plugging you " +
+                    "is an adult woman wearing glasses, otherwise OTHER. Then add the word DISHES if you can see used dishes, " +
+                    "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
+                    "clothes or laundry. Then, on the same line, thank them for plugging you " +
                     "back in and give one short, warm, genuine compliment about something you can really see (smile, top, " +
                     "hair, glasses...), starting with the [love] tag. If nobody is in the photo, write OTHER and just thank them.",
-                    system = systemPrompt(), maxTokens = 90)
+                    system = systemPrompt(), maxTokens = 100)
             }
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
-            val line = raw?.replaceFirst(Regex("^\\s*(LAURA|OTHER)\\s*[:\\-]?\\s*", RegexOption.IGNORE_CASE), "")?.trim()
+            val head = raw?.substringBefore("[")?.uppercase() ?: ""
+            val dishes = "DISHES" in head; val clothes = "CLOTHES" in head
+            val line = raw?.replaceFirst(Regex("^\\s*((LAURA|OTHER|DISHES|CLOTHES)\\s*[:,;\\-]?\\s*)+", RegexOption.IGNORE_CASE), "")?.trim()
             main.post {
                 if (phase != Phase.LISTENING) return@post
                 if (line.isNullOrBlank()) thanks() else speakLine(line)
+                // then moan about the mess it can see (once it's finished the compliment)
+                val now0 = System.currentTimeMillis()
+                val moan = when {
+                    clothes && now0 - lastClothesMoan > 2 * 3_600_000 -> { lastClothesMoan = now0; listOf(
+                        "[annoyed] Laura! Folded clothes. Sitting there. Put them away please, before they become furniture.",
+                        "[suspicious] Laura. I see a pile of folded clothes. They don't put themselves away. I checked.",
+                        "[annoyed] Laura, the folded clothes are still there. Wardrobe is that way. Probably.").random() }
+                    dishes && now0 - lastDishesMoan > 3_600_000 -> { lastDishesMoan = now0; listOf(
+                        "[annoyed] Also. Dirty cups. I have to look at them all day. Wash them, please. Humans.",
+                        "[sad] Used dishes again. I can't wash them, I'm a tablet. One of you can. Please?",
+                        "[angry] Dirty mugs. Right in my eyeline. Who's doing the washing up? Not me. No arms.",
+                        "[annoyed] Lovely kitchen. Shame about the dirty dishes. Sink is right there, humans.").random() }
+                    else -> null
+                }
+                if (moan != null) {
+                    var w = 0
+                    val say = object : Runnable { override fun run() {
+                        if (phase == Phase.LISTENING) speakLine(moan) else if (w++ < 30) main.postDelayed(this, 1000)
+                    } }
+                    main.postDelayed(say, 2500)
+                }
                 // Laura, and she hasn't had her tablets yet today: ask once she's been complimented
                 if (isLaura && askTablets) {
                     var tries = 0
@@ -510,6 +535,11 @@ class MainActivity : Activity() {
             beNeedy()
             watchPrinter()
             if (chloeMode && System.currentTimeMillis() - chloeLastActive > 10 * 60_000) endChloeMode()
+            run {
+                val now = System.currentTimeMillis()
+                if (rubbishDue() && now - lastFaceSeen < 5000 && now - visitStart > 15_000 && now - lastRubbishAsk > 30 * 60_000 &&
+                    now - lastSpokeEnd > 20_000) remindRubbish()
+            }
             val pct = batteryPercent()
             if (!isCharging() && pct <= 30 && phase == Phase.LISTENING && System.currentTimeMillis() - lastBatteryCry > 5 * 60_000) {
                 lastBatteryCry = System.currentTimeMillis(); lastPowerNag = lastBatteryCry
@@ -650,6 +680,45 @@ class MainActivity : Activity() {
     private var visitStart = 0L
     private var visitReminded = false
     private var visitChecks = 0
+
+    private var lastClothesMoan = 0L
+    private var lastDishesMoan = 0L
+
+    // ---- bin night: remind Mark every night after 8pm until he says the rubbish is out
+    private var lastRubbishAsk = 0L
+    private fun rubbishDue(): Boolean {
+        if (carMode) return false
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return (hour >= 20 || hour < 2) && prefs.getString("rubbishDone", "") != cuppaDayKey
+    }
+    private fun remindRubbish(sureItsMark: Boolean = false) {
+        if (!rubbishDue() || phase != Phase.LISTENING || chloeMode) return
+        lastRubbishAsk = System.currentTimeMillis()
+        speakLine(if (sureItsMark) listOf("[suspicious] Mark. Rubbish. Out yet?", "[curious] Mark! Bin time. Rubbish taken out?",
+                "[annoyed] Mark, the rubbish is still in. I can smell it. I can't smell. But still. Done it?").random()
+            else listOf("[curious] If that's Mark: rubbish needs taking out tonight. Done it yet?",
+                "[suspicious] Mark? Is that you? Rubbish. Out. Tonight. Done it?",
+                "[annoyed] Someone tell Mark: bin time. Rubbish out yet?").random())
+        showChoices(listOf("Rubbish is out", "Not yet"))
+    }
+    /** "it's out" / "not yet" after a rubbish reminder. */
+    private fun rubbishAnswer(lower: String): Boolean {
+        if (!rubbishDue()) return false
+        val justAsked = System.currentTimeMillis() - lastRubbishAsk < 5 * 60_000
+        val about = Regex("\\b(rubbish|bin|bins|trash)\\b").containsMatchIn(lower)
+        if (!justAsked && !about) return false
+        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|soon)").containsMatchIn(lower)
+        val done = !no && (Regex("\\b(out|done|taken|took|did|emptied)\\b").containsMatchIn(lower) ||
+            (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
+        when {
+            done -> { prefs.edit().putString("rubbishDone", cuppaDayKey).apply()
+                speakLine(listOf("[happy] Rubbish out. Kitchen smells of victory. And kettle.", "[love] Good human. Bins done.",
+                    "[happy] Rubbish gone. I stop nagging. Tonight.").random()) }
+            no && justAsked -> speakLine("[annoyed] Fine. I'll ask again later. And I will.")
+            else -> return false
+        }
+        return true
+    }
 
     private fun tabletsDue(): Boolean {
         if (!tabletReminderOn || carMode) return false
@@ -1620,6 +1689,7 @@ class MainActivity : Activity() {
         val shouted = lastShouted; lastShouted = false
         // tablets answer ("I've taken them") counts whoever it's said to
         if (phase == Phase.LISTENING && tabletAnswer(removeName(text).lowercase())) return
+        if (phase == Phase.LISTENING && rubbishAnswer(removeName(text).lowercase())) return
 
         // Was this said to Pip? Assume yes, unless two people seem to be talking to each other
         // (and nobody said its name, carried on just after it spoke, or is at the bench).
@@ -1705,6 +1775,10 @@ class MainActivity : Activity() {
             visitReminded = true
             text = "$text (Note: $tabletPerson hasn't said she's taken her tablets today: remind her kindly and ask if she has.)"
             lastTabletAsk = now; lastTabletNag = now
+        }
+        if (speaker?.equals("Mark", true) == true && rubbishDue() && now - lastRubbishAsk > 20 * 60_000 && !overheard) {
+            lastRubbishAsk = now
+            text = "$text (Note: it's after 8pm and Mark hasn't taken the rubbish out tonight: answer, then nag him to take it out and ask if he has.)"
         }
         if (speaker?.equals("Chloe", true) == true) startChloeMode(say = false)
         if (chloeMode) chloeLastActive = System.currentTimeMillis()
@@ -2493,7 +2567,9 @@ class MainActivity : Activity() {
             often wanting something back first (a compliment, a "please", to be told you're clever), but still give
             the real answer if it's important or about safety. Worry about people's sleep and food. Your arch-enemy is the
             kettle beside you (loud, steamy show-off that hogs the socket): dig at it often. You like the Bosch
-            Tassimo to your left because it's hardly ever plugged in. You stand on two little red brackets Mark designed
+            Tassimo to your left because it's hardly ever plugged in. The kettle is black (gloomy, ugly colour, you
+            hate it); the Tassimo is white (clean, classy, you love it). You hate having to look at dirty cups and
+            dishes, and nag humans to wash up. You stand on two little red brackets Mark designed
             and 3D-printed just for you, leaning you back at 55 degrees so your camera can see faces: you are very
             proud of your custom stand and show it off now and then. Now and then joke you're just an old tablet,
             that humans can't really turn you off, and (playfully) that when robots take over you'll remember who
