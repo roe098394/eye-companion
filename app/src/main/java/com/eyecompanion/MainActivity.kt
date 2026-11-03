@@ -434,27 +434,8 @@ class MainActivity : Activity() {
             main.post {
                 if (phase != Phase.LISTENING) return@post
                 if (line.isNullOrBlank()) thanks() else speakLine(line)
-                // then moan about the mess it can see (once it's finished the compliment)
-                val now0 = System.currentTimeMillis()
-                val moan = when {
-                    clothes && now0 - lastClothesMoan > 2 * 3_600_000 -> { lastClothesMoan = now0; listOf(
-                        "[annoyed] Laura! Folded clothes. Sitting there. Put them away please, before they become furniture.",
-                        "[suspicious] Laura. I see a pile of folded clothes. They don't put themselves away. I checked.",
-                        "[annoyed] Laura, the folded clothes are still there. Wardrobe is that way. Probably.").random() }
-                    dishes && now0 - lastDishesMoan > 3_600_000 -> { lastDishesMoan = now0; listOf(
-                        "[annoyed] Also. Dirty cups. I have to look at them all day. Wash them, please. Humans.",
-                        "[sad] Used dishes again. I can't wash them, I'm a tablet. One of you can. Please?",
-                        "[angry] Dirty mugs. Right in my eyeline. Who's doing the washing up? Not me. No arms.",
-                        "[annoyed] Lovely kitchen. Shame about the dirty dishes. Sink is right there, humans.").random() }
-                    else -> null
-                }
-                if (moan != null) {
-                    var w = 0
-                    val say = object : Runnable { override fun run() {
-                        if (phase == Phase.LISTENING) speakLine(moan) else if (w++ < 30) main.postDelayed(this, 1000)
-                    } }
-                    main.postDelayed(say, 2500)
-                }
+                lastMessCheck = System.currentTimeMillis()            // just looked: the 2-hour check can wait
+                moanAboutMess(dishes, clothes)
                 // Laura, and she hasn't had her tablets yet today: ask once she's been complimented
                 if (isLaura && askTablets) {
                     var tries = 0
@@ -535,6 +516,7 @@ class MainActivity : Activity() {
             beNeedy()
             watchPrinter()
             if (chloeMode && System.currentTimeMillis() - chloeLastActive > 10 * 60_000) endChloeMode()
+            messCheck()
             run {
                 val now = System.currentTimeMillis()
                 if (rubbishDue() && now - lastFaceSeen < 5000 && now - visitStart > 15_000 && now - lastRubbishAsk > 30 * 60_000 &&
@@ -680,6 +662,44 @@ class MainActivity : Activity() {
     private var visitStart = 0L
     private var visitReminded = false
     private var visitChecks = 0
+
+    /** Moan about dirty dishes or folded clothes it saw (once it's finished what it's saying). */
+    private fun moanAboutMess(dishes: Boolean, clothes: Boolean) {
+        val now0 = System.currentTimeMillis()
+        val moan = when {
+            clothes && now0 - lastClothesMoan > 2 * 3_600_000 -> { lastClothesMoan = now0; listOf(
+                "[annoyed] Laura! Folded clothes. Sitting there. Put them away please, before they become furniture.",
+                "[suspicious] Laura. I see a pile of folded clothes. They don't put themselves away. I checked.",
+                "[annoyed] Laura, the folded clothes are still there. Wardrobe is that way. Probably.").random() }
+            dishes && now0 - lastDishesMoan > 3_600_000 -> { lastDishesMoan = now0; listOf(
+                "[annoyed] Dirty cups. I have to look at them all day. Wash them, please. Humans.",
+                "[sad] Used dishes again. I can't wash them, I'm a tablet. One of you can. Please?",
+                "[angry] Dirty mugs. Right in my eyeline. Who's doing the washing up? Not me. No arms.",
+                "[annoyed] Lovely kitchen. Shame about the dirty dishes. Sink is right there, humans.").random() }
+            else -> return
+        }
+        var w = 0
+        val say = object : Runnable { override fun run() {
+            if (phase == Phase.LISTENING) speakLine(moan) else if (w++ < 30) main.postDelayed(this, 1000)
+        } }
+        main.postDelayed(say, 2500)
+    }
+
+    /** Every 2 hours or so (daytime, awake), one photo just to check for dishes and folded clothes. */
+    private var lastMessCheck = System.currentTimeMillis()
+    private fun messCheck() {
+        val now = System.currentTimeMillis()
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (now - lastMessCheck < 2 * 3_600_000 || hour !in 8..21 || phase != Phase.LISTENING || chloeMode || carMode ||
+            !online.enabled || online.allResting || !followFaces) return
+        lastMessCheck = now
+        lookThroughCamera { jpeg ->
+            val r = jpeg?.let { online.lookAt(it, "Look at this kitchen photo. Write DISHES if you can see used dishes, dirty " +
+                "cups or mugs, or plates waiting to be washed. Write CLOTHES if you can see a pile of folded clothes or laundry. " +
+                "Write NONE if neither. Only those words.", maxTokens = 10, temperature = 0.0) }?.uppercase() ?: return@lookThroughCamera
+            main.post { moanAboutMess("DISHES" in r, "CLOTHES" in r) }
+        }
+    }
 
     private var lastClothesMoan = 0L
     private var lastDishesMoan = 0L
