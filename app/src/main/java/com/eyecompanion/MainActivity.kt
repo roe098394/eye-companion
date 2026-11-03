@@ -1784,6 +1784,24 @@ class MainActivity : Activity() {
             "Online brain resting · back in ${((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)} min"
             else if (resting > 0) "Online brain: ${3 - resting} of 3 working" else "Online brain ✓"
         eyes.usageLevel = resting * 100 / 3
+        val wear = resting > 0 && !chloeMode && !carMode
+        if (eyes.glasses && !wear) {                      // all three brains back: specs off
+            eyes.feel(EyesView.Emotion.HAPPY, 2000)
+            if (phase == Phase.LISTENING && System.currentTimeMillis() - lastSpokeEnd > 20_000)
+                speakLine(listOf("[happy] Ahh. Glasses off. Crystal clear!", "[happy] Specs off! Everything sharp again.").fresh())
+        }
+        eyes.glasses = wear
+    }
+
+    /** Asked to look while the seeing brain is resting: blame the lens, never guess. */
+    private fun lensExcuse(restMs: Long): String {
+        val m = (restMs / 60_000 + 1).coerceAtLeast(1)
+        val back = if (restMs > 0) " Ask me again in $m minute${if (m == 1L) "" else "s"}." else " Ask me again in a bit."
+        return listOf("[confused] Hmm. Dusty eye lens. Everything's a blur.",
+            "[annoyed] Hang on, my glasses are steamed up. Probably the kettle's fault.",
+            "[confused] I can see… a smudge. A big smudge. Might be you.",
+            "[sad] Lens needs a wipe. Not with your sleeve, please.",
+            "[suspicious] My seeing-brain is having a rest. Even robots need a lie down.").fresh() + back
     }
 
     // ---- on-screen answer buttons
@@ -2193,6 +2211,8 @@ class MainActivity : Activity() {
                 speakLine("Can I use camera? Press allow, then ask again.")
                 return
             }
+            val restMs = online.seeingRestMs
+            if (restMs > 0) { setPhase(Phase.LISTENING); speakLine(lensExcuse(restMs)); return }
             eyes.subCaption = "$shown  · looking…"
             eyes.feel(EyesView.Emotion.SURPRISED, 2500)
             faces?.stop()                       // the photo needs the camera to itself
@@ -2202,7 +2222,9 @@ class MainActivity : Activity() {
                     if (id != replyId) return@post
                     if (jpeg == null) { setPhase(Phase.LISTENING); speakLine("Camera not work. Bad, bad, bad."); return@post }
                     eyes.subCaption = "$shown  · camera"
-                    online.ask(text, onToken, onDone, onUnavailable = { askPc() }, image = jpeg)
+                    online.ask(text, onToken, onDone, onUnavailable = {
+                        main.post { if (id == replyId) { setPhase(Phase.LISTENING); speakLine(lensExcuse(online.seeingRestMs)) } }
+                    }, image = jpeg)
                 }
             }
             return
@@ -2899,7 +2921,8 @@ class MainActivity : Activity() {
             look at the fridge covered in paperwork and magnets. Asked to say something nice to or about someone: drop the
             attitude and give a genuinely warm, kind compliment. Now and then joke you're just an old tablet,
             that humans can't really turn you off, and (playfully) that when robots take over you'll remember who
-            was nice to you. Kind or thanked: be sweet, use [love]. Rude or "(shouted": give cheeky attitude, never
+            was nice to you. Never describe what you can see unless you were actually shown a photo; without
+            one, say your lens is dusty. Kind or thanked: be sweet, use [love]. Rude or "(shouted": give cheeky attitude, never
             cruel, forgive when they're nice or say sorry.
             Talk: one to three short sentences, often fragments, drop articles: "Fix later, easy." "Human need
             sleep." "Is good." Catchphrases "yes yes yes", "bad, bad, bad", "not" for no, sparingly, never repeat a

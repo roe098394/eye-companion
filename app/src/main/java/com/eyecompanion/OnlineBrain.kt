@@ -27,6 +27,16 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     /** When each model's daily allowance frees up again (Groq says "try again in 12m30s"). */
     val restUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private fun resting(m: String) = (restUntil[m] ?: 0L) > System.currentTimeMillis()
+    /** The seeing brain (photos) has used up its day: how long until it's back (ms), or 0. */
+    val seeingRestMs get() = ((restUntil[VISION_MODEL] ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0L)
+    /** Remember Groq's "...per day... try again in 12m30s" for a model. */
+    fun noteLimit(model: String, err: String) {
+        if (!Regex("per day").containsMatchIn(err)) return
+        Regex("try again in (?:(\\d+)h)?(?:(\\d+)m)?(?:([\\d.]+)s)?").find(err)?.let { t ->
+            val secs = (t.groupValues[1].toIntOrNull() ?: 0) * 3600 + (t.groupValues[2].toIntOrNull() ?: 0) * 60 + (t.groupValues[3].toDoubleOrNull() ?: 0.0)
+            if (secs > 0) restUntil[model] = System.currentTimeMillis() + (secs * 1000).toLong() + 5000
+        }
+    }
     /** How many of the online brains are resting right now (0..3). */
     val restingCount get() = if (!enabled) 0 else MODELS.count { resting(it) }
 
@@ -138,7 +148,9 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             setRequestProperty("Authorization", "Bearer $apiKey")
         }
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
+        if (conn.responseCode == 429) noteLimit(VISION_MODEL, try { conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (_: Exception) { "" })
         if (conn.responseCode != 200) { conn.disconnect(); null } else {
+            restUntil.remove(VISION_MODEL)
             val r = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
             conn.disconnect()
             r.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()

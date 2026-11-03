@@ -341,6 +341,22 @@ class EyesView(context: Context) : View(context) {
             blushPaint.alpha = 255; canvas.drawPath(nose, blushPaint)
         }
 
+        // round specs while one of the online brains is resting
+        if (glasses && !carMode && mood != Mood.LOADING) {
+            specLine.color = Color.parseColor("#E8E2D0"); specLine.strokeWidth = eyeW * 0.07f; specLine.alpha = 220
+            specFill.color = Color.WHITE; specFill.alpha = 28
+            val rr = eyeW * 0.78f
+            for (side in arrayOf(-1f, 1f)) {
+                val ex = cx + side * (gap / 2 + eyeW / 2)
+                canvas.drawCircle(ex, cy, rr, specFill); canvas.drawCircle(ex, cy, rr, specLine)
+                // little glint on the lens
+                specLine.alpha = 120; canvas.drawArc(ex - rr * 0.7f, cy - rr * 0.7f, ex + rr * 0.7f, cy + rr * 0.7f, 200f, 40f, false, specLine); specLine.alpha = 220
+                canvas.drawLine(ex + side * rr, cy - rr * 0.15f, ex + side * rr * 1.45f, cy - rr * 0.35f, specLine)   // arms
+            }
+            val bx = gap / 2 + eyeW / 2 - rr
+            canvas.drawArc(cx - bx, cy - rr * 0.45f, cx + bx, cy + rr * 0.05f, 200f, 140f, false, specLine)       // bridge
+        }
+
         canvas.restore()
 
         // a game question shown big under the eyes
@@ -566,6 +582,11 @@ class EyesView(context: Context) : View(context) {
         c.drawText("◄ TASSIMO: ALLY ✓", w * 0.86f, h * 0.62f, hudPaint)
         hudPaint.textAlign = Paint.Align.LEFT
     }
+
+    /** Pip wears glasses while an online brain is resting. */
+    @Volatile var glasses = false
+    private val specLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val specFill = Paint(Paint.ANTI_ALIAS_FLAG)
 
     /** This week's cuppas, Monday..Sunday, and which day is today. */
     var week = IntArray(7)
