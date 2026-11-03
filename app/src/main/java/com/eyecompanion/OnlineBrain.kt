@@ -21,6 +21,13 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     @Volatile var lastProblem = ""
     /** How much of today's free allowance is used, 0..100 (from Groq's own figures), or -1 if not known yet. */
     @Volatile var usedPercent = -1
+    /** Tokens used today per model (Groq's real limit is 200,000 tokens a day per model). */
+    val tokensUsed = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    @Volatile var dailyLimit = 200_000
+    private fun recompute() {
+        // Pip can carry on while ANY model has allowance left, so show the least-used one
+        usedPercent = (MODELS.minOf { tokensUsed[it] ?: 0 } * 100L / dailyLimit).toInt().coerceIn(0, 100)
+    }
 
     private val worker = Executors.newSingleThreadExecutor()
     private val history = ArrayList<Pair<String, String>>()
@@ -136,6 +143,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             .put("model", model)
             .put("messages", msgs)
             .put("stream", true)
+            .put("stream_options", JSONObject().put("include_usage", true))
             .put("temperature", 0.6)
             // reasoning models spend some tokens thinking first, so leave room for that
             .put("max_completion_tokens", maxReplyTokens + 250)   // Groq counts this against the per-minute limit
@@ -152,11 +160,13 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         }
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
         val code = conn.responseCode
-        // Groq says how many of today's requests are left for this model
-        val lim = conn.getHeaderField("x-ratelimit-limit-requests")?.toDoubleOrNull()
-        val rem = conn.getHeaderField("x-ratelimit-remaining-requests")?.toDoubleOrNull()
-        if (code == 429 && model == MODELS.last()) usedPercent = 100
-        else if (lim != null && rem != null && lim > 0 && image == null) usedPercent = (100 - rem / lim * 100).toInt().coerceIn(0, 100)
+        if (code == 429) {
+            // "...tokens per day (TPD): Limit 200000, Used 199289..." -> the real figure
+            val err = try { conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (_: Exception) { "" }
+            Regex("per day.*?Limit (\\d+), Used (\\d+)").find(err)?.let { m ->
+                dailyLimit = m.groupValues[1].toInt(); tokensUsed[model] = m.groupValues[2].toInt(); recompute()
+            }
+        }
         when (code) {
             200 -> {}
             401, 403 -> throw BadKey()
@@ -169,7 +179,11 @@ class OnlineBrain(private val systemPrompt: () -> String) {
                 if (!line.startsWith("data:")) continue
                 val data = line.removePrefix("data:").trim()
                 if (data == "[DONE]") break
-                val choice = JSONObject(data).optJSONArray("choices")?.optJSONObject(0) ?: continue
+                val obj = JSONObject(data)
+                // the last chunk says how many tokens this reply used
+                (obj.optJSONObject("x_groq")?.optJSONObject("usage") ?: obj.optJSONObject("usage"))?.optInt("total_tokens", 0)
+                    ?.takeIf { it > 0 }?.let { t -> tokensUsed[model] = (tokensUsed[model] ?: 0) + t; recompute() }
+                val choice = obj.optJSONArray("choices")?.optJSONObject(0) ?: continue
                 val piece = choice.optJSONObject("delta")?.optString("content").orEmpty()
                 if (piece.isNotEmpty() && piece != "null") {
                     reply.append(piece)

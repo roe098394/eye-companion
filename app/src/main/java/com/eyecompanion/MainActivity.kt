@@ -1286,6 +1286,11 @@ class MainActivity : Activity() {
 
     // ---- daily online-brain allowance meter (top-left corner)
     private fun updateUsage() {
+        val day = todayKey
+        if (prefs.getString("tokDay", "") == day && online.tokensUsed.isEmpty())
+            OnlineBrain.MODELS.forEach { m -> prefs.getInt("tok_$m", 0).takeIf { it > 0 }?.let { online.tokensUsed[m] = it } }
+        if (prefs.getString("tokDay", "") != day) { prefs.edit().putString("tokDay", day).apply(); online.tokensUsed.clear(); online.usedPercent = -1 }
+        prefs.edit().apply { online.tokensUsed.forEach { (m, t) -> putInt("tok_$m", t) } }.apply()
         var p = online.usedPercent
         if (p >= 0) prefs.edit().putInt("usage", p).putString("usageDay", todayKey).apply()
         else if (prefs.getString("usageDay", "") == todayKey) p = prefs.getInt("usage", -1)
@@ -1356,9 +1361,8 @@ class MainActivity : Activity() {
             // two different voices talking in the last half minute = people chatting to each other
             val chatting = print != null && recentPrints.any { now0 - it.first < 25_000 && !voices.sameVoice(it.second, print) }
             if (!tapped && !calledByName(text) && !followUp && !looking && chatting) {
-                // the clever brains hear it and decide; the tablet's own brain, or strict mode, just ignores it
-                if (onlyWhenCalled || !(online.worthTrying || pc.worthTrying)) { eyes.subCaption = ""; return }
-                overheard = true
+                // people chatting to each other: ignore it (sending it all online used up the daily allowance)
+                eyes.subCaption = ""; return
             }
         }
         text = removeName(text).ifBlank { if (calledByName(rawText)) "Hello" else text }
