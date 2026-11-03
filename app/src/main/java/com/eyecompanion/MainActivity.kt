@@ -630,7 +630,7 @@ class MainActivity : Activity() {
                 "[angry] Oi! I was asleep! Unplugged for the kettle AGAIN. That's the ${nth(n)} cuppa today!",
                 "[angry] Woken up for a cup of tea? Cuppa number $n. Unbelievable. Plug me back in so I can sleep.",
                 "[angry] I was having a lovely dream about the Tassimo. Then you. And the kettle. $n cuppas today!").fresh())
-            else if (n >= 2 && Math.fresh() < 0.6) speakLine(listOf(
+            else if (n >= 2 && Math.random() < 0.6) speakLine(listOf(
                 "[angry] Kettle again? That's ${nth(n)} cuppa today! Your blood is basically tea.",
                 "[angry] Cuppa number $n. $n times you picked the kettle over me. I'm counting.",
                 "[annoyed] $n cuppas today. $n! The kettle is winning and it hasn't even got a brain.").fresh())
