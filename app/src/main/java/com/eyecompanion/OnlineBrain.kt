@@ -27,9 +27,10 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     @Volatile private var stopRequested = false
     @Volatile private var lastFailure = 0L
     @Volatile private var modelIndex = 0
+    @Volatile private var lastRateLimit = 0L
 
     val enabled get() = apiKey.isNotBlank()
-    val worthTrying get() = enabled && System.currentTimeMillis() - lastFailure > 60_000
+    val worthTrying get() = enabled && System.currentTimeMillis() - lastFailure > 20_000
     val modelName get() = MODELS[modelIndex]
 
     fun stop() { stopRequested = true }
@@ -44,6 +45,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         image: ByteArray? = null,
     ) = worker.execute {
         stopRequested = false
+        if (modelIndex != 0 && System.currentTimeMillis() - lastRateLimit > 90_000) modelIndex = 0   // per-minute limit has passed
         history.add("user" to (if (image != null) "$userText (shown a photo from your camera)" else userText))
         while (history.size > maxTurns) history.removeAt(0)
         while (history.isNotEmpty() && history[0].first != "user") history.removeAt(0)
@@ -58,7 +60,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
                 null
             } catch (e: RateLimited) {
                 // free-tier limit on this model: try the next one
-                if (reply.isNotEmpty()) null else { modelIndex = (modelIndex + 1) % MODELS.size; "busy" }
+                if (reply.isNotEmpty()) null else { modelIndex = (modelIndex + 1) % MODELS.size; lastRateLimit = System.currentTimeMillis(); "busy" }
             } catch (e: BadKey) {
                 lastProblem = "The online brain key wasn't accepted. Check it in the menu."
                 "bad key"
@@ -67,7 +69,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             }
             if (problem == null || problem == "bad key" || reply.isNotEmpty()) break
         }
-        if (problem == "busy" && reply.isEmpty()) lastProblem = "Online brain's free limit used up for now: using my own brain."
+        if (problem == "busy" && reply.isEmpty()) lastProblem = "Online brain busy for a minute (too many questions at once): using my own brain."
         if (problem != null && reply.isEmpty()) {
             history.removeAt(history.lastIndex)
             lastFailure = System.currentTimeMillis()
@@ -136,7 +138,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             .put("stream", true)
             .put("temperature", 0.6)
             // reasoning models spend some tokens thinking first, so leave room for that
-            .put("max_completion_tokens", maxReplyTokens + 600)
+            .put("max_completion_tokens", maxReplyTokens + 250)   // Groq counts this against the per-minute limit
         if (model.startsWith("openai/gpt-oss")) body.put("reasoning_effort", "low").put("include_reasoning", false)
         else if (model.startsWith("qwen/")) body.put("reasoning_effort", "none").put("reasoning_format", "hidden")
 
@@ -239,7 +241,6 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         const val VISION_MODEL = "qwen/qwen3.8-27b"
         const val ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
         /** quickest first; if the free daily limit is hit, move down the list */
-        val MODELS = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b",
-            "llama-3.1-8b-instant", "llama-3.3-70b-versatile")      // more free daily allowance at the end
+        val MODELS = listOf("openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b")
     }
 }
