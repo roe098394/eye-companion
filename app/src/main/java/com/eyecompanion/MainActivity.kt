@@ -959,6 +959,7 @@ class MainActivity : Activity() {
         keepBluetoothInMusicMode()
         applyButtonLock()
         updateListenChip()
+        updateUsage()
         thread(name = "printer-find") {        // look for the 3D printer once, so Pip can watch it
             if (printer.find() != null) prefs.edit().putString("printerHost", printer.host).apply()
         }
@@ -1238,6 +1239,15 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---- daily online-brain allowance meter (top-left corner)
+    private fun updateUsage() {
+        var p = online.usedPercent
+        if (p >= 0) prefs.edit().putInt("usage", p).putString("usageDay", todayKey).apply()
+        else if (prefs.getString("usageDay", "") == todayKey) p = prefs.getInt("usage", -1)
+        eyes.usageText = if (!online.enabled) "" else if (p < 0) "Online brain: –" else "Online brain: $p% used today"
+        eyes.usageLevel = maxOf(p, 0)
+    }
+
     // ---- on-screen answer buttons
     private lateinit var choiceBar: android.widget.LinearLayout
     private val hideChoicesLater = Runnable { hideChoices() }
@@ -1427,6 +1437,7 @@ class MainActivity : Activity() {
                 }
                 if (full.isBlank()) eyes.caption = ""
                 v.endReply()
+                updateUsage()
                 cleaner.choices.takeIf { it.size >= 2 }?.let { showChoices(it) }
             }
             Unit
@@ -1488,7 +1499,7 @@ class MainActivity : Activity() {
         if (online.worthTrying) {
             eyes.subCaption = "$shown  · online brain"
             online.ask(text, onToken, onDone, onUnavailable = {
-                main.post { if (online.lastProblem.isNotEmpty()) eyes.subCaption = online.lastProblem }
+                main.post { if (online.lastProblem.isNotEmpty()) eyes.subCaption = online.lastProblem; updateUsage() }
                 askPc()
             })
         } else askPc()

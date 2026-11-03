@@ -366,6 +366,19 @@ class EyesView(context: Context) : View(context) {
             if (a2 > 0f && subCaption.isNotEmpty()) canvas.drawText(subCaption.take(90), w / 2, h * 0.08f, subPaint)
         }
 
+        // daily allowance meter, top-left
+        if (usageText.isNotEmpty() && mood != Mood.LOADING) {
+            val c = when { usageLevel >= 90 -> Color.parseColor("#FF5A3C"); usageLevel >= 70 -> Color.parseColor("#FFB23E"); else -> eyeColor }
+            usagePaint.textSize = h * 0.028f; usagePaint.color = c; usagePaint.alpha = 140
+            val x = w * 0.02f; val y = h * 0.055f
+            canvas.drawText(usageText, x, y, usagePaint)
+            val bw = w * 0.12f; val bh = h * 0.008f; val by = y + h * 0.015f
+            usageBar.color = c; usageBar.alpha = 50
+            rect.set(x, by, x + bw, by + bh); canvas.drawRoundRect(rect, bh, bh, usageBar)
+            usageBar.alpha = 160
+            rect.set(x, by, x + bw * usageLevel.coerceIn(0, 100) / 100f, by + bh); canvas.drawRoundRect(rect, bh, bh, usageBar)
+        }
+
         // the listening-mode button, small and dim in the bottom-left corner
         if (listenChip.isNotEmpty() && mood != Mood.LOADING) {
             chipPaint.textSize = h * 0.03f
@@ -381,6 +394,12 @@ class EyesView(context: Context) : View(context) {
 
         postInvalidateOnAnimation()
     }
+
+    /** Small usage meter in the top-left corner ("" hides it). */
+    var usageText = ""
+    var usageLevel = 0      // 0..100, turns amber then red as it fills
+    private val usagePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val usageBar = Paint(Paint.ANTI_ALIAS_FLAG)
 
     /** Label on the always-listening / wake-word button ("" hides it). */
     var listenChip = ""

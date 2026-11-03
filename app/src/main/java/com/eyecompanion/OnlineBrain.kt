@@ -19,6 +19,8 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     @Volatile var maxTurns = 12
     /** Last problem worth telling the user about (e.g. a rejected key), or "" */
     @Volatile var lastProblem = ""
+    /** How much of today's free allowance is used, 0..100 (from Groq's own figures), or -1 if not known yet. */
+    @Volatile var usedPercent = -1
 
     private val worker = Executors.newSingleThreadExecutor()
     private val history = ArrayList<Pair<String, String>>()
@@ -147,7 +149,13 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             setRequestProperty("Authorization", "Bearer $apiKey")
         }
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
-        when (conn.responseCode) {
+        val code = conn.responseCode
+        // Groq says how many of today's requests are left for this model
+        val lim = conn.getHeaderField("x-ratelimit-limit-requests")?.toDoubleOrNull()
+        val rem = conn.getHeaderField("x-ratelimit-remaining-requests")?.toDoubleOrNull()
+        if (code == 429 && model == MODELS.last()) usedPercent = 100
+        else if (lim != null && rem != null && lim > 0 && image == null) usedPercent = (100 - rem / lim * 100).toInt().coerceIn(0, 100)
+        when (code) {
             200 -> {}
             401, 403 -> throw BadKey()
             429 -> throw RateLimited()
