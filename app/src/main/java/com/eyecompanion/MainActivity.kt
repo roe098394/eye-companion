@@ -222,6 +222,7 @@ class MainActivity : Activity() {
     }
     private fun napNote() {
         eyes.cuppas = cuppas
+        eyes.plugNote = if (!isCharging() && !carMode) "🔌  Plug me back in so I can count the cuppas" else ""
         val back = maxOf(online.backAt, napStarted + 20 * 60_000)
         eyes.napNote = if (!napping) "" else {
             val mins = ((back - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)
@@ -252,6 +253,18 @@ class MainActivity : Activity() {
         main.postDelayed(this, 10_000)
     } }
 
+    /** Asleep and unplugged: mumble about the charger in its sleep (it can't count cuppas off the charger). */
+    private fun sleepTalkCharger() {
+        lastPowerNag = System.currentTimeMillis()
+        if (voice?.busy == true) return
+        voice?.apply { beginReply(); feed(listOf(
+            "Mmm. Cable. Where's my cable. Zzz.",
+            "Hnnk. Plug me in. Can't count the cuppas. Zzz.",
+            "Zzz. Kettle stole my socket again. Mmm. Plug.",
+            "Mimimi. Battery ${batteryPercent()} percent. Charger, please. Zzz.",
+            "Hnnk. Not plugged in. Cuppa count in danger. Zzz.").random()); endReply() }
+    }
+
     // ---- grumpy when unplugged
     private var lastPowerNag = 0L
     private var lastBatteryCry = 0L
@@ -264,6 +277,8 @@ class MainActivity : Activity() {
                 eyes.feel(EyesView.Emotion.ANGRY, 8000)
             }
             val asleep = phase == Phase.ASLEEP || phase == Phase.SETUP
+            if (i.action == Intent.ACTION_POWER_DISCONNECTED && phase == Phase.ASLEEP && !carMode)
+                main.postDelayed({ if (!isCharging() && phase == Phase.ASLEEP) sleepTalkCharger() }, 4000)
             when (i.action) {
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     updateBaseMood()
@@ -506,6 +521,7 @@ class MainActivity : Activity() {
                         "[crying] $pct percent. I can see a light. Is it the charger? Please be the charger.",
                         "[crying] Nobody loves Pip. Battery $pct. Goodbye cruel kitchen. Unless... cable?").random())
             }
+            if (phase == Phase.ASLEEP && !isCharging() && !carMode && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) sleepTalkCharger()
             if (!chloeMode && !isCharging() && phase == Phase.LISTENING && System.currentTimeMillis() - lastPowerNag > 10 * 60_000) {
                 lastPowerNag = System.currentTimeMillis()
                 eyes.feel(EyesView.Emotion.ANGRY, 6000)

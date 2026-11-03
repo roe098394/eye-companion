@@ -428,6 +428,10 @@ class EyesView(context: Context) : View(context) {
             canvas.drawText(clock, w / 2, h * 0.24f, sleepPaint)
             sleepPaint.textSize = h * 0.045f; sleepPaint.alpha = 130
             canvas.drawText("☕  Cuppas today: $cuppas", w / 2, h * 0.70f, sleepPaint)
+            if (plugNote.isNotEmpty()) {
+                sleepPaint.textSize = h * 0.035f; sleepPaint.alpha = (110 + 90 * sin(secs * 2.5f)).toInt().coerceIn(20, 230)
+                canvas.drawText(plugNote, w / 2, h * 0.78f, sleepPaint)
+            }
             if (napNote.isNotEmpty()) drawAlarmClock(canvas, w * 0.82f, h * 0.24f, h * 0.085f, napNote, secs)
             for (i in 0..2) {
                 val ph = ((secs * 0.35f + i / 3f) % 1f)
@@ -505,6 +509,7 @@ class EyesView(context: Context) : View(context) {
     var sleepScreen = false
     var cuppas = 0
     var napNote = ""
+    var plugNote = ""
     private val sleepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
 
     /** Small usage meter in the top-left corner ("" hides it). */
