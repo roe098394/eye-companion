@@ -508,8 +508,8 @@ class MainActivity : Activity() {
                 eyes.feel(EyesView.Emotion.SLEEPY, 4000)
                 speakLine(Lines.DREAMS.fresh())
             } else if (now - lastSnore > 5 * 60_000 && voice?.busy != true) snore()
-        } else if (online.allResting && (wokeFromNap || online.backAt - now > 5 * 60_000) && phase == Phase.LISTENING && isCharging() && !chloeMode && !carMode && now > noNapUntil &&
-                   now - phaseSince > 30_000 && now - lastSpokeEnd > 30_000 && now - lastTalkedTo > 60_000) {
+        } else if (online.allResting && phase == Phase.LISTENING && isCharging() && !chloeMode && !carMode && now > noNapUntil &&
+                   now - phaseSince > 8_000 && now - lastSpokeEnd > 8_000) {
             startNap(if (wokeFromNap) listOf("[sleepy] Power back. Right. Back to sleep. Don't touch the cable.",
                     "[sleepy] Plugged in. Good. Going back to my nap now. Goodnight, kettle criminals.").fresh()
                 else listOf("[sleepy] Brain full for today. Nap time. Wake me if anything exciting happens. It won't.",
