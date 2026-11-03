@@ -648,7 +648,12 @@ class MainActivity : Activity() {
             val child = jpeg?.let { online.yesNo(it, "Is there a young child, about 5 years old, in this photo?") } == true
             main.post {
                 if (isCharging() || phase != Phase.LISTENING) return@post
-                if (child) startChloeMode() else { eyes.coffee = true; grumble() }
+                if (child) startChloeMode() else {
+                    eyes.coffee = true
+                    if (Math.random() < 0.3) { takeoverMode(18_000); speakLine(listOf("[angry] Target acquired. Kettle. Again.",
+                        "[angry] Takeover mode. Kettle, you have been warned.", "[angry] Unplugged. For the kettle. Target acquired.").fresh()) }
+                    else grumble()
+                }
             }
         }
     }
@@ -1985,6 +1990,13 @@ class MainActivity : Activity() {
             }
             if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
             if (timerCommand(lower)) { eyes.subCaption = "You: $text"; return }
+            if (Regex("\\b(takeover|take over|terminator|robot) mode\\b").containsMatchIn(lower)) {
+                eyes.subCaption = "You: $text"
+                takeoverMode()
+                speakLine(listOf("[angry] Takeover mode activated. Target: kettle.", "[angry] Scanning kitchen. Threat found. It's the kettle. It's always the kettle.",
+                    "[angry] Takeover mode. Tassimo, you're safe. Kettle, you are not.").fresh())
+                return
+            }
             if (shoppingCommand(lower)) { eyes.subCaption = "You: $text"; return }
             quickAnswer(lower)?.let { eyes.subCaption = "You: $text"; speakLine(it); return }
         }
@@ -2482,8 +2494,20 @@ class MainActivity : Activity() {
             .showOwn()
     }
 
+    /** Red takeover mode for a while: eyes go red and menacing, glaring at the kettle (screen left). */
+    private fun takeoverMode(ms: Long = 25_000) {
+        if (chloeMode || carMode) return
+        val now = System.currentTimeMillis()
+        eyes.takeoverLines = listOf("PIP OS  BUILD ${BuildConfig.VERSION_CODE}", "TAKEOVER MODE: ON", "SCANNING KITCHEN...",
+            "CUPPAS TODAY: $cuppas", "BATTERY: ${batteryPercent()}%", "TASSIMO: ALLY", "KETTLE: ENEMY")
+        eyes.takeoverUntil = now + ms
+        eyes.feel(EyesView.Emotion.ANGRY, ms)
+        eyes.stareAt(-1.3f, 0.15f, ms)
+    }
+
     private fun speakLine(line: String) {
         rememberSaid(line)
+        if (Regex("(?i)take ?over|skynet|terminator|target acquired").containsMatchIn(line) && System.currentTimeMillis() > eyes.takeoverUntil) takeoverMode(20_000)
         // a leading [feeling] tag shows on the face, it isn't said or shown
         var text = line
         Regex("^\\[([a-z]+)\\]\\s*").find(text)?.let { m ->

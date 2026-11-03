@@ -250,7 +250,8 @@ class EyesView(context: Context) : View(context) {
             Emotion.SCARED, Emotion.CRYING, Emotion.STONED -> lastEmoCol
             else -> eyeColor
         }
-        val col = blend(eyeColor, emoColor, tint)
+        val takeover = t < takeoverUntil
+        val col = if (takeover) Color.parseColor("#FF2A1E") else blend(eyeColor, emoColor, tint)
         eyePaint.color = col
         glowPaint.color = col; glowPaint.alpha = 40
         canvas.save()
@@ -419,6 +420,8 @@ class EyesView(context: Context) : View(context) {
             eyePaint.alpha = 255
         }
 
+        if (takeover) drawTakeover(canvas, w, h, secs)
+
         // captions
         if (showCaptions || mood == Mood.LOADING) {
             textPaint.textSize = h * 0.035f
@@ -524,6 +527,44 @@ class EyesView(context: Context) : View(context) {
         sleepPaint.color = col; sleepPaint.alpha = 200
         sleepPaint.textSize = r * (if (label.length > 4) 0.42f else 0.55f)
         c.drawText(label, x, y + sleepPaint.textSize * 0.36f, sleepPaint)
+    }
+
+    /** Red "takeover mode" until this time: scanlines, a scanner sweep, a status readout and a crosshair on the kettle. */
+    @Volatile var takeoverUntil = 0L
+    var takeoverLines: List<String> = emptyList()
+    private val hudPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = android.graphics.Typeface.MONOSPACE }
+    private val hudLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private fun drawTakeover(c: Canvas, w: Float, h: Float, secs: Float) {
+        val red = Color.parseColor("#FF3B2A")
+        // red wash and scanlines
+        hudLine.style = Paint.Style.FILL; hudLine.color = red; hudLine.alpha = 14
+        c.drawRect(0f, 0f, w, h, hudLine)
+        hudLine.color = Color.BLACK; hudLine.alpha = 70
+        var y = 0f; while (y < h) { c.drawRect(0f, y, w, y + 2f, hudLine); y += 5f }
+        // scanner bar sweeping up and down
+        val sy = h * (0.5f + 0.42f * sin(secs * 1.3f))
+        hudLine.color = red; hudLine.alpha = 35; c.drawRect(0f, sy - h * 0.02f, w, sy + h * 0.02f, hudLine)
+        hudLine.alpha = 150; c.drawRect(0f, sy - 2f, w, sy + 2f, hudLine)
+        // status readout, typed out line by line
+        hudPaint.color = red; hudPaint.textSize = h * 0.034f; hudPaint.textAlign = Paint.Align.LEFT
+        val shown = ((takeoverUntil - now()).let { 25_000 - it }.coerceAtLeast(0) / 350).toInt()
+        takeoverLines.forEachIndexed { i, l -> if (i <= shown) { hudPaint.alpha = 210; c.drawText(l, w * 0.035f, h * (0.07f + i * 0.048f), hudPaint) } }
+        // crosshair locked on the kettle (screen left), Tassimo marked friendly (screen right)
+        val tx = w * 0.13f + sin(secs * 2.1f) * w * 0.006f; val ty = h * 0.62f + sin(secs * 2.9f) * h * 0.006f
+        val bw = w * 0.085f; val bh = h * 0.1f
+        hudLine.style = Paint.Style.STROKE; hudLine.color = red; hudLine.alpha = 220; hudLine.strokeWidth = h * 0.004f
+        c.drawRect(tx - bw, ty - bh, tx + bw, ty + bh, hudLine)
+        c.drawLine(tx - bw * 1.4f, ty, tx - bw, ty, hudLine); c.drawLine(tx + bw, ty, tx + bw * 1.4f, ty, hudLine)
+        c.drawLine(tx, ty - bh * 1.5f, tx, ty - bh, hudLine); c.drawLine(tx, ty + bh, tx, ty + bh * 1.5f, hudLine)
+        hudLine.style = Paint.Style.FILL
+        hudPaint.textAlign = Paint.Align.CENTER; hudPaint.textSize = h * 0.036f
+        hudPaint.alpha = if ((secs * 3f).toInt() % 2 == 0) 240 else 140
+        c.drawText("KETTLE", tx, ty - h * 0.005f, hudPaint)
+        hudPaint.textSize = h * 0.027f; hudPaint.alpha = 220
+        c.drawText("THREAT: MAX", tx, ty + h * 0.04f, hudPaint)
+        hudPaint.textSize = h * 0.03f; hudPaint.alpha = 160
+        c.drawText("◄ TASSIMO: ALLY ✓", w * 0.86f, h * 0.62f, hudPaint)
+        hudPaint.textAlign = Paint.Align.LEFT
     }
 
     /** This week's cuppas, Monday..Sunday, and which day is today. */
