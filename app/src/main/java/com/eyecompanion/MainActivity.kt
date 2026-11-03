@@ -1311,7 +1311,7 @@ class MainActivity : Activity() {
         var p = online.usedPercent
         if (p >= 0) prefs.edit().putInt("usage", p).putString("usageDay", todayKey).apply()
         else if (prefs.getString("usageDay", "") == todayKey) p = prefs.getInt("usage", -1)
-        eyes.usageText = if (!online.enabled) "" else if (p < 0) "Online brain: –" else "Online brain: $p% used today"
+        eyes.usageText = if (!online.enabled || chloeMode) "" else if (p < 0) "Online brain: –" else "Online brain: $p% used today"
         eyes.usageLevel = maxOf(p, 0)
     }
 
@@ -1340,6 +1340,10 @@ class MainActivity : Activity() {
                 android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { setMargins((8 * dp).toInt(), 0, (8 * dp).toInt(), 0) })
         }
+        (choiceBar.layoutParams as? android.widget.FrameLayout.LayoutParams)?.let {
+            it.bottomMargin = (resources.displayMetrics.heightPixels * (if (big) 0.03f else 0.15f)).toInt()
+            choiceBar.layoutParams = it
+        }
         choiceBar.visibility = android.view.View.VISIBLE
         main.removeCallbacks(hideChoicesLater)
         main.postDelayed(hideChoicesLater, 40_000)
@@ -1355,7 +1359,7 @@ class MainActivity : Activity() {
         chloeLastActive = System.currentTimeMillis()
         if (chloeMode) return
         chloeMode = true
-        eyes.catFace = true; eyes.coffee = false
+        eyes.catFace = true; eyes.coffee = false; eyes.usageText = ""
         showKidBar(); updateBaseMood()
         if (say && phase == Phase.LISTENING) speakLine(listOf(
             "[excited] Chloe! Meow! Pip is a kitty cat today. Want to play?",
@@ -1366,14 +1370,14 @@ class MainActivity : Activity() {
         if (!chloeMode) return
         chloeMode = false; eyes.catFace = false; eyes.puzzle = ""; gameRound = null
         kidBar?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }; kidBar = null
-        hideChoices(); updateBaseMood()
+        hideChoices(); updateBaseMood(); updateUsage()
     }
 
     private fun showKidBar() {
         val root = eyes.parent as? android.widget.FrameLayout ?: return
         kidBar?.let { root.removeView(it) }
         val dp = resources.displayMetrics.density
-        val bar = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER }
+        val bar = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER }
         fun btn(label: String, onTap: () -> Unit) = bar.addView(android.widget.TextView(this).apply {
             text = label; textSize = 26f; setTextColor(android.graphics.Color.WHITE)
             setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
@@ -1381,13 +1385,13 @@ class MainActivity : Activity() {
                 cornerRadius = 40 * dp; setColor(0x44FF6F9C); setStroke((2 * dp).toInt(), 0xFFFF6F9C.toInt())
             }
             setOnClickListener { chloeLastActive = System.currentTimeMillis(); onTap() }
-        }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { setMargins((8 * dp).toInt(), 0, (8 * dp).toInt(), 0) })
+        }, android.widget.LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, (6 * dp).toInt(), 0, (6 * dp).toInt()) })
         btn("🔢 Numbers") { playGame("maths") }
         btn("🔤 Letters") { playGame("letters") }
         btn("🥚 My animals") { showAnimals() }
         btn("✖") { endChloeMode(); speakLine("[happy] Bye bye games. Meow!") }
-        root.addView(bar, android.widget.FrameLayout.LayoutParams(-1, -2, android.view.Gravity.TOP).apply {
-            topMargin = (resources.displayMetrics.heightPixels * 0.04f).toInt() })
+        root.addView(bar, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL).apply {
+            rightMargin = (12 * dp).toInt() })
         kidBar = bar
     }
 

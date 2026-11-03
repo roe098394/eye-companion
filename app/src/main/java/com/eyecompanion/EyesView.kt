@@ -232,12 +232,15 @@ class EyesView(context: Context) : View(context) {
 
         // --- draw ---
         val w = width.toFloat(); val h = height.toFloat()
-        val eyeW = min(w * 0.17f, h * 0.30f) * scale * (if (carMode) 1.25f else 1f)
+        // during a game the eyes shrink and move up to make room for the sum and the answer buttons
+        val gameShrink = if (puzzle.isNotEmpty()) 0.68f else 1f
+        val eyeW = min(w * 0.17f, h * 0.30f) * scale * gameShrink * (if (carMode) 1.25f else 1f)
         val eyeH = eyeW * (if (carMode) 0.42f else 1.55f)
         val gap = eyeW * (if (carMode) 0.55f else 0.85f)
         val jitter = if (shake > 0f) (Random.nextFloat() - 0.5f) * shake * w else 0f
         val cx = w / 2 + lookX * w * (if (carMode) 0.07f else 0.11f) + jitter
-        val cy = (if (carMode) h * 0.38f else h * 0.46f) + lookY * h * (if (carMode) 0.03f else 0.10f) + bounce * h
+        val cy = (if (carMode) h * 0.38f else if (puzzle.isNotEmpty()) h * 0.36f else h * 0.46f) +
+            lookY * h * (if (carMode) 0.03f else 0.10f) * gameShrink + bounce * h
         val openNow = max(0.04f, open * blink)
 
         val emoColor = when (feeling) {
@@ -342,7 +345,7 @@ class EyesView(context: Context) : View(context) {
         // a game question shown big under the eyes
         if (puzzle.isNotEmpty() && !hatching) {
             puzzlePaint.textSize = h * 0.11f; puzzlePaint.color = Color.WHITE
-            canvas.drawText(puzzle, w / 2, h * 0.82f, puzzlePaint)
+            canvas.drawText(puzzle, w / 2, h * 0.72f, puzzlePaint)
         }
         // reward: an egg wobbles, cracks open and a baby animal pops out
         if (hatching) drawHatch(canvas, w, h, (t - hatchStart) / 1000f)
