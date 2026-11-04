@@ -1834,16 +1834,15 @@ class MainActivity : Activity() {
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
             if (phase == Phase.TALKING || phase == Phase.THINKING) {
-                // Bluetooth speakers play a moment behind, so wait longer before listening again
-                val tail = if (bluetoothOut()) 2000L else 1000L
+                // Listen straight away (people answer fast). Bluetooth plays a moment behind, so for a short
+                // "echo window" anything matching the end of what Pip just said is filtered out, not the whole mic.
+                val tail = if (bluetoothOut()) 900L else 350L
                 lastSpokeEnd = System.currentTimeMillis() + tail
                 lastReplyAsked = currentReply.trim().endsWith("?")
                 rememberSaid(currentReply.toString())
+                lastReplyTail = words(currentReply.toString()).takeLast(10)
                 deafUntil = System.currentTimeMillis() + tail
-                ears?.paused = true
-                main.postDelayed({
-                    if (phase == Phase.TALKING || phase == Phase.THINKING) setPhase(Phase.LISTENING)
-                }, tail)
+                setPhase(Phase.LISTENING)
             }
         } }
 
@@ -1948,8 +1947,7 @@ class MainActivity : Activity() {
         if (training) { trainingHeard(h); return }
         val shouted = isShout(h.audio)
         lastShouted = shouted
-        val useWhisper = onlineEars && online.enabled && h.audio != null && phase == Phase.LISTENING &&
-            System.currentTimeMillis() >= deafUntil && h.conf >= 0.3f
+        val useWhisper = onlineEars && online.enabled && h.audio != null && phase == Phase.LISTENING && h.conf >= 0.3f
         if (!useWhisper) { heard(h.text, h.conf, h.print); return }
         eyes.mood = EyesView.Mood.LISTEN
         thread(name = "whisper") {
@@ -2004,6 +2002,19 @@ class MainActivity : Activity() {
     }
     private val recentlySaidText = ArrayDeque<Pair<Long, String>>()
     private fun pairs(w: List<String>) = w.zipWithNext { a, b -> "$a $b" }.toSet()
+    /** The last words Pip said, to strip its own echo off the front of a quick answer. */
+    private var lastReplyTail: List<String> = emptyList()
+    private fun stripEcho(t: String): String {
+        val heardWords = t.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (heardWords.isEmpty() || lastReplyTail.isEmpty()) return t
+        val tail = lastReplyTail.toSet()
+        // drop leading words that were the end of Pip's own sentence ("...a cuppa yes please" -> "yes please")
+        var i = 0
+        while (i < heardWords.size && words(heardWords[i]).firstOrNull()?.let { it in tail } == true) i++
+        val rest = heardWords.drop(i)
+        // nothing left, or only one stray echo word: it was all Pip
+        return if (rest.isEmpty()) "" else rest.joinToString(" ")
+    }
     private fun isOwnEcho(t: String): Boolean {
         val w = words(t)
         if (w.size < 3) return false                         // "yes", "hello Pip": never an echo
@@ -2321,7 +2332,10 @@ class MainActivity : Activity() {
             return
         }
         if (phase == Phase.LISTENING && !tapped) {
-            if (System.currentTimeMillis() < deafUntil) return   // tail end of its own voice
+            if (System.currentTimeMillis() < deafUntil + 2500) {   // just after Pip spoke: drop its own echo, keep the answer
+                text = stripEcho(text)
+                if (text.isBlank()) return
+            }
             if (conf < (if (chloeMode) 0.3f else 0.6f)) return   // not sure what was said: stay quiet
         }
         when (phase) {
