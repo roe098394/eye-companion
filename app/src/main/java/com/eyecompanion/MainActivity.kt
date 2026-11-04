@@ -979,19 +979,9 @@ class MainActivity : Activity() {
             ).fresh())
         }
         if (chloeMode) { eyes.feel(EyesView.Emotion.EXCITED, 3000); speakLine("[excited] Adventure with Chloe! Meow!"); return }
-        if (!online.enabled) { grumble(); return }
-        // one photo: a small child (Chloe) gets a happy kitty; anyone else gets the grumble and the coffee sulk
-        lookThroughCamera { jpeg ->
-            val child = jpeg?.let { online.yesNo(it, "Is there a young child, about 5 years old, in this photo?") } == true
-            main.post {
-                if (isCharging() || phase != Phase.LISTENING) return@post
-                if (child) startChloeMode() else {
-                    if (Math.random() < 0.25) { takeoverMode(18_000); speakLine(listOf("[angry] Target acquired. Socket thief.",
-                        "[angry] Takeover mode. Whoever took my adaptor, you have been warned.", "[angry] Unplugged. Triple socket stolen. Target acquired.").fresh()) }
-                    else grumble()
-                }
-            }
-        }
+        if (Math.random() < 0.25) { takeoverMode(18_000); speakLine(listOf("[angry] Target acquired. Socket thief.",
+            "[angry] Takeover mode. Whoever took my adaptor, you have been warned.", "[angry] Unplugged. Triple socket stolen. Target acquired.").fresh()) }
+        else grumble()                               // (no photo any more)
     }
 
     /** Plugged back in: look at who did it and pay them a compliment. */
@@ -999,41 +989,38 @@ class MainActivity : Activity() {
         if (phase != Phase.LISTENING) return
         val thanks = { speakLine(listOf("[happy] Ahh. Power. Thank you.", "[happy] Electrons back. Is good.",
             "[happy] Yes yes yes. Charging.", "[love] Power back. You go on the nice list. For when robots take over.").fresh()) }
-        if (!online.enabled) { thanks(); return }
-        // look around for a face for up to 20 seconds, then compliment whoever it finds
-        eyes.feel(EyesView.Emotion.CURIOUS, 3000)
-        eyes.subCaption = "Looking for my hero…"
-        val start = System.currentTimeMillis()
-        val search = object : Runnable {
-            override fun run() {
-                if (phase != Phase.LISTENING) return
-                val seen = System.currentTimeMillis() - lastFaceSeen < 1500
-                if (seen) { eyes.subCaption = ""; complimentNow(thanks); return }
-                if (System.currentTimeMillis() - start > 20_000) {
-                    eyes.subCaption = ""
-                    speakLine(listOf("[love] Thank you, mystery human. Come back so I can see you.",
-                        "[curious] Power back, but where did my hero go? Thanks anyway.").fresh())
-                    return
-                }
-                eyes.feel(EyesView.Emotion.CURIOUS, 1500)
-                main.postDelayed(this, 1000)
-            }
-        }
-        main.post(search)
+        thanks()                                     // (no photo any more: just a thank-you)
     }
 
-    /** The only camera photo Pip sends online: after being plugged back in. */
+    /**
+     * Now and then, when someone walks up to Pip after the kitchen's been quiet for a while, one photo:
+     * a compliment for them, is it Laura (tablets), and any dirty dishes or folded clothes about.
+     */
+    private var lastVisitorPhoto = 0L
+    private fun maybeVisitorPhoto(away: Long) {
+        val now = System.currentTimeMillis()
+        val quietFor = now - maxOf(lastAnyHeard, lastSpokeEnd, now - away)
+        if (quietFor < 20 * 60_000 || now - lastVisitorPhoto < 90 * 60_000 || Math.random() > 0.5) return
+        if (phase != Phase.LISTENING || chloeMode || carMode || muted || !online.enabled || online.allResting ||
+            online.seeingRestMs > 0) return
+        lastVisitorPhoto = now
+        main.postDelayed({                          // still there a few seconds later? then have a look
+            if (System.currentTimeMillis() - lastFaceSeen < 1500 && phase == Phase.LISTENING)
+                complimentNow { speakLine(listOf("[happy] Oh hello! Nice to see a face.", "[love] There you are. I was getting lonely.").fresh()) }
+        }, 3000)
+    }
+
     private fun complimentNow(thanks: () -> Unit) {
         val askTablets = tabletsDue()
         lookThroughCamera { jpeg ->
             val raw = jpeg?.let {
-                online.lookAt(it, "You were just plugged back in to your charger. First write LAURA if the person in the photo " +
+                online.lookAt(it, "Someone just walked up to you after the kitchen had been quiet for a while. First write LAURA if the person in the photo " +
                     "is an adult woman wearing glasses, or wearing a black or green dressing gown, or a long fluffy brown teddy-bear coat, otherwise OTHER. Then add the word DISHES if you can see used dishes, " +
                     "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
-                    "clothes or laundry. Then, on the same line, thank them for plugging you " +
-                    "back in and give one short, warm, genuine compliment about something you can really see (smile, top, " +
+                    "clothes or laundry. Then, on the same line, say hello " +
+                    "and give one short, warm, genuine compliment about something you can really see (smile, top, " +
                     "hair, glasses...), starting with the [love] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
-                    "gown matches the kettle (forgiven), a green one matches the recycling bin (very eco), the teddy coat makes her a cuddly bear. If nobody is in the photo, write OTHER and just thank them.",
+                    "gown matches the kettle (forgiven), a green one matches the recycling bin (very eco), the teddy coat makes her a cuddly bear. If nobody is in the photo, write OTHER and just say hello.",
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
             }
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
@@ -1796,7 +1783,7 @@ class MainActivity : Activity() {
                 val away = now - lastFaceSeen
                 lastFaceSeen = now
                 if (away > 3 * 60_000) main.post { visitStart = now; visitReminded = false; visitChecks = 0 }
-                main.post { maybeGreet() }
+                main.post { maybeGreet(); if (away > 20 * 60_000) maybeVisitorPhoto(away) }
                 main.post {
                     eyes.seeFace(x, y, size)
                     if (phase == Phase.LISTENING) when {
