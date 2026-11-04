@@ -96,7 +96,7 @@ class Appliances(private val prefs: SharedPreferences) {
         private set
     private fun loudEnough(s: Sound, row: DoubleArray): Boolean {
         val a = row.average()
-        return a > s.mean!!.average() - 10.0 && a > roomFloor + 4.0
+        return a > s.mean!!.average() - 15.0 && a > roomFloor + 2.5
     }
 
     private fun check(s: Sound, row: DoubleArray) {
@@ -110,8 +110,8 @@ class Appliances(private val prefs: SharedPreferences) {
         s.share = share
         if (s.history.size < window / 2) return
         val now = System.currentTimeMillis()
-        val onAt = if (s === kettle) 0.5 else 0.6
-        val offAt = if (s === kettle) 0.15 else 0.25
+        val onAt = if (s === kettle) 0.35 else 0.5
+        val offAt = if (s === kettle) 0.1 else 0.2
         if (!s.on && share > onAt) { s.on = true; s.onSince = now; onChange(s, true) }
         else if (s.on && share < offAt) { s.on = false; onChange(s, false) }
     }
@@ -123,15 +123,15 @@ class Appliances(private val prefs: SharedPreferences) {
         s.mean = mean; s.spread = spread
         // how far its own seconds were from the average: allow a bit more than that
         val own = rows.map { score(s, it) }.sorted()
-        s.limit = maxOf(2.0, own[(own.size * 0.9).toInt().coerceAtMost(own.size - 1)] * 1.8)
+        s.limit = maxOf(3.0, own[(own.size * 0.9).toInt().coerceAtMost(own.size - 1)] * 2.5)
         s.history.clear(); s.on = false
         save(s)
-        val ok = mean.average() > roomFloor + 4.0                       // clearly louder than the quiet room
+        val ok = mean.average() > roomFloor + 2.5                       // clearly louder than the quiet room
         learnDone?.invoke(ok); learnDone = null
     }
 
     private fun save(s: Sound) {
-        prefs.edit().putString("snd2_${s.name}", s.mean!!.joinToString(",") + "|" + s.spread!!.joinToString(",") + "|" + s.limit).apply()
+        prefs.edit().putString("snd2_${s.name}", s.mean!!.joinToString(",") + "|" + s.spread!!.joinToString(",") + "|" + s.limit + "|v3").apply()
     }
     private fun load(s: Sound) {
         val t = prefs.getString("snd2_${s.name}", null) ?: return
@@ -139,7 +139,8 @@ class Appliances(private val prefs: SharedPreferences) {
             val p = t.split("|")
             s.mean = p[0].split(",").map { it.toDouble() }.toDoubleArray()
             s.spread = p[1].split(",").map { it.toDouble() }.toDoubleArray()
-            s.limit = p[2].toDouble()
+            s.limit = if (p.size > 3) p[2].toDouble()
+                else maxOf(3.0, p[2].toDouble() * 2.5 / 1.8)          // learned on build 108: that was too strict
         } catch (_: Exception) { s.mean = null }
     }
     fun learned(s: Sound) = s.mean != null
