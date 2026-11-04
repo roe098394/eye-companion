@@ -20,7 +20,7 @@ class EyesView(context: Context) : View(context) {
 
     /** How Pip feels about what it's saying; shown on top of the mood for a while. */
     enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY,
-        SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING, STONED, SNIGGER }
+        SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING, STONED, SNIGGER, HOT }
 
     /** Chloe mode: cute cat ears, nose and whiskers around the eyes. */
     @Volatile var catFace = false
@@ -195,6 +195,9 @@ class EyesView(context: Context) : View(context) {
                 bounce += abs(sin(secs * 18f)) * 0.01f; tScale *= 0.92f }
             Emotion.CRYING -> { tLid = -1f; tOpen = min(tOpen, 0.6f); tLookY = 0.4f; tTint = 1f; tHappy = 0f
                 emoCol = Color.parseColor("#4A7BFF") }
+            Emotion.HOT -> { tOpen = min(tOpen, 0.55f) + 0.04f * sin(secs * 1.3f); tLid = -0.5f; tLookY = 0.3f; tHappy = 0f
+                tTint = 1f; tBlush = 0.9f; emoCol = Color.parseColor("#FF7A2E"); tScale *= 1f + 0.02f * sin(secs * 2f)
+                bounce += sin(secs * 2.2f) * 0.006f }                       // drooping, flushed, slowly wilting
             Emotion.NEUTRAL -> {}
         }
         if (seesFace && faceSize > 0.35f && feeling == Emotion.NEUTRAL) tScale *= 1f + min(0.12f, (faceSize - 0.35f) * 0.5f)
@@ -247,7 +250,7 @@ class EyesView(context: Context) : View(context) {
             Emotion.ANGRY -> Color.parseColor("#FF5A3C")
             Emotion.SAD -> Color.parseColor("#4A7BFF")
             Emotion.LOVE -> Color.parseColor("#FF6FB5")
-            Emotion.SCARED, Emotion.CRYING, Emotion.STONED -> lastEmoCol
+            Emotion.SCARED, Emotion.CRYING, Emotion.STONED, Emotion.HOT -> lastEmoCol
             else -> eyeColor
         }
         val takeover = t < takeoverUntil
@@ -288,6 +291,32 @@ class EyesView(context: Context) : View(context) {
                     val ty = cy + eh / 2 + p * h * 0.28f
                     canvas.drawCircle(tx, ty, ew * 0.07f, tearPaint)
                     canvas.drawCircle(tx, ty - ew * 0.05f, ew * 0.045f, tearPaint)
+                }
+            }
+            // too hot: sweat drops running down from the outer top corner, and heat shimmer above
+            if (feeling == Emotion.HOT && !carMode) {
+                for (d in 0..1) {
+                    val p = ((secs * 0.45f + d * 0.5f + (if (side < 0) 0.3f else 0f)) % 1f)
+                    sweatPaint.alpha = (230 * (1f - p * p)).toInt()
+                    val sx = ex + side * (ew / 2 + ew * 0.12f)
+                    val sy = cy - eh / 2 + p * eh * 0.9f
+                    val dr = ew * 0.075f
+                    val drop = android.graphics.Path().apply {
+                        moveTo(sx, sy - dr * 2.2f)
+                        quadTo(sx + dr * 1.1f, sy - dr * 0.2f, sx, sy + dr)
+                        quadTo(sx - dr * 1.1f, sy - dr * 0.2f, sx, sy - dr * 2.2f); close()
+                    }
+                    canvas.drawPath(drop, sweatPaint)
+                }
+                if (side > 0) {
+                    mugLine.color = Color.parseColor("#FF9A4A"); mugLine.strokeWidth = ew * 0.03f
+                    for (k in -1..1) {
+                        val bx = cx + k * ew * 0.45f; val by = cy - eyeH * 0.62f
+                        val pth = android.graphics.Path(); pth.moveTo(bx, by)
+                        for (j in 1..6) pth.lineTo(bx + sin(secs * 6f + j + k) * ew * 0.05f, by - j * ew * 0.06f)
+                        mugLine.alpha = (120 + 80 * sin(secs * 3f + k)).toInt().coerceIn(0, 255)
+                        canvas.drawPath(pth, mugLine)
+                    }
                 }
             }
             // angry / sad brows: a dark wedge cutting the top corner of each eye
@@ -890,6 +919,7 @@ class EyesView(context: Context) : View(context) {
     // smoothed extras
     private var openL = 1f; private var openR = 1f; private var rot = 0f; private var blush = 0f
     private var lastEmoCol = Color.WHITE
+    private val sweatPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#9FE3FF") }
     private val blushPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FF6F9C") }
     private val tearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#7FC8FF") }
     private val sparkPaint = Paint(Paint.ANTI_ALIAS_FLAG)

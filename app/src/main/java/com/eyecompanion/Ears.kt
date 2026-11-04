@@ -189,6 +189,7 @@ class Ears(
                 }
 
                 this.peak = peak
+                Appliances.tap?.let { t -> try { t(buf, n, m.rate) } catch (_: Exception) {} }   // dryer / kettle ears
                 if (paused) { onLevel(0f); continue }
                 if (needReset) { recognizer.reset(); needReset = false; lastPartial = ""; sentence.clear(); preRoll.clear(); capturing = false }
 

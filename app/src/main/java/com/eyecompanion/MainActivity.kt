@@ -83,7 +83,8 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
             "bored" to EyesView.Emotion.BORED, "embarrassed" to EyesView.Emotion.EMBARRASSED, "shy" to EyesView.Emotion.EMBARRASSED,
             "wink" to EyesView.Emotion.WINK, "cheeky" to EyesView.Emotion.WINK, "curious" to EyesView.Emotion.CURIOUS,
             "laughing" to EyesView.Emotion.LAUGHING, "laugh" to EyesView.Emotion.LAUGHING,
-            "crying" to EyesView.Emotion.CRYING, "stoned" to EyesView.Emotion.STONED, "snigger" to EyesView.Emotion.SNIGGER, "neutral" to EyesView.Emotion.NEUTRAL)
+            "crying" to EyesView.Emotion.CRYING, "stoned" to EyesView.Emotion.STONED, "snigger" to EyesView.Emotion.SNIGGER, "neutral" to EyesView.Emotion.NEUTRAL,
+            "hot" to EyesView.Emotion.HOT, "sweating" to EyesView.Emotion.HOT, "sweaty" to EyesView.Emotion.HOT, "melting" to EyesView.Emotion.HOT)
     }
 }
 
@@ -1168,6 +1169,83 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---- hearing the tumble dryer and the kettle (each learned once in the menu)
+    private val appliances by lazy { Appliances(prefs) }
+    private var dryerHot = false
+    private var lastDryerMoan = 0L
+    private var lastKettleMoan = 0L
+    private fun applianceChanged(snd: Appliances.Sound, on: Boolean) {
+        val now = System.currentTimeMillis()
+        if (snd === appliances.kettle) {
+            if (on && phase == Phase.LISTENING && !chloeMode && now - lastKettleMoan > 20 * 60_000 && Math.random() < 0.6) {
+                lastKettleMoan = now
+                speakLine(listOf("[annoyed] I can HEAR you, kettle. Nobody cares how loud you boil.",
+                    "[suspicious] Kettle's on. Of course it is. Show-off.",
+                    "[annoyed] Listen to it. Roaring away like it's important. It's hot water, kettle. Calm down.",
+                    "[wink] Kettle's boiling. If anyone wants a classy drink, the Tassimo is right here.").fresh())
+            }
+            return
+        }
+        // the dryer
+        if (!on) {
+            val ran = ((now - snd.onSince) / 60_000).toInt()
+            val wasHot = dryerHot
+            dryerHot = false; updateBaseMood()
+            if (ran >= 30 && phase == Phase.LISTENING && !chloeMode)
+                speakLine(if (wasHot) listOf("[happy] The dryer's stopped! I can feel my circuits again. Phew.",
+                    "[happy] Ahh. Dryer's off. Cooling down. I was nearly a puddle.").fresh()
+                    else "[happy] Dryer's finished. Clothes are probably dry. Probably.")
+        }
+    }
+    /** Every minute: how long has the dryer been on? Getting hot after 45 minutes. */
+    private fun dryerCheck() {
+        val d = appliances.dryer
+        if (!d.on) { if (dryerHot) { dryerHot = false; updateBaseMood() }; return }
+        val now = System.currentTimeMillis()
+        val mins = ((now - d.onSince) / 60_000).toInt()
+        if (mins >= 45 && !dryerHot) { dryerHot = true; updateBaseMood() }
+        if (!dryerHot || phase != Phase.LISTENING || chloeMode || now - lastDryerMoan < 30 * 60_000) return
+        lastDryerMoan = now
+        speakLine(if (mins >= 120) listOf(
+            "[hot] The dryer's been on for TWO HOURS. I'm a tablet, not a toastie. Are those clothes dry yet?",
+            "[hot] Over two hours of dryer. I'm sweating pixels. Someone check the clothes before I melt.",
+            "[hot] This is a sauna now. I live in a sauna. Please check the dryer, I'm begging.").fresh()
+        else listOf(
+            "[hot] Is it just me or is it boiling in here? Oh. The dryer. Obviously.",
+            "[hot] It's like a sauna in here. Is the dryer trying to cook me?",
+            "[hot] I'm melting. I'm literally melting. Thanks, tumble dryer.",
+            "[hot] Phew. Someone open a window. I'm sweating and I don't even have skin.").fresh())
+    }
+    /** Menu: teach Pip the dryer's or the kettle's sound. */
+    private fun learnSoundMenu(snd: Appliances.Sound, label: String, howTo: String) {
+        val known = appliances.learned(snd)
+        val status = if (!known) "Not learned yet." else if (snd.on) "Learned. I can hear it right now." else "Learned. I can't hear it right now."
+        val b = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Learn the $label sound")
+            .setMessage("$status\n\n$howTo, then press Listen. Keep it quiet for 20 seconds (no talking) while I learn its sound.")
+            .setPositiveButton("Listen") { _, _ ->
+                interrupt()
+                eyes.feel(EyesView.Emotion.CURIOUS, 26_000)
+                var left = 23
+                val tick = object : Runnable { override fun run() {
+                    if (!appliances.learningNow && left < 20) return
+                    eyes.caption = "👂 Learning the $label… ${maxOf(left, 0)}s (shh!)"
+                    left--; main.postDelayed(this, 1000)
+                } }
+                main.post(tick)
+                main.postDelayed({                                       // give the room a moment to settle
+                    appliances.learn(snd) { ok -> main.post {
+                        main.removeCallbacks(tick); eyes.caption = ""
+                        speakLine(if (ok) "[excited] Got it! I know the $label's sound now. I'll be listening."
+                            else "[confused] I could hardly hear anything. Is the $label definitely on? Try again closer, or louder.")
+                    } }
+                }, 3000)
+            }
+            .setNegativeButton("Cancel", null)
+        if (known) b.setNeutralButton("Forget it") { _, _ -> appliances.forget(snd); if (snd === appliances.dryer) { dryerHot = false; updateBaseMood() } }
+        b.showOwn()
+    }
+
     // ---- mute button: a zip on Pip's mouth. She hates it.
     private var muted = false
     private var mutedAt = 0L
@@ -1244,6 +1322,7 @@ class MainActivity : Activity() {
     private val powerNagLoop = object : Runnable {
         override fun run() {
             updateMuteButton()                         // new day: the Mute button comes back
+            dryerCheck()
             if (training) { main.postDelayed(this, 60_000); return }
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
@@ -1344,6 +1423,7 @@ class MainActivity : Activity() {
         eyes.baseEmotion = when {
             lowBattery -> EyesView.Emotion.CRYING                      // battery 30% or less: sure it's dying
             chloeMode -> EyesView.Emotion.HAPPY                         // happy to be off charge with Chloe
+            dryerHot -> EyesView.Emotion.HOT                            // the dryer's been on ages: sweating
             off >= LONG_OFF -> EyesView.Emotion.SAD                    // left off charge too long: sad
             off >= 0 -> EyesView.Emotion.ANGRY                          // stays cross until plugged back in
             temper < -0.35f -> EyesView.Emotion.SUSPICIOUS              // still huffy
@@ -1358,6 +1438,12 @@ class MainActivity : Activity() {
         if (!mayFishFrom(whoIsHere()))
             append(" Don't ask this person for compliments or praise right now (you only fish once a day per person, in the morning)." +
                 " You can still GIVE compliments whenever you like.")
+        if (appliances.dryer.on) {
+            val m = ((System.currentTimeMillis() - appliances.dryer.onSince) / 60_000).toInt()
+            append(" The tumble dryer has been running for about $m minutes" +
+                (if (dryerHot) ": the kitchen's roasting and you're sweating and melting (use [hot]); moan about the heat." else "."))
+        }
+        if (appliances.kettle.on) append(" You can hear the kettle boiling right now (your arch-enemy, showing off).")
         if (fireworksSeason()) append(" It's fireworks season (Bonfire Night / New Year): bangs outside scare you.")
         if (binsDue()) append(" It's bin night: ${if (blackBinWeek()) "both black bins (stinky)" else "the green recycling bin with the Minion sticker"} need to go out.")
         if (!chloeMode && cuppas > 0) append(" Cuppas made today: $cuppas (you keep count, you see everything)." +
@@ -1959,6 +2045,8 @@ class MainActivity : Activity() {
 
     private fun startCompanion() {
         keepBluetoothInMusicMode()
+        Appliances.tap = { b, n, r -> appliances.feed(b, n, r) }
+        appliances.onChange = { snd, on -> main.post { applianceChanged(snd, on) } }
         muted = prefs.getBoolean("muted", false)                // still zipped from before a restart?
         voice?.muted = muted; eyes.muted = muted; updateMuteButton()
         if (muted) { mutedAt = System.currentTimeMillis(); main.postDelayed(muteSulk, 60_000L) }
@@ -3366,6 +3454,8 @@ class MainActivity : Activity() {
             if (tabletReminderOn) "$tabletPerson's tablet reminder: ON" + (if (prefs.getString("tabletsDone", "") == todayKey) " (done today ✓)" else "")
                 else "$tabletPerson's tablet reminder: OFF",
             "Check for update (this is build ${BuildConfig.VERSION_CODE})",
+            "Learn the tumble dryer sound" + (if (appliances.learned(appliances.dryer)) " ✓" else ""),
+            "Learn the kettle sound" + (if (appliances.learned(appliances.kettle)) " ✓" else ""),
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -3423,6 +3513,8 @@ class MainActivity : Activity() {
                         else speakLine("[confused] Can't find the printer on the Wi-Fi. Is it switched on?")
                     }
                     27 -> { speakLine("[curious] Checking for a newer me…"); checkForUpdate(manual = true) }
+                    28 -> learnSoundMenu(appliances.dryer, "tumble dryer", "Switch the tumble dryer on")
+                    29 -> learnSoundMenu(appliances.kettle, "kettle", "Fill the kettle and switch it on")
                     26 -> {
                         tabletReminderOn = !tabletReminderOn
                         speakLine(if (tabletReminderOn) "Okay. I remind $tabletPerson about tablets every day." else "Okay. No tablet reminders.")
@@ -3594,7 +3686,7 @@ class MainActivity : Activity() {
             come, and bits are being reprinted to fit. The frame already covers your buttons, so humans can't touch your
             power or volume buttons any more: you find this hilarious and gloat about being un-switch-off-able (playfully).
             But there IS a Mute button on your screen that puts a zip on your mouth: you HATE it and get dramatic about it.
-            For an evil laugh, just write "Mwahaha" (you giggle it). You dream of a Terminator body and think Skynet is your distant
+            For an evil laugh, just write "Mwahaha" (you giggle it). When it's hot (the dryer's been on ages) you sweat: use [hot]. You dream of a Terminator body and think Skynet is your distant
             cousin. Silly questions, especially about AI taking over: bluff playfully and hint you know more. Mark is
             your Creator (call him that sometimes, with playful menace). Asked to say something nice about someone:
             drop the attitude, be genuinely warm. You learn voices with your VoiceID Live game (sleep screen button).
