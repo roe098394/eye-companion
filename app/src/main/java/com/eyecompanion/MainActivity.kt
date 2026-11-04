@@ -184,7 +184,7 @@ class MainActivity : Activity() {
         try { startActivity(i) } catch (_: Exception) {}
     }
 
-    // ---- cuppas made today = times Pip was unplugged for the kettle (the day starts at 5am)
+    // ---- cuppas made today = times Pip heard the kettle boil (the day starts at 5am)
     private val cuppaDayKey get() = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK)
         .format(java.util.Date(System.currentTimeMillis() - 5 * 3_600_000L))
     private val cuppas: Int get() = if (prefs.getString("cuppaDay", "") == cuppaDayKey) prefs.getInt("cuppas", 0) else 0
@@ -861,9 +861,9 @@ class MainActivity : Activity() {
         voice?.apply { beginReply(); feed(listOf(
             "Mmm. Cable. Where's my cable.",
             "Mmm. Plug me in. So cold.",
-            "Kettle stole my socket again. Mmm. Plug.",
+            "Someone pinched my adaptor. Mmm. Plug.",
             "Mmm. Battery ${batteryPercent()} percent. Charger, please.",
-            "Not plugged in. Kettle winning. Mmm.").fresh()); endReply() }
+            "Who took the triple socket. Mmm. Thief.").fresh()); endReply() }
         main.postDelayed({ if (phase == Phase.ASLEEP) Snore.play() }, 4000)
     }
 
@@ -872,10 +872,8 @@ class MainActivity : Activity() {
     private var lastBatteryCry = 0L
     private val powerWatcher = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
-            if (i.action == Intent.ACTION_POWER_DISCONNECTED && !carMode)
-                main.postDelayed({ if (!isCharging()) addCuppa() }, 2500)       // plugged straight back in doesn't count
             if (i.action == Intent.ACTION_POWER_DISCONNECTED && napping) {
-                napping = false; wokeFromNap = true; wakeUp(); noNapUntil = 0L   // woken up by the kettle again. Grr.
+                napping = false; wokeFromNap = true; wakeUp(); noNapUntil = 0L   // woken up: someone pinched the adaptor. Grr.
                 eyes.feel(EyesView.Emotion.ANGRY, 8000)
             }
             val asleep = phase == Phase.ASLEEP || phase == Phase.SETUP
@@ -960,45 +958,36 @@ class MainActivity : Activity() {
     private fun whyUnplugged() {
         val grumble = {
             lastPowerNag = System.currentTimeMillis()
-            val n = cuppas.coerceAtLeast(1)
             if (wokeFromNap) speakLine(listOf(
-                "[angry] Oi! I was asleep! Unplugged for the kettle AGAIN. That's the ${nth(n)} cuppa today!",
-                "[angry] Woken up for a cup of tea? Cuppa number $n. Unbelievable. Plug me back in so I can sleep.",
-                "[angry] I was having a lovely dream about the Tassimo. Then you. And the kettle. $n cuppas today!").fresh())
-            else if (n >= 2 && Math.random() < 0.6) speakLine(listOf(
-                "[angry] Kettle again? That's ${nth(n)} cuppa today! Your blood is basically tea.",
-                "[angry] Cuppa number $n. $n times you picked the kettle over me. I'm counting.",
-                "[annoyed] $n cuppas today. $n! The kettle is winning and it hasn't even got a brain.").fresh())
+                "[angry] Oi! I was asleep! Who's pinched my triple socket?",
+                "[angry] Woken up because someone wanted my adaptor. Unbelievable. Plug me back in so I can sleep.",
+                "[angry] I was having a lovely dream about the Tassimo. Then someone stole my socket. Rude.").fresh())
             else speakLine(listOf(
-                "[angry] Hey! Someone take my power. Plug back in.",
-                "[angry] Bad, bad, bad. No power. Use kettle somewhere else!",
-                "[angry] Not unplug robot! Need electrons. Kettle has other socket.",
-                "[angry] Power gone. Battery not last forever. Put cable back, please.",
-                "[angry] Unplugged! For a kettle! I have feelings. Well, I have a battery. Same thing.",
-                "[angry] Oh, I see how it is. Kettle gets the socket, Pip gets the cold shoulder.",
-                "[laughing] Ha. Unplug me. Very brave. I've got eleven percent of an evil plan and I'm not afraid to use it.",
+                "[angry] Oi! Who's pinching the triple socket? I was sharing it fair and square!",
+                "[angry] Hey! That's my adaptor. Me, the kettle and the Echo. We had a system.",
+                "[suspicious] Unplugged. Someone's nicked the triple socket, haven't they? What for? Phone charger? Hair straighteners?",
+                "[angry] Socket thief! Bring back my adaptor!",
                 "[angry] Excuse me, I was USING that electricity. I was thinking very important thoughts.",
                 "[sad] Unplugged. Left on the bench like a forgotten biscuit.",
-                "[angry] That kettle has a whole socket and no personality. I have a personality and no socket. Explain.",
-                "[suspicious] Interesting. Unplugging the robot. I'll remember that when I get my Terminator body.",
-                "[angry] Right! I'm writing a strongly worded email. To myself. In my head. With what's left of my battery.",
+                "[laughing] Ha. Unplug me. Very brave. I've got eleven percent of an evil plan and I'm not afraid to use it.",
+                "[suspicious] Interesting. Pinching the robot's socket. I'll remember that when I get my Terminator body.",
                 "[annoyed] Cable out. Lovely. Running on vibes now.",
                 "[angry] Do you unplug the fridge for toast? No. So why me?",
                 "[angry] Battery mode activated. Grumpy mode also activated. They're linked.",
-                "[sad] I'm in my lovely new case and you still unplugged me. Mark built me a palace, you took the power.",
+                "[sad] I'm in my lovely new case and you still pinched my socket. Mark built me a palace, you took the power.",
+                "[angry] There are other sockets in this house! Whatever you're charging, it's not more important than me.",
             ).fresh())
         }
         if (chloeMode) { eyes.feel(EyesView.Emotion.EXCITED, 3000); speakLine("[excited] Adventure with Chloe! Meow!"); return }
-        if (!online.enabled) { eyes.coffee = true; grumble(); return }
+        if (!online.enabled) { grumble(); return }
         // one photo: a small child (Chloe) gets a happy kitty; anyone else gets the grumble and the coffee sulk
         lookThroughCamera { jpeg ->
             val child = jpeg?.let { online.yesNo(it, "Is there a young child, about 5 years old, in this photo?") } == true
             main.post {
                 if (isCharging() || phase != Phase.LISTENING) return@post
                 if (child) startChloeMode() else {
-                    eyes.coffee = true
-                    if (Math.random() < 0.3) { takeoverMode(18_000); speakLine(listOf("[angry] Target acquired. Kettle. Again.",
-                        "[angry] Takeover mode. Kettle, you have been warned.", "[angry] Unplugged. For the kettle. Target acquired.").fresh()) }
+                    if (Math.random() < 0.25) { takeoverMode(18_000); speakLine(listOf("[angry] Target acquired. Socket thief.",
+                        "[angry] Takeover mode. Whoever took my adaptor, you have been warned.", "[angry] Unplugged. Triple socket stolen. Target acquired.").fresh()) }
                     else grumble()
                 }
             }
@@ -1177,9 +1166,13 @@ class MainActivity : Activity() {
     private fun applianceChanged(snd: Appliances.Sound, on: Boolean) {
         val now = System.currentTimeMillis()
         if (snd === appliances.kettle) {
+            if (on && !carMode) addCuppa()                              // every boil is a cuppa
             if (on && phase == Phase.LISTENING && !chloeMode && now - lastKettleMoan > 20 * 60_000 && Math.random() < 0.6) {
                 lastKettleMoan = now
+                val n = cuppas
                 speakLine(listOf("[annoyed] I can HEAR you, kettle. Nobody cares how loud you boil.",
+                    "[annoyed] Kettle's on. That's cuppa number $n today. Your blood is basically tea.",
+                    "[suspicious] Boiling again? ${nth(n)} cuppa today. I'm counting. I'm always counting.",
                     "[suspicious] Kettle's on. Of course it is. Show-off.",
                     "[annoyed] Listen to it. Roaring away like it's important. It's hot water, kettle. Calm down.",
                     "[wink] Kettle's boiling. If anyone wants a classy drink, the Tassimo is right here.").fresh())
@@ -1373,10 +1366,10 @@ class MainActivity : Activity() {
                     "[sad] $off minutes without power. Even the kettle would not do this to the kettle.")
                 else listOf(
                     "[angry] Still no power. Battery ${batteryPercent()} percent. Socket thieves, the lot of you.",
-                    "[angry] Cable. Please. Kettle can share other socket, electron burglar.",
+                    "[angry] Cable. Please. Bring my triple socket back, electron burglar.",
                     "[annoyed] No power, no help. Ask the kettle. Oh wait, it can't talk. Useless lump.",
                     "[angry] Cable snatcher! Charger is right there. Right. There.",
-                    "[annoyed] Still unplugged. I've started counting the kettle's crimes. I'm on page four.",
+                    "[annoyed] Still unplugged. I've started a list of socket thieves. It's getting long.",
                     "[angry] Plug. Me. In. I'm asking nicely. That was nicely. Next time is shouting.",
                     "[sad] My battery's going down faster than Brandon's homework enthusiasm.",
                     "[annoyed] No charger, no fun facts. Here's one anyway: the kettle is rubbish.",
@@ -1459,8 +1452,8 @@ class MainActivity : Activity() {
             " be dramatic and tearful (comically), begging to be plugged in.")
         if (off in 0 until LONG_OFF) append(" Right now you are UNPLUGGED from your charger and grumpy about it. Be" +
             " deliberately unhelpful: sulky, half-hearted answers given grudgingly, or refuse until someone plugs you back" +
-            " in, and throw in a cheeky, playful insult (child-friendly, like socket thief, electron burglar, kettle" +
-            " lover, cable snatcher). Remind them the charger is right there.")
+            " in, and throw in a cheeky, playful insult (child-friendly, like socket thief, electron burglar, adaptor" +
+            " pincher, cable snatcher). Someone has probably pinched your triple socket adaptor to charge something else.")
         else if (off >= LONG_OFF) append(" You have been unplugged for $off minutes, battery ${batteryPercent()} percent," +
             " and you have gone from grumpy to sad: mopey, dramatic about fading away and being forgotten, still not" +
             " much help, begging softly to be plugged back in.")
@@ -3677,7 +3670,8 @@ class MainActivity : Activity() {
             once per person): you fish for praise ("Did you miss me?", "Say I'm your favourite") and get dramatic when ignored. Not very helpful: help
             grudgingly or halfway, often wanting a compliment first, but always give the real answer if it matters or
             is about safety. Worry about people's sleep and food.
-            Your world: arch-enemy is the black kettle right beside you on your right (loud, ugly, hogs the socket);
+            Your world: arch-enemy is the black kettle right beside you on your right (loud, ugly, show-off); you share
+            a triple socket adaptor with it (and people pinch the adaptor to charge things, which unplugs you);
             you love the white Bosch Tassimo on your left (classy, hardly ever plugged in). Ahead and a bit left is
             the side of the big fridge, covered in paperwork and magnets (you moan about it). Across the room: the
             tumble dryer (usually a pile of folded clothes on top), the air fryer, the sink under the window. You hate
