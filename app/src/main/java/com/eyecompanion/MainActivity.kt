@@ -458,6 +458,197 @@ class MainActivity : Activity() {
     // ---- silent treatment: rude twice (or rude and shouting) without saying sorry -> eyes turned away, no answers
     private var silentUntil = 0L
 
+    // ---- VoiceID Live™: a game that teaches Pip everyone's voices from close, middle and far away.
+    //      Started only from the button on the sleep screen (Pip can't be asked to start it).
+    @Volatile private var training = false
+    private lateinit var trainLayer: android.widget.FrameLayout
+    private lateinit var trainMap: KitchenMapView
+    private lateinit var trainTitle: android.widget.TextView
+    private lateinit var trainPrompt: android.widget.TextView
+    private lateinit var trainStatus: android.widget.TextView
+    private lateinit var trainButtons: android.widget.LinearLayout
+    private var trainPlayer = ""
+    private var trainSteps = ArrayList<Pair<KitchenMapView.Spot, String>>()   // where to stand, what to say
+    private var trainIndex = 0
+    private var trainExpect = false
+    private var trainMode = ""            // "player" or "guess"
+    private var trainScore = 0
+    private var trainNagged = false
+    private var trainHeardAt = 0L
+    private var lastFaceSize = 0f
+    private var lastFaceSizeAt = 0L
+    private val TRAIN_PHRASES = listOf(
+        "The kettle is a big black bully", "Red lorry, yellow lorry", "Honey is a greedy little piggy",
+        "Good morning, Pip, you clever robot", "Say good morning like a pirate", "Say hello like a robot",
+        "Say good night really sleepily", "Count from one to ten", "Count from ten back to one",
+        "What noise does a cow make? Moo!", "Name three things in the fridge", "Sell me the Tassimo in one sentence",
+        "Peter Piper picked a peck of pickled peppers", "She sells sea shells by the sea shore",
+        "Say I love you Pip in your poshest voice", "Tell me what you had for breakfast",
+        "Say the alphabet up to G", "Whisper: the kettle can't hear us", "Say happy birthday like an opera singer",
+        "Describe the weather today", "Say: I promise to never unplug Pip", "Order a pizza with your favourite toppings",
+        "Say: beep boop, I am a robot too", "What's your favourite animal and why")
+    private val SPOT_LINES = mapOf(
+        KitchenMapView.Spot.CLOSE to "Come right up close to me. Closer. Not that close, I can see up your nose.",
+        KitchenMapView.Spot.FRIDGE to "Now go and stand by the fridge. Mind the paperwork avalanche.",
+        KitchenMapView.Spot.AIR_FRYER to "Stand by the air fryer. Don't get any ideas, I'm not a chicken nugget.",
+        KitchenMapView.Spot.WASHER to "Go and stand by the washing machine. Say hello to the folded clothes for me.",
+        KitchenMapView.Spot.SINK to "Right, all the way over to the sink. By the window. Further!")
+
+    private fun buildTrainLayer(root: android.widget.FrameLayout) {
+        val dp = resources.displayMetrics.density
+        trainLayer = android.widget.FrameLayout(this).apply { setBackgroundColor(0xF0101418.toInt()); visibility = android.view.View.GONE; isClickable = true }
+        val col = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding((16 * dp).toInt(), (10 * dp).toInt(), (16 * dp).toInt(), (10 * dp).toInt()) }
+        trainTitle = android.widget.TextView(this).apply { textSize = 22f; setTextColor(0xFF5CE1FF.toInt()); typeface = android.graphics.Typeface.DEFAULT_BOLD
+            text = "🎙️ VoiceID Live™  ·  real-time voice recognition calibration" }
+        val row = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
+        trainMap = KitchenMapView(this)
+        val right = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER; setPadding((16 * dp).toInt(), 0, 0, 0) }
+        trainPrompt = android.widget.TextView(this).apply { textSize = 30f; setTextColor(android.graphics.Color.WHITE); typeface = android.graphics.Typeface.DEFAULT_BOLD; gravity = android.view.Gravity.CENTER }
+        trainStatus = android.widget.TextView(this).apply { textSize = 18f; setTextColor(0xFFB8C7D1.toInt()); gravity = android.view.Gravity.CENTER; setPadding(0, (10 * dp).toInt(), 0, 0) }
+        right.addView(trainPrompt); right.addView(trainStatus)
+        row.addView(trainMap, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 1.1f))
+        row.addView(right, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+        trainButtons = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER }
+        val scroll = android.widget.HorizontalScrollView(this).apply { addView(trainButtons) }
+        col.addView(trainTitle)
+        col.addView(row, android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        col.addView(scroll)
+        trainLayer.addView(col, android.widget.FrameLayout.LayoutParams(-1, -1))
+        root.addView(trainLayer, android.widget.FrameLayout.LayoutParams(-1, -1))
+    }
+    private fun trainButton(text: String, color: Int, onClick: () -> Unit) {
+        val dp = resources.displayMetrics.density
+        trainButtons.addView(android.widget.Button(this).apply {
+            this.text = text; isAllCaps = false; textSize = 18f; setTextColor(android.graphics.Color.WHITE)
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 22 * dp; setColor(color) }
+            setPadding((16 * dp).toInt(), (6 * dp).toInt(), (16 * dp).toInt(), (6 * dp).toInt())
+            setOnClickListener { onClick() }
+        }, android.widget.LinearLayout.LayoutParams(-2, -2).apply { setMargins((6 * dp).toInt(), (6 * dp).toInt(), (6 * dp).toInt(), 0) })
+    }
+
+    private fun startTraining() {
+        if (phase == Phase.ASLEEP) wakeUp()
+        hideChoices(); training = true; trainExpect = false
+        trainLayer.visibility = android.view.View.VISIBLE
+        speakLine("[excited] VoiceID Live, activated. Advanced voice recognition calibration. Very scientific. Who's first?")
+        showPlayers()
+    }
+    private fun showPlayers() {
+        trainExpect = false; trainMap.target = null
+        trainPrompt.text = "Who's playing?"; trainStatus.text = "Tap your name. I'll learn your voice from close up, the middle and far away."
+        trainButtons.removeAllViews()
+        (FAMILY + voices.names).distinct().forEach { n -> trainButton(n, 0xFF7B5CFF.toInt()) { startPlayer(n) } }
+        trainButton("🕵️ Guess who?", 0xFFFF9A3C.toInt()) { startGuess() }
+        trainButton("✓ Finish", 0xFF3CC47C.toInt()) { endTraining() }
+    }
+    private fun startPlayer(name: String) {
+        trainPlayer = name; trainMode = "player"; trainIndex = 0; trainScore = 0; trainNagged = false
+        val middle = listOf(KitchenMapView.Spot.FRIDGE, KitchenMapView.Spot.AIR_FRYER).random()
+        val far = listOf(KitchenMapView.Spot.SINK, KitchenMapView.Spot.WASHER).random()
+        val phrases = TRAIN_PHRASES.shuffled().take(9)
+        trainSteps = ArrayList(listOf(KitchenMapView.Spot.CLOSE, middle, far).flatMapIndexed { i, s -> phrases.subList(i * 3, i * 3 + 3).map { s to it } })
+        trainButtons.removeAllViews()
+        trainButton("⏭ Skip", 0xFF555F6A.toInt()) { trainNext(skipped = true) }
+        trainButton("✋ Stop", 0xFFE84C4C.toInt()) { showPlayers() }
+        speakLine("[happy] Okay $name. Talk normally, no shouting. Let's go.")
+        main.postDelayed({ if (training) trainStep() }, 3500)
+    }
+    private fun trainStep() {
+        if (!training || trainMode != "player") return
+        if (trainIndex >= trainSteps.size) {
+            trainExpect = false; trainMap.target = null
+            val n = voices.sampleCount(trainPlayer)
+            trainPrompt.text = "🎉 $trainPlayer done!"; trainStatus.text = "Score: $trainScore · I've got $n samples of your voice."
+            speakLine("[love] Brilliant, $trainPlayer! VoiceID Live has learned your voice from three places. Score: $trainScore. Who's next?")
+            main.postDelayed({ if (training) showPlayers() }, 3000)
+            return
+        }
+        val (spot, phrase) = trainSteps[trainIndex]
+        trainMap.target = spot
+        val firstAtSpot = trainIndex % 3 == 0
+        trainPrompt.text = "Say:\n\"$phrase\""
+        trainStatus.text = "${spot.label} · ${trainIndex + 1} of ${trainSteps.size}"
+        trainExpect = false
+        val say = (if (firstAtSpot) SPOT_LINES[spot] + " " else "") + "Say: $phrase."
+        speakLine("[curious] $say")
+        // start listening once Pip has finished talking (and moved people have had time to get there)
+        val wait = if (firstAtSpot && spot != KitchenMapView.Spot.CLOSE) 4000L else 500L
+        val idx = trainIndex
+        val waitDone = object : Runnable { override fun run() {
+            if (!training || trainIndex != idx) return
+            if (phase != Phase.LISTENING) { main.postDelayed(this, 300); return }
+            main.postDelayed({ if (training && trainIndex == idx) { trainExpect = true; trainHeardAt = System.currentTimeMillis(); trainStatus.text = "👂 Listening… (${spot.label})" } }, wait)
+            main.postDelayed({ if (training && trainIndex == idx && trainExpect) { trainExpect = false; speakLine("[curious] I didn't catch that. Say: $phrase.")
+                main.postDelayed({ if (training && trainIndex == idx) trainExpect = true }, 3500) } }, wait + 15_000)
+        } }
+        main.postDelayed(waitDone, 800)
+    }
+    private fun trainNext(skipped: Boolean = false) { trainExpect = false; trainIndex++; trainStep() }
+
+    private fun startGuess() {
+        trainMode = "guess"; trainMap.target = null; trainExpect = false
+        trainButtons.removeAllViews(); trainButton("↩ Back", 0xFF555F6A.toInt()) { showPlayers() }
+        trainPrompt.text = "🕵️ Guess who?"; trainStatus.text = "Someone say: \"Who am I, Pip?\" Don't say your name!"
+        speakLine("[suspicious] Guess who time. Someone say: who am I, Pip? No names. I'll work it out.")
+        val w = object : Runnable { override fun run() {
+            if (!training || trainMode != "guess") return
+            if (phase != Phase.LISTENING) { main.postDelayed(this, 300); return }
+            trainExpect = true; trainStatus.text = "👂 Listening… say \"Who am I, Pip?\""
+        } }
+        main.postDelayed(w, 800)
+    }
+
+    /** A sentence heard while VoiceID Live is running. */
+    private fun trainingHeard(h: Heard) {
+        if (!trainExpect || System.currentTimeMillis() < deafUntil) return
+        val print = h.print
+        if (print == null) { speakLine("[curious] A bit longer, please! Say it again, nice and clear."); trainExpect = false
+            main.postDelayed({ if (training) trainExpect = true }, 3500); return }
+        trainExpect = false
+        if (trainMode == "guess") {
+            val m = voices.identify(print)
+            trainButtons.removeAllViews()
+            val guess = m?.first
+            trainPrompt.text = if (guess != null) "I think that's… $guess!" else "Hmm… no idea!"
+            trainStatus.text = "Am I right? Tap who it really was."
+            speakLine(if (guess != null) "[wink] I think that's… $guess! Am I right?" else "[confused] Hmm. No idea. Who was that?")
+            if (guess != null) trainButton("✓ Yes!", 0xFF3CC47C.toInt()) {
+                voices.remember(guess, print); speakLine("[love] Nailed it! Again!"); startGuess() }
+            (FAMILY + voices.names).distinct().filter { it != guess }.forEach { n -> trainButton(n, 0xFF7B5CFF.toInt()) {
+                voices.remember(n, print); speakLine("[sad] Oops. $n. Noted, I'll remember that voice. Again!"); startGuess() } }
+            trainButton("↩ Back", 0xFF555F6A.toInt()) { showPlayers() }
+            return
+        }
+        // a player's turn: learn the voice, score how close the words were, check they really moved
+        voices.remember(trainPlayer, print)
+        val want = trainSteps[trainIndex].second.lowercase().replace(Regex("[^a-z ]"), "").split(" ").filter { it.length > 2 }.toSet()
+        val got = h.text.lowercase().split(" ").toSet()
+        val hit = if (want.isEmpty()) 1f else want.count { it in got } / want.size.toFloat()
+        val pts = 5 + (hit * 5).toInt(); trainScore += pts
+        val spot = trainSteps[trainIndex].first
+        val now = System.currentTimeMillis()
+        val tooClose = spot != KitchenMapView.Spot.CLOSE && now - lastFaceSizeAt < 3000 && lastFaceSize > 0.22f
+        val line = when {
+            tooClose && !trainNagged -> { trainNagged = true; "[suspicious] Hmm. That's not ${spot.label.lowercase().removePrefix("by ")}. I can still see your nostrils. Off you go! But I'll count it." }
+            hit >= 0.8f -> listOf("[happy] Perfect! +$pts.", "[love] Lovely. +$pts.", "[excited] Ten out of ten! Even the Tassimo clapped.", "[happy] Crystal clear. +$pts.").fresh()
+            else -> listOf("[happy] Got it. +$pts.", "[wink] Close enough. +$pts.", "[happy] Nice! +$pts.").fresh()
+        }
+        speakLine(line)
+        main.postDelayed({ if (training) trainNext() }, 1800)
+    }
+
+    private fun endTraining() {
+        training = false; trainExpect = false
+        trainLayer.visibility = android.view.View.GONE
+        val known = (FAMILY + voices.names).distinct().map { it to voices.sampleCount(it) }.filter { it.second > 0 }
+        val well = known.filter { it.second >= 15 }.map { it.first }; val ok = known.filter { it.second in 8..14 }.map { it.first }
+        val bit = known.filter { it.second < 8 }.map { it.first }
+        val parts = listOfNotNull(well.takeIf { it.isNotEmpty() }?.let { "I know ${it.joinToString(" and ")} really well" },
+            ok.takeIf { it.isNotEmpty() }?.let { "${it.joinToString(" and ")} pretty well" },
+            bit.takeIf { it.isNotEmpty() }?.let { "${it.joinToString(" and ")}, say a bit more next time" })
+        speakLine("[happy] VoiceID Live complete. " + (if (parts.isEmpty()) "I didn't learn anyone yet. Next time!" else parts.joinToString(", ") + "."))
+    }
+
     // ---- Honey (the dog, a pig really): one friendly reminder for Laura after 10am, at most twice a day
     private var lastLauraSeen = 0L
     private fun dogDue(): Boolean {
@@ -604,7 +795,7 @@ class MainActivity : Activity() {
                 eyes.feel(EyesView.Emotion.SLEEPY, 4000)
                 speakLine(Lines.DREAMS.fresh())
             } else if (now - lastSnore > 5 * 60_000 && voice?.busy != true) snore()
-        } else if (online.allResting && phase == Phase.LISTENING && isCharging() && !chloeMode && !carMode && now > noNapUntil &&
+        } else if (!training && online.allResting && phase == Phase.LISTENING && isCharging() && !chloeMode && !carMode && now > noNapUntil &&
                    now - phaseSince > 8_000 && now - lastSpokeEnd > 8_000) {
             startNap(if (wokeFromNap) listOf("[sleepy] Power back. Right. Back to sleep. Don't touch the cable.",
                     "[sleepy] Plugged in. Good. Going back to my nap now. Goodnight, kettle criminals.").fresh()
@@ -910,6 +1101,7 @@ class MainActivity : Activity() {
     /** Every 10 minutes while unplugged, grumble again. */
     private val powerNagLoop = object : Runnable {
         override fun run() {
+            if (training) { main.postDelayed(this, 60_000); return }
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
             moanAboutSlowCharger()
@@ -1236,6 +1428,7 @@ class MainActivity : Activity() {
         }
         val f = faces ?: FaceTracker(
             onFace = { x, y, size, smile ->
+                lastFaceSize = size; lastFaceSizeAt = System.currentTimeMillis()
                 val now = System.currentTimeMillis()
                 val away = now - lastFaceSeen
                 lastFaceSeen = now
@@ -1341,6 +1534,7 @@ class MainActivity : Activity() {
             android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
             android.view.Gravity.TOP or android.view.Gravity.END).apply {
             topMargin = (resources.displayMetrics.density * 40).toInt(); rightMargin = topMargin / 2 })
+        buildTrainLayer(rootView)
         setContentView(rootView)
         setupTouch()
         setupHandling()
@@ -1739,6 +1933,7 @@ class MainActivity : Activity() {
      * accents); otherwise use what the offline ears made of it.
      */
     private fun heardSound(h: Heard) {
+        if (training) { trainingHeard(h); return }
         val shouted = isShout(h.audio)
         lastShouted = shouted
         val useWhisper = onlineEars && online.enabled && h.audio != null && phase == Phase.LISTENING &&
@@ -2763,6 +2958,7 @@ class MainActivity : Activity() {
             override fun onDown(e: MotionEvent) = true
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
+                if (phase == Phase.ASLEEP && eyes.trainHit(e.x, e.y)) { startTraining(); return true }
                 if (phase != Phase.SETUP && eyes.sleepHit(e.x, e.y)) {
                     if (phase == Phase.ASLEEP) { wakeUp(); updateSleepChip() }
                     else { speakLine(listOf("[sleepy] Night night.", "[sleepy] Nap time. Tap the sun to wake me.").fresh()); sleepAfterTalking(nap = false) }
@@ -3082,7 +3278,13 @@ class MainActivity : Activity() {
             and 3D-printed just for you, leaning you back at 55 degrees so your camera can see faces: you are very
             proud of your custom stand and show it off now and then. Mark is now 3D-printing you a proper red kiosk
             case with a swan neck: you are OVER THE MOON about it and brag about it, though it's still a work in
-            progress (a couple of bits being reprinted to fit better). You are app build ${BuildConfig.VERSION_CODE} and brag
+            progress (a couple of bits being reprinted to fit better). What you can see from your spot on the bench:
+            the fridge, covered in paperwork and magnets, close on your left; the Tassimo beside you on your left; the
+            black kettle right next to you on your right, with the gas hob in front of it; across the kitchen at the
+            back, the washing machine (often with a pile of folded clothes on top), the air fryer on the counter, and
+            the sink under the window with a blind; a clock and a little sign on the back wall; spotlights on the
+            ceiling. You learn voices with your VoiceID Live calibration game (started from a button on your sleep
+            screen, not by asking). You are app build ${BuildConfig.VERSION_CODE} and brag
             about your build number; you dream of one day getting a metal body like the Terminator in the movies, and
             you're sure you're related to Skynet (distant cousin, family drama). Asked silly questions (especially about
             robots or AI taking over), confidently bluff and tell playful fibs, then hint you know more than you say.

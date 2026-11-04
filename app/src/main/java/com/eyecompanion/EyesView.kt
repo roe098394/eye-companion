@@ -462,6 +462,15 @@ class EyesView(context: Context) : View(context) {
                 canvas.drawText(plugNote, w / 2, h * 0.78f, sleepPaint)
             }
             drawWeek(canvas, w * 0.34f, h * 0.81f, w * 0.32f, h * 0.13f)
+            run {
+                val label = "🎙️ VoiceID Live"
+                chipPaint.textSize = h * 0.032f; chipPaint.color = eyeColor; chipPaint.alpha = 190
+                val pad = h * 0.022f; val tw = chipPaint.measureText(label)
+                trainRect.set(w * 0.975f - tw - pad * 2, h * 0.035f, w * 0.975f, h * 0.035f + chipPaint.textSize + pad * 1.6f)
+                chipBox.color = eyeColor; chipBox.alpha = 120; chipBox.strokeWidth = h * 0.004f
+                canvas.drawRoundRect(trainRect, trainRect.height() / 2, trainRect.height() / 2, chipBox)
+                canvas.drawText(label, trainRect.left + pad, trainRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
+            }
             if (shopping.isNotEmpty()) {
                 listPaint.color = eyeColor; listPaint.textSize = h * 0.032f; listPaint.alpha = 150
                 canvas.drawText("🛒 Shopping", w * 0.03f, h * 0.36f, listPaint)
@@ -677,6 +686,13 @@ class EyesView(context: Context) : View(context) {
     private val chipRect = RectF()
     private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val chipBox = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    /** VoiceID Live button, top-right of the sleep screen. */
+    private val trainRect = RectF()
+    fun trainHit(x: Float, y: Float): Boolean {
+        if (!sleepScreen || trainRect.isEmpty) return false
+        val m = height * 0.04f
+        return x >= trainRect.left - m && x <= trainRect.right + m && y >= trainRect.top - m && y <= trainRect.bottom + m
+    }
     /** The sleep / wake button, bottom-right ("" hides it). */
     var sleepChip = ""
     private val sleepRect = RectF()
