@@ -6,22 +6,22 @@ import android.view.View
 import kotlin.math.sin
 
 /**
- * A cartoon of the kitchen as Pip sees it from its corner (drawn from Mark's photos), with the place
+ * A cartoon of the kitchen as Pip sees it from its corner (drawn from Mark's photos and layout), with the place
  * to stand glowing. Used by VoiceID Live. No real photo is stored anywhere.
  *
- * From Pip's corner: the side of the fridge straight ahead and a bit left (paperwork stuck on it), the Tassimo
- * beside Pip on its left, the kettle right next to it on its right, the worktop with the hob running out on the
- * right; past the end of the fridge, across the room: the tumble dryer (basket and folded clothes on top),
- * the air fryer, and the sink under the window.
+ * Pip sits on the back worktop between the Tassimo (left) and the kettle (right). On the left, close, the tall
+ * fridge-freezer sticks out (its side covered in paperwork). On the right the worktop runs past the hob (oven
+ * underneath) to the corner, then the side run comes towards the room: the sink under the window, and the air
+ * fryer at the far end. Straight ahead across the floor: the tumble dryer.
  */
 class KitchenMapView(context: Context) : View(context) {
 
     enum class Spot(val label: String, val x: Float, val y: Float) {
-        CLOSE("Right in front of Pip", 0.52f, 0.80f),
-        FRIDGE("By the end of the fridge", 0.44f, 0.56f),
-        DRYER("By the tumble dryer", 0.53f, 0.52f),
-        AIR_FRYER("By the air fryer", 0.68f, 0.52f),
-        SINK("By the sink", 0.87f, 0.52f),
+        CLOSE("Right in front of Pip", 0.50f, 0.80f),
+        FRIDGE("By the end of the fridge", 0.34f, 0.60f),
+        DRYER("By the tumble dryer", 0.50f, 0.42f),
+        AIR_FRYER("By the air fryer", 0.72f, 0.45f),
+        SINK("By the sink", 0.84f, 0.58f),
     }
 
     @Volatile var target: Spot? = null
@@ -36,44 +36,49 @@ class KitchenMapView(context: Context) : View(context) {
         var i = 2; while (i < xy.size) { path.lineTo(w * xy[i], h * xy[i + 1]); i += 2 }
         path.close(); p.color = col; c.drawPath(path, p)
     }
-    private fun box(c: Canvas, w: Float, h: Float, l: Float, top: Float, rr: Float, b: Float, col: Int, label: String, textCol: Int = 0xFFE6E6E6.toInt()) {
-        p.color = col; r.set(w * l, h * top, w * rr, h * b); c.drawRoundRect(r, h * 0.015f, h * 0.015f, p)
-        t.color = textCol; t.textSize = h * 0.032f; c.drawText(label, r.centerX(), r.bottom - h * 0.02f, t)
+    private fun label(c: Canvas, w: Float, h: Float, x: Float, y: Float, text: String, col: Int = 0xFFE6E6E6.toInt(), size: Float = 0.032f) {
+        t.color = col; t.textSize = h * size; c.drawText(text, w * x, h * y, t)
     }
 
     override fun onDraw(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
         val secs = (System.currentTimeMillis() - start) / 1000f
         p.color = 0xFF1B2A24.toInt(); c.drawRect(0f, 0f, w, h, p)
-        // the far side of the room, past the end of the fridge: wall and floor
-        poly(c, w, h, 0xFF2E4238.toInt(), 0.40f, 0.10f, 0.98f, 0.04f, 0.98f, 0.46f, 0.40f, 0.46f)
-        poly(c, w, h, 0xFF222222.toInt(), 0.40f, 0.46f, 0.98f, 0.46f, 1.0f, 0.62f, 0.40f, 0.66f)
-        // window with a blind, counter, sink
-        poly(c, w, h, 0xFFBFD8E8.toInt(), 0.80f, 0.10f, 0.95f, 0.09f, 0.95f, 0.27f, 0.80f, 0.27f)
-        poly(c, w, h, 0xFF8C8C8C.toInt(), 0.80f, 0.10f, 0.95f, 0.09f, 0.95f, 0.15f, 0.80f, 0.16f)
-        p.color = 0xFF3A3A3A.toInt(); c.drawRect(w * 0.62f, h * 0.34f, w * 0.98f, h * 0.46f, p)
-        box(c, w, h, 0.80f, 0.30f, 0.94f, 0.38f, 0xFF5A6B78.toInt(), "sink")
-        // tumble dryer with a basket and folded clothes on top, air fryer on the counter
-        box(c, w, h, 0.46f, 0.28f, 0.60f, 0.46f, 0xFFE8E8E8.toInt(), "dryer", 0xFF333333.toInt())
-        p.color = 0xFFB08A5A.toInt(); r.set(w * 0.48f, h * 0.22f, w * 0.53f, h * 0.28f); c.drawRect(r, p)          // basket
-        p.color = 0xFF2E8B57.toInt(); r.set(w * 0.54f, h * 0.245f, w * 0.59f, h * 0.28f); c.drawRect(r, p)        // clothes
-        box(c, w, h, 0.64f, 0.24f, 0.72f, 0.34f, 0xFF333333.toInt(), "air fryer")
-        // the side of the fridge: close, straight ahead and a bit left, paperwork stuck on it
-        poly(c, w, h, 0xFF585E66.toInt(), 0.06f, 0.0f, 0.40f, 0.04f, 0.40f, 0.72f, 0.06f, 0.86f)
+        // the room seen from Pip's corner: far wall ahead, floor, the side wall with the window on the right
+        poly(c, w, h, 0xFF2E4238.toInt(), 0.30f, 0.10f, 0.70f, 0.10f, 0.70f, 0.40f, 0.30f, 0.40f)       // far wall
+        poly(c, w, h, 0xFF3A3328.toInt(), 0.30f, 0.40f, 0.70f, 0.40f, 0.86f, 0.88f, 0.14f, 0.88f)       // floor
+        poly(c, w, h, 0xFF34493F.toInt(), 0.70f, 0.10f, 1.00f, 0.00f, 1.00f, 0.70f, 0.70f, 0.40f)       // right wall
+        // window on the right wall, with the sink run and the air fryer at the far end
+        poly(c, w, h, 0xFFBFD8E8.toInt(), 0.76f, 0.13f, 0.95f, 0.07f, 0.95f, 0.34f, 0.76f, 0.33f)
+        poly(c, w, h, 0xFF2B2B2B.toInt(), 0.70f, 0.40f, 1.00f, 0.46f, 1.00f, 0.80f, 0.70f, 0.52f)       // side worktop
+        poly(c, w, h, 0xFF5A6B78.toInt(), 0.80f, 0.47f, 0.95f, 0.51f, 0.95f, 0.60f, 0.80f, 0.55f)       // sink
+        label(c, w, h, 0.88f, 0.66f, "sink")
+        p.color = 0xFF151515.toInt(); r.set(w * 0.71f, h * 0.31f, w * 0.77f, h * 0.42f); c.drawRoundRect(r, h * 0.015f, h * 0.015f, p)
+        label(c, w, h, 0.74f, 0.29f, "air fryer", size = 0.028f)
+        // the tumble dryer straight ahead, a basket and folded clothes on top
+        p.color = 0xFFE8E8E8.toInt(); r.set(w * 0.43f, h * 0.22f, w * 0.57f, h * 0.40f); c.drawRoundRect(r, h * 0.012f, h * 0.012f, p)
+        p.color = 0xFF9AA4AA.toInt(); c.drawCircle(w * 0.50f, h * 0.31f, h * 0.05f, p)
+        p.color = 0xFFB08A5A.toInt(); r.set(w * 0.44f, h * 0.17f, w * 0.49f, h * 0.22f); c.drawRect(r, p)
+        p.color = 0xFF2E8B57.toInt(); r.set(w * 0.51f, h * 0.19f, w * 0.56f, h * 0.22f); c.drawRect(r, p)
+        label(c, w, h, 0.50f, 0.455f, "dryer", size = 0.028f)
+        // the fridge-freezer: tall, close, on the left, paperwork on its side
+        poly(c, w, h, 0xFF8E959C.toInt(), 0.04f, 0.00f, 0.30f, 0.06f, 0.30f, 0.66f, 0.04f, 0.92f)
         p.color = 0xFFE6E4D7.toInt()
-        for (i in 0..3) { r.set(w * (0.30f + 0.02f * i), h * (0.20f + 0.06f * i), w * (0.37f + 0.01f * i), h * (0.30f + 0.06f * i)); c.drawRect(r, p) }
-        t.color = 0xFFE6E6E6.toInt(); t.textSize = h * 0.038f; c.drawText("fridge", w * 0.2f, h * 0.45f, t)
-        // worktop running out on the right with the hob; kettle and Tassimo beside Pip
-        poly(c, w, h, 0xFF2B2B2B.toInt(), 0.55f, 0.70f, 1.0f, 0.60f, 1.0f, 0.86f, 0.45f, 0.86f)
-        poly(c, w, h, 0xFF505050.toInt(), 0.70f, 0.68f, 0.92f, 0.64f, 0.95f, 0.76f, 0.72f, 0.80f)
-        t.textSize = h * 0.032f; c.drawText("hob", w * 0.82f, h * 0.73f, t)
-        box(c, w, h, 0.62f, 0.62f, 0.70f, 0.86f, 0xFF111111.toInt(), "kettle")
-        box(c, w, h, 0.30f, 0.66f, 0.40f, 0.88f, 0xFFEEE8DC.toInt(), "Tassimo", 0xFF3C3C3C.toInt())
+        for (i in 0..3) { r.set(w * (0.17f + 0.02f * i), h * (0.18f + 0.07f * i), w * (0.25f + 0.01f * i), h * (0.27f + 0.07f * i)); c.drawRect(r, p) }
+        label(c, w, h, 0.12f, 0.50f, "fridge", 0xFF222222.toInt(), 0.038f)
+        // the back worktop Pip sits on: hob (oven under it) running out to the right, kettle and Tassimo beside Pip
+        poly(c, w, h, 0xFF2B2B2B.toInt(), 0.30f, 0.66f, 0.70f, 0.52f, 1.00f, 0.80f, 1.00f, 0.92f, 0.20f, 0.92f)
+        poly(c, w, h, 0xFF505050.toInt(), 0.62f, 0.62f, 0.82f, 0.60f, 0.86f, 0.72f, 0.64f, 0.75f)
+        label(c, w, h, 0.74f, 0.70f, "hob")
+        p.color = 0xFF111111.toInt(); r.set(w * 0.58f, h * 0.70f, w * 0.65f, h * 0.90f); c.drawRoundRect(r, h * 0.02f, h * 0.02f, p)
+        label(c, w, h, 0.615f, 0.88f, "kettle", size = 0.026f)
+        p.color = 0xFFEEE8DC.toInt(); r.set(w * 0.33f, h * 0.72f, w * 0.42f, h * 0.92f); c.drawRoundRect(r, h * 0.015f, h * 0.015f, p)
+        label(c, w, h, 0.375f, 0.89f, "Tassimo", 0xFF3C3C3C.toInt(), 0.026f)
         // Pip in the corner
-        p.color = 0xFF242424.toInt(); c.drawRect(0f, h * 0.88f, w, h, p)
-        p.color = 0xFFE8433A.toInt(); r.set(w * 0.44f, h * 0.88f, w * 0.56f, h * 0.99f); c.drawRoundRect(r, h * 0.015f, h * 0.015f, p)
+        p.color = 0xFF242424.toInt(); c.drawRect(0f, h * 0.92f, w, h, p)
+        p.color = 0xFFE8433A.toInt(); r.set(w * 0.45f, h * 0.90f, w * 0.55f, h * 0.995f); c.drawRoundRect(r, h * 0.015f, h * 0.015f, p)
         p.color = 0xFF5CE1FF.toInt()
-        c.drawCircle(w * 0.475f, h * 0.935f, h * 0.012f, p); c.drawCircle(w * 0.525f, h * 0.935f, h * 0.012f, p)
+        c.drawCircle(w * 0.48f, h * 0.945f, h * 0.012f, p); c.drawCircle(w * 0.52f, h * 0.945f, h * 0.012f, p)
         // where to stand: a glowing, pulsing ring
         target?.let { s ->
             val pulse = 0.5f + 0.5f * sin(secs * 5f)
