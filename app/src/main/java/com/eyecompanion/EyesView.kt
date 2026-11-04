@@ -574,7 +574,7 @@ class EyesView(context: Context) : View(context) {
             canvas.drawText(label, volRect.left + pad, volRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         } else volRect.setEmpty()
         // mute button: awake only, just above the sleep button
-        if (mood != Mood.SLEEP && mood != Mood.LOADING && sleepChip.isNotEmpty() && !carMode) {
+        if (mood != Mood.SLEEP && mood != Mood.LOADING && sleepChip.isNotEmpty() && !carMode && muteAllowed) {
             val label = if (muted) "🤐 Pull my zip ←" else "🔇 Mute"
             chipPaint.textSize = h * 0.03f; chipPaint.color = eyeColor; chipPaint.alpha = if (muted) 200 else 95
             val pad = h * 0.022f; val tw = chipPaint.measureText(label)
@@ -764,6 +764,8 @@ class EyesView(context: Context) : View(context) {
     }
     /** Mute button (zips Pip's mouth). */
     @Volatile var muted = false
+    /** False once today's 5 zips are used up: the button disappears. */
+    @Volatile var muteAllowed = true
     /** How far the zip has been pulled open (0 closed, 1 open), while someone drags the tab. */
     @Volatile var zipOpen = 0f
     @Volatile var zipLeft = 0f; @Volatile var zipRight = 0f; @Volatile var zipY = 0f; @Volatile var zipTabX = 0f

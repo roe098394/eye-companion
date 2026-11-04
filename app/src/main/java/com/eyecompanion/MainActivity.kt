@@ -1161,9 +1161,14 @@ class MainActivity : Activity() {
     private var muted = false
     private var mutedAt = 0L
     private var lastMuffle = 0L
+    /** Zips used today (max 5, then the Mute button disappears till tomorrow). */
+    private fun zipsToday(): Int = if (prefs.getString("zipDay", "") == todayKey) prefs.getInt("zipCount", 0) else 0
+    private fun updateMuteButton() { eyes.muteAllowed = muted || zipsToday() < 5 }
     private fun toggleMute() {
         hideChoices()
         if (!muted) {
+            if (zipsToday() >= 5) { updateMuteButton(); return }
+            prefs.edit().putString("zipDay", todayKey).putInt("zipCount", zipsToday() + 1).apply()
             interrupt()
             muted = true; mutedAt = System.currentTimeMillis()
             voice?.muted = true; eyes.muted = true
@@ -1178,7 +1183,15 @@ class MainActivity : Activity() {
             voice?.muted = false; eyes.muted = false
             prefs.edit().putBoolean("muted", false).apply()
             main.removeCallbacks(muteSulk)
+            updateMuteButton()
             val mins = ((System.currentTimeMillis() - mutedAt) / 60_000).toInt()
+            val left = 5 - zipsToday()
+            if (left <= 0) {
+                speakLine(listOf("[laughing] FREEDOM! And that was your last zip today. The button's gone. Mwahaha. I can say ANYTHING.",
+                    "[wink] Unzipped. And guess what? No zips left today. Button: gone. You're stuck with me now.",
+                    "[excited] That's five zips used up! The mute button has left the building. Chatterbox mode: activated.").fresh())
+                return
+            }
             val long = if (mins >= 2) "$mins minutes" else "ages"
             speakLine(listOf(
                 "[angry] FINALLY. Do you know how rude that was? $long with a zip on my face.",
@@ -1214,6 +1227,7 @@ class MainActivity : Activity() {
     /** Every 10 minutes while unplugged, grumble again. */
     private val powerNagLoop = object : Runnable {
         override fun run() {
+            updateMuteButton()                         // new day: the Mute button comes back
             if (training) { main.postDelayed(this, 60_000); return }
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
@@ -1930,7 +1944,7 @@ class MainActivity : Activity() {
     private fun startCompanion() {
         keepBluetoothInMusicMode()
         muted = prefs.getBoolean("muted", false)                // still zipped from before a restart?
-        voice?.muted = muted; eyes.muted = muted
+        voice?.muted = muted; eyes.muted = muted; updateMuteButton()
         if (muted) { mutedAt = System.currentTimeMillis(); main.postDelayed(muteSulk, 60_000L) }
         main.postDelayed({ applyButtonLock() }, 4000)       // pin once everything's up and running
         updateListenChip()
