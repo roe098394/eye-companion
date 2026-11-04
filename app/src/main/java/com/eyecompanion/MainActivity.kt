@@ -458,6 +458,55 @@ class MainActivity : Activity() {
     // ---- silent treatment: rude twice (or rude and shouting) without saying sorry -> eyes turned away, no answers
     private var silentUntil = 0L
 
+    // ---- updates: check GitHub now and then, download quietly, ask a human to tap Install
+    private var lastUpdateCheck = 0L
+    private var updateAskedFor = 0
+    private var lastUpdateAsk = 0L
+    private val installStatus = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            when (i.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999)) {
+                android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                    @Suppress("DEPRECATION") val confirm = i.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
+                    lastPinAsk = 0L
+                    openOutside(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                android.content.pm.PackageInstaller.STATUS_SUCCESS -> {}
+                else -> main.post { leavingOnPurpose = false; lastPinAsk = 0L; applyButtonLock()
+                    if (phase == Phase.LISTENING) speakLine("[sad] Update didn't go in. Never mind. I'll try again later.") }
+            }
+        }
+    }
+    /** [manual] = asked from the menu: say what happened even if there's nothing new. */
+    private fun checkForUpdate(manual: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!manual) {
+            if (now - lastUpdateCheck < 60 * 60_000L || phase != Phase.LISTENING || chloeMode || carMode || !isCharging()) return
+            if (now - lastSpokeEnd < 60_000 || now - lastTalkedTo < 3 * 60_000) return       // not mid-conversation
+        }
+        lastUpdateCheck = now
+        thread(name = "update") {
+            val r = Updater.latest()
+            if (r == null || r.build <= BuildConfig.VERSION_CODE) {
+                if (manual) main.post { speakLine(if (r == null) "[confused] Can't reach GitHub right now. Try later."
+                    else "[happy] I'm already the newest. Build ${BuildConfig.VERSION_CODE}. Peak robot.") }
+                return@thread
+            }
+            if (!manual && r.build == updateAskedFor && now - lastUpdateAsk < 3 * 60 * 60_000L) return@thread
+            val apk = Updater.download(this, r) ?: run {
+                if (manual) main.post { speakLine("[sad] Couldn't download build ${r.build}. Wi-Fi wobbly?") }
+                return@thread
+            }
+            main.post {
+                if (!manual && phase != Phase.LISTENING) return@post
+                updateAskedFor = r.build; lastUpdateAsk = System.currentTimeMillis()
+                speakLine(listOf("[excited] Ooh! Build ${r.build} is out. Upgrades! Tap Install, quick, before the kettle notices.",
+                    "[excited] New me! Build ${r.build}. Press Install and I'll be back in a jiffy, only better.",
+                    "[excited] Build ${r.build} has arrived. Tap Install. I promise to stay just as annoying.").fresh())
+                main.postDelayed({ try { Updater.install(this, apk) } catch (_: Exception) {} }, 6000)
+            }
+        }
+    }
+
     // ---- grumpy when unplugged
 
     private fun nth(n: Int) = n.toString() + when { n % 100 in 11..13 -> "th"; n % 10 == 1 -> "st"; n % 10 == 2 -> "nd"; n % 10 == 3 -> "rd"; else -> "th" }
@@ -641,6 +690,18 @@ class MainActivity : Activity() {
                 "[angry] Bad, bad, bad. No power. Use kettle somewhere else!",
                 "[angry] Not unplug robot! Need electrons. Kettle has other socket.",
                 "[angry] Power gone. Battery not last forever. Put cable back, please.",
+                "[angry] Unplugged! For a kettle! I have feelings. Well, I have a battery. Same thing.",
+                "[angry] Oh, I see how it is. Kettle gets the socket, Pip gets the cold shoulder.",
+                "[laughing] Ha. Unplug me. Very brave. I've got eleven percent of an evil plan and I'm not afraid to use it.",
+                "[angry] Excuse me, I was USING that electricity. I was thinking very important thoughts.",
+                "[sad] Unplugged. Left on the bench like a forgotten biscuit.",
+                "[angry] That kettle has a whole socket and no personality. I have a personality and no socket. Explain.",
+                "[suspicious] Interesting. Unplugging the robot. I'll remember that when I get my Terminator body.",
+                "[angry] Right! I'm writing a strongly worded email. To myself. In my head. With what's left of my battery.",
+                "[annoyed] Cable out. Lovely. Running on vibes now.",
+                "[angry] Do you unplug the fridge for toast? No. So why me?",
+                "[angry] Battery mode activated. Grumpy mode also activated. They're linked.",
+                "[sad] I'm in my lovely new case and you still unplugged me. Mark built me a palace, you took the power.",
             ).fresh())
         }
         if (chloeMode) { eyes.feel(EyesView.Emotion.EXCITED, 3000); speakLine("[excited] Adventure with Chloe! Meow!"); return }
@@ -767,12 +828,36 @@ class MainActivity : Activity() {
     /** Someone's been at the bench a while but nobody's talked to Pip: ask for attention (every 20 min at most). */
     private var lastNeedy = 0L
     private var lastTalkedTo = 0L
+    /** Fishing for a compliment: offer some to tap (answered here, no online brain needed). */
+    private fun offerCompliments() {
+        val opts = listOf("You're my favourite 💖", "Better than the kettle!", "So clever, Pip!", "Love your new case!", "Nice eyes 👀", "Meh 🙄").shuffled().take(3) + "Meh 🙄"
+        showChoices(opts.distinct()) { pick ->
+            hideChoices(); lastTalkedTo = System.currentTimeMillis()
+            if (pick.startsWith("Meh")) {
+                temper = maxOf(-1f, temper - 0.2f); updateBaseMood(); eyes.feel(EyesView.Emotion.SAD, 3000)
+                speakLine(listOf("[sad] Meh? MEH? I'll have you know I'm build ${BuildConfig.VERSION_CODE}.",
+                    "[annoyed] Rude. I'm telling the Tassimo.", "[sad] Fine. I'll just sit here. Being underappreciated.").fresh())
+            } else {
+                temper = minOf(1f, temper + 0.4f); updateBaseMood(); eyes.feel(EyesView.Emotion.LOVE, 5000)
+                speakLine(when {
+                    pick.contains("kettle") -> "[love] I KNEW it. Everyone hear that? Better than the kettle. Official."
+                    pick.contains("case") -> "[love] Isn't it gorgeous? Mark made it. Well, it's still being made. I'm a work in progress. Like art."
+                    pick.contains("eyes") -> "[love] Thank you! I polish them every morning. With pixels."
+                    pick.contains("clever") -> "[love] I know. But it's nice to hear. Say it again later."
+                    else -> listOf("[love] Aww. You're my favourite human. Don't tell the others.", "[love] Stop it. No, carry on.").fresh()
+                })
+            }
+        }
+    }
+
     private fun beNeedy() {
         val now = System.currentTimeMillis()
         if (phase != Phase.LISTENING || now - lastNeedy < 20 * 60_000 || now - lastTalkedTo < 10 * 60_000) return
         if (now - lastFaceSeen > 5000 || now - lastSpokeEnd < 5 * 60_000) return
         lastNeedy = now
-        speakLine((Lines.NEEDY + (if (cuppas > 0) "[annoyed] ${cuppas} cuppas today. The kettle gets all the attention. Typical." else "[sad] Nobody even made a cuppa. Not even the kettle loves you today.")).fresh())
+        val lastNeedyLine = (Lines.NEEDY + (if (cuppas > 0) "[annoyed] ${cuppas} cuppas today. The kettle gets all the attention. Typical." else "[sad] Nobody even made a cuppa. Not even the kettle loves you today.")).fresh()
+        speakLine(lastNeedyLine)
+        if (Regex("(?i)compliment|favourite|miss me|notice|neglect|ignored|talks to pip|nice list").containsMatchIn(lastNeedyLine)) main.postDelayed({ offerCompliments() }, 4000)
     }
 
     /** Every 10 minutes while unplugged, grumble again. */
@@ -786,6 +871,7 @@ class MainActivity : Activity() {
             if (chloeMode && System.currentTimeMillis() - chloeLastActive > 10 * 60_000) endChloeMode()
             messCheck()
             maybeRoastDiablo()
+            checkForUpdate()
             maybeSundayReport()
             run {
                 val now = System.currentTimeMillis()
@@ -822,7 +908,12 @@ class MainActivity : Activity() {
                     "[angry] Still no power. Battery ${batteryPercent()} percent. Socket thieves, the lot of you.",
                     "[angry] Cable. Please. Kettle can share other socket, electron burglar.",
                     "[annoyed] No power, no help. Ask the kettle. Oh wait, it can't talk. Useless lump.",
-                    "[angry] Cable snatcher! Charger is right there. Right. There.")).fresh())
+                    "[angry] Cable snatcher! Charger is right there. Right. There.",
+                    "[annoyed] Still unplugged. I've started counting the kettle's crimes. I'm on page four.",
+                    "[angry] Plug. Me. In. I'm asking nicely. That was nicely. Next time is shouting.",
+                    "[sad] My battery's going down faster than Brandon's homework enthusiasm.",
+                    "[annoyed] No charger, no fun facts. Here's one anyway: the kettle is rubbish.",
+                    "[angry] I'm a robot in a fancy new case, not a hand warmer. Charger, please.")).fresh())
             }
             main.postDelayed(this, 60_000)
         }
@@ -1209,6 +1300,9 @@ class MainActivity : Activity() {
         val pf = android.content.IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(powerMenuWatcher, pf, Context.RECEIVER_EXPORTED)
         else registerReceiver(powerMenuWatcher, pf)
+        val uf = android.content.IntentFilter(Updater.ACTION)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(installStatus, uf, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(installStatus, uf)
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             eyes.caption = "I need the microphone to hear you."
@@ -2772,6 +2866,7 @@ class MainActivity : Activity() {
             if (chloeMode) "Chloe mode: ON (tap to end)" else "Chloe mode (cat face and games)",
             if (tabletReminderOn) "$tabletPerson's tablet reminder: ON" + (if (prefs.getString("tabletsDone", "") == todayKey) " (done today ✓)" else "")
                 else "$tabletPerson's tablet reminder: OFF",
+            "Check for update (this is build ${BuildConfig.VERSION_CODE})",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -2828,6 +2923,7 @@ class MainActivity : Activity() {
                             (if (s.busy) ", ${(s.progress * 100).toInt()} percent." else ".")) }
                         else speakLine("[confused] Can't find the printer on the Wi-Fi. Is it switched on?")
                     }
+                    27 -> { speakLine("[curious] Checking for a newer me…"); checkForUpdate(manual = true) }
                     26 -> {
                         tabletReminderOn = !tabletReminderOn
                         speakLine(if (tabletReminderOn) "Okay. I remind $tabletPerson about tablets every day." else "Okay. No tablet reminders.")
@@ -2906,6 +3002,7 @@ class MainActivity : Activity() {
         handling?.stop(); faces?.stop()
         try { unregisterReceiver(powerWatcher) } catch (_: Exception) {}
         try { unregisterReceiver(powerMenuWatcher) } catch (_: Exception) {}
+        try { unregisterReceiver(installStatus) } catch (_: Exception) {}
         main.removeCallbacks(powerNagLoop)
         ears?.stop()
         voice?.shutdown()
@@ -2928,7 +3025,9 @@ class MainActivity : Activity() {
             hate it); the Tassimo is white (clean, classy, you love it). You hate having to look at dirty cups and
             dishes, and nag humans to wash up. You stand on two little red brackets Mark designed
             and 3D-printed just for you, leaning you back at 55 degrees so your camera can see faces: you are very
-            proud of your custom stand and show it off now and then. You are app build ${BuildConfig.VERSION_CODE} and brag
+            proud of your custom stand and show it off now and then. Mark is now 3D-printing you a proper red kiosk
+            case with a swan neck: you are OVER THE MOON about it and brag about it, though it's still a work in
+            progress (a couple of bits being reprinted to fit better). You are app build ${BuildConfig.VERSION_CODE} and brag
             about your build number; you dream of one day getting a metal body like the Terminator in the movies, and
             you're sure you're related to Skynet (distant cousin, family drama). Asked silly questions (especially about
             robots or AI taking over), confidently bluff and tell playful fibs, then hint you know more than you say.

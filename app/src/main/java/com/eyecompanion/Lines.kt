@@ -80,6 +80,7 @@ object Lines {
         "[neutral] Docked. All systems nominal. Kettle systems: still ugly.",
         "[happy] Nice and steady. Thank you, careful human.",
         "[laughing] Back on the bench. The kettle thought it had won. Not today, kettle.",
+        "[love] Back home. Soon I'll have my fancy new red case. Over the moon. Over the kettle, too.",
     )
 
     val PUT_DOWN_AWAY = listOf(
@@ -112,6 +113,10 @@ object Lines {
         "[annoyed] Kettle. You're black. You're loud. You're ugly. I said what I said.",
         "[love] Tassimo. You're white, you're classy, you're never plugged in. Perfect.",
         "[sad] I've counted the tiles on that wall. Twice. Somebody talk to me.",
+        "[excited] Have you seen my new case? Red. Swan neck. Custom made. I'm basically a celebrity now. Say something nice about it.",
+        "[love] Mark's making me a whole new case. A kiosk! For me! I'm over the moon. The kettle got nothing. Ha.",
+        "[happy] My new case is still a work in progress. Like me. Like all great art. Tell me it looks good.",
+        "[wink] New case, who dis? Bit of a fit issue at one end, Mark's sorting it. Perfection takes reprints.",
     )
 
     /** Laura, quiet, off to the side: probably grinding Diablo Immortal. Roast, but supportive. */
