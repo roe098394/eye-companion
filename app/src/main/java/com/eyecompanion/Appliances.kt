@@ -143,8 +143,8 @@ class Appliances(private val prefs: SharedPreferences) {
         // it has to SOUND like the kettle (its pattern, a bit stricter than before) and be something new and loud;
         // a loud roar alone isn't enough any more (TV, chatter and the tap were fooling her)
         val sc = s.lastScore
-        // (the real kettle scores about 1.5; something else got through at 2.6, so the line is 2.1)
-        val strictMatch = sc < minOf(s.limit, 2.1)
+        // (the real kettle scores about 1.4; something else got through at 2.6, so the line is halfway: 2.0)
+        val strictMatch = sc < minOf(s.limit, 2.0)
         val hit = !dryerLike && strictMatch && newSound
         if (stage == 2 && hit) confirmScores.add(sc)
         s.lastLoudEnough = roaring || patternHit
