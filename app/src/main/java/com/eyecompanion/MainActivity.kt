@@ -115,7 +115,7 @@ class MainActivity : Activity() {
     private var voice: Voice? = null
     private var voskModel: Model? = null
     private var speakerModel: org.vosk.SpeakerModel? = null
-    private val voices by lazy { Voices(prefs) }
+    private val voices by lazy { Voices(prefs).also { it.keepOnly(FAMILY) } }
     /** A new voice we've just asked "who's this?" — waiting for their name. */
     private class Intro(val print: FloatArray?, val question: String, val at: Long)
     private var pendingIntro: Intro? = null
@@ -2408,7 +2408,7 @@ class MainActivity : Activity() {
         val intro = pendingIntro?.takeIf { now - it.at < 25_000 }
         pendingIntro = null
         if (intro != null) {
-            val name = Voices.parseName(text)
+            val name = Voices.parseName(text)?.let { n -> FAMILY.firstOrNull { it.equals(n, true) } }
             if (name != null) {
                 intro.print?.let { voices.remember(name, it) }
                 print?.let { voices.remember(name, it) }
@@ -2427,17 +2427,6 @@ class MainActivity : Activity() {
                 // probably still the same person as a moment ago: carry on, and learn this version of their voice
                 speaker = lastSpeaker; lastSpeakerAt = now
                 voices.remember(lastSpeaker!!, print)
-            } else if (!overheard && now - lastAskedWho > 15 * 60_000) {
-                lastAskedWho = now
-                pendingIntro = Intro(print, text, now)
-                eyes.subCaption = "You: $text"
-                speakLine(if (voices.names.isEmpty()) "New voice. Who is talking?"
-                          else "Not know this voice. Who is this?")
-                showChoices((FAMILY + voices.names).distinct().take(6) + "Someone else") { pick ->
-                    if (pick == "Someone else") speakLine("[curious] Okay, new human. Tell me your name.")
-                    else heard(pick, 1f, null, tapped = true)
-                }
-                return
             }
         }
 

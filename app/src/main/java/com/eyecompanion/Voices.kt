@@ -53,6 +53,12 @@ class Voices(private val prefs: SharedPreferences) {
 
     fun forgetAll() { people.clear(); save() }
 
+    /** Drop everyone not in [names] (clears out misheard "names"). */
+    fun keepOnly(names: Collection<String>) {
+        val keep = names.map { it.lowercase() }.toSet()
+        if (people.removeAll { it.name.lowercase() !in keep }) save()
+    }
+
     /** Do two voice prints sound like the same person? */
     fun sameVoice(a: FloatArray, b: FloatArray) = cosine(a, b) >= MATCH - 0.1f
 
