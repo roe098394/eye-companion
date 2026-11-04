@@ -93,6 +93,8 @@ class EyesView(context: Context) : View(context) {
     /** Captions fade away 10 seconds after they last changed (not during setup). */
     var caption = ""
         set(v) { if (v != field) captionAt = now(); field = v }
+    /** Live readout while testing the kettle/dryer sound ("" = hidden). */
+    @Volatile var testLine = ""
     var subCaption = ""
         set(v) { if (v != field) subCaptionAt = now(); field = v }
     @Volatile private var captionAt = 0L
@@ -515,6 +517,11 @@ class EyesView(context: Context) : View(context) {
             if (a1 > 0f) drawWrapped(canvas, caption, w / 2, h * 0.90f, w * 0.85f, textPaint)
             if (a2 > 0f && subCaption.isNotEmpty()) canvas.drawText(subCaption.take(90), w / 2, h * 0.08f, subPaint)
         }
+        // kettle / dryer test readout: low down in the middle, clear of the corner labels and the takeover HUD
+        if (testLine.isNotEmpty()) {
+            subPaint.textSize = h * 0.032f; subPaint.alpha = 220
+            canvas.drawText(testLine.take(110), w / 2, h * 0.80f, subPaint)
+        }
 
         // sleep screen: a big clock, today's cuppa count, when the brain's back, and floating zzz
         if (mood == Mood.SLEEP && sleepScreen) {
@@ -568,7 +575,7 @@ class EyesView(context: Context) : View(context) {
         }
 
         // daily allowance meter, top-left
-        if (usageText.isNotEmpty() && mood != Mood.LOADING) {
+        if (usageText.isNotEmpty() && mood != Mood.LOADING && t >= takeoverUntil) {      // hidden while the takeover HUD is up
             val c = when { usageLevel >= 90 -> Color.parseColor("#FF5A3C"); usageLevel >= 70 -> Color.parseColor("#FFB23E"); else -> eyeColor }
             usagePaint.textSize = h * 0.028f; usagePaint.color = c; usagePaint.alpha = 140
             val x = w * 0.02f; val y = h * 0.055f

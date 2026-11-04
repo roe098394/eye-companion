@@ -1246,9 +1246,9 @@ class MainActivity : Activity() {
         val until = System.currentTimeMillis() + 60_000
         val tick = object : Runnable { override fun run() {
             val pct = (snd.share * 100).toInt()
-            eyes.subCaption = "${label.replaceFirstChar { it.uppercase() }} test: match ${"%.1f".format(snd.lastScore)} (needs under ${"%.1f".format(snd.limit)})" +
+            eyes.testLine = "${label.replaceFirstChar { it.uppercase() }} test: match ${"%.1f".format(snd.lastScore)} (needs under ${"%.1f".format(snd.limit)})" +
                 (if (snd.lastLoudEnough) "" else " · too quiet") + " · recent $pct% · ${if (snd.on) "ON ✅" else "off"}"
-            if (System.currentTimeMillis() < until) main.postDelayed(this, 1000) else eyes.subCaption = ""
+            if (System.currentTimeMillis() < until) main.postDelayed(this, 1000) else eyes.testLine = ""
         } }
         main.post(tick)
     }
