@@ -1316,7 +1316,8 @@ class MainActivity : Activity() {
             .setTitle("Learn the $label sound")
             .setMessage("$status\n\n$howTo, then press Listen. Keep it quiet for 20 seconds (no talking) while I learn its sound." +
                 "\n\nBest time: when it's properly going (for the kettle, about a minute after switching on)." +
-                (if (known) "\n\nTest it shows for a minute how well what I hear matches." else ""))
+                (if (known) "\n\nTest it shows for a minute how well what I hear matches." else "") +
+                (if (snd.log.isNotEmpty()) "\n\nLast heard switching on:\n" + snd.log.joinToString("\n") else ""))
             .setPositiveButton("Listen") { _, _ ->
                 interrupt()
                 eyes.feel(EyesView.Emotion.CURIOUS, 26_000)

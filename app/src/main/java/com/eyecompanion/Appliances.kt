@@ -25,6 +25,8 @@ class Appliances(private val prefs: SharedPreferences) {
         @Volatile var lastLoudEnough = false
         /** share of recent seconds that matched (0..1), for the menu's test readout */
         @Volatile var share = 0.0
+        /** the last few times it was heard switching on, newest first (shown in the menu) */
+        val log = ArrayDeque<String>()
     }
 
     val dryer = Sound("dryer")
@@ -138,7 +140,12 @@ class Appliances(private val prefs: SharedPreferences) {
         val newSound = avg > base + 3.0                             // something louder than the kitchen was a minute ago
         val d = dryer
         val dryerLike = d.mean != null && score(d, row) < d.limit && !patternHit
-        val hit = (patternHit && !dryerLike && newSound) || roaring
+        // it has to SOUND like the kettle (its pattern, a bit stricter than before) and be something new and loud;
+        // a loud roar alone isn't enough any more (TV, chatter and the tap were fooling her)
+        val sc = s.lastScore
+        val strictMatch = sc < minOf(s.limit, 2.6)
+        val hit = !dryerLike && ((strictMatch && newSound) || (roaring && sc < 3.4))
+        if (stage == 2 && hit) confirmScores.add(sc)
         s.lastLoudEnough = roaring || patternHit
         s.history.addLast(hit); while (s.history.size > 20) s.history.removeFirst()
         s.share = s.history.count { it }.toDouble() / s.history.size
@@ -153,8 +160,16 @@ class Appliances(private val prefs: SharedPreferences) {
         }
         when (stage) {
             0 -> if (counted()) { stage = 1; stageAt = now; run1 = 0; misses = 0; onMaybe(s) }
-            1 -> if (now - stageAt >= 3000) { stage = 2; run1 = 0; misses = 0 }          // a little pause, then check again
-            2 -> if (counted()) { stage = 0; run1 = 0; s.on = true; s.onSince = now; quiet = 0; onChange(s, true) }
+            1 -> if (now - stageAt >= 3000) { stage = 2; run1 = 0; misses = 0; confirmScores.clear() }          // a little pause, then check again
+            2 -> if (counted()) {
+                stage = 0; run1 = 0; s.on = true; s.onSince = now; quiet = 0
+                val avgSc = if (confirmScores.isEmpty()) sc else confirmScores.average()
+                s.log.addFirst(java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.UK).format(java.util.Date(now)) +
+                    "  match ${"%.1f".format(avgSc)}" + (if (roaring) "  loud" else ""))
+                while (s.log.size > 8) s.log.removeLast()
+                confirmScores.clear()
+                onChange(s, true)
+            }
                  else if (now - stageAt > 18_000) { stage = 0; run1 = 0 }               // didn't confirm: never mind
         }
     }
@@ -163,6 +178,7 @@ class Appliances(private val prefs: SharedPreferences) {
     private val recent = ArrayDeque<Double>()
     private fun baseline(): Double { val l = recent.sorted(); return l[l.size / 4] }
     private var quiet = 0; private var misses = 0
+    private val confirmScores = ArrayList<Double>()
 
     private fun finishLearning(s: Sound) {
         val rows = learnRows; learning = null
