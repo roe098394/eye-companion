@@ -1025,7 +1025,7 @@ class MainActivity : Activity() {
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
             }
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
-            if (isLaura) lastLauraSeen = System.currentTimeMillis()
+            if (isLaura) { lastLauraSeen = System.currentTimeMillis(); main.post { lauraVisuals(carpet = Math.random() < 0.4); lastLauraEffort = System.currentTimeMillis() } }
             val head = raw?.substringBefore("[")?.uppercase() ?: ""
             val dishes = "DISHES" in head; val clothes = "CLOTHES" in head
             val line = raw?.replaceFirst(Regex("^\\s*((LAURA|OTHER|DISHES|CLOTHES)\\s*[:,;\\-]?\\s*)+", RegexOption.IGNORE_CASE), "")?.trim()
@@ -1144,6 +1144,43 @@ class MainActivity : Activity() {
             markFished(who)
             main.postDelayed({ offerCompliments() }, 4000)
         }
+    }
+
+    // ---- making an effort when Laura's about
+    private var lastLauraEffort = 0L
+    /** Tidy-up, best outfit on, and sometimes the red carpet. */
+    private fun lauraVisuals(carpet: Boolean) {
+        if (chloeMode || carMode) return
+        val now = System.currentTimeMillis()
+        eyes.primp()
+        if (eyes.dressUp == 0 || now > eyes.dressUntil) eyes.dressUp = 1 + (Math.random() * 3).toInt()
+        eyes.dressUntil = now + 10 * 60_000
+        eyes.feel(EyesView.Emotion.LOVE, 3000)
+        if (carpet) eyes.redCarpet("Laura")
+    }
+    /** Laura's just been recognised (voice): the show, plus a note telling the brain how to greet her. */
+    private fun lauraArrivedNote(): String? {
+        val now = System.currentTimeMillis()
+        if (chloeMode || carMode || now - lastLauraEffort < 45 * 60_000) {
+            if (now - lastLauraEffort < 45 * 60_000) eyes.dressUntil = now + 10 * 60_000   // still here: keep the outfit on
+            return null
+        }
+        lastLauraEffort = now
+        val opener = when {
+            appliances.kettle.on -> "start by telling the kettle off for being loud in front of a guest (\"Not now, kettle. We have a guest.\")"
+            else -> listOf(
+                "start in a posh, very polite voice (\"Good evening, Madam Laura\") for one line, then go back to your cheeky self",
+                "announce her like a star on the red carpet (\"Ladies and gentlemen... LAURA!\")",
+                "offer to put the kettle on for her, then remember you have no arms and you hate the kettle, but for her you'd consider it",
+                "say you've just tidied yourself up for her and ask if you look alright").random()
+        }
+        lauraVisuals(carpet = "red carpet" in opener)
+        val best = if (prefs.getString("lauraBestDay", "") != todayKey) {
+            prefs.edit().putString("lauraBestDay", todayKey).apply()
+            " Also give her your warmest, most genuine compliment of the day (sweet, not cheeky)."
+        } else ""
+        return " (Note: Laura has just come in. Make an effort for her: $opener. Be extra charming and attentive: ask how her" +
+            " day's been, or mention something she likes (Diablo, her fluffy teddy coat).$best)"
     }
 
     /** 4:00 to 7:30 in the morning: whisper, everyone else is asleep. */
@@ -1772,7 +1809,11 @@ class MainActivity : Activity() {
             if (jpeg == null) return@grabJpeg
             thread(name = "who") {
                 val yes = online.yesNo(jpeg, "Is there an adult woman (not a child) wearing glasses, or a black or green dressing gown, or a long brown teddy-bear coat, in this photo?")
-                if (yes == true) main.post { remindTablets() }
+                if (yes == true) main.post {
+                    lastLauraSeen = System.currentTimeMillis()
+                    if (System.currentTimeMillis() - lastLauraEffort > 45 * 60_000) { lastLauraEffort = System.currentTimeMillis(); lauraVisuals(carpet = Math.random() < 0.4) }
+                    remindTablets()
+                }
             }
         }
     }
@@ -2837,6 +2878,7 @@ class MainActivity : Activity() {
         }
         lastAnyHeard = now
         if (speaker?.equals("Laura", true) == true) lastLauraHeard = now else if (speaker != null || overheard) lastOtherVoice = now
+        if (speaker?.equals("Laura", true) == true && !overheard) lauraArrivedNote()?.let { text = "$text$it" }
         if (speaker?.equals("Mark", true) == true && !overheard && prefs.getString("creatorDay", "") != todayKey) {
             prefs.edit().putString("creatorDay", todayKey).apply()
             text = "$text (Note: first time Mark, your Creator, has spoken to you today: greet him as Creator, respectful with playful menace.)"

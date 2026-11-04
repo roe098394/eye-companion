@@ -222,7 +222,8 @@ class EyesView(context: Context) : View(context) {
                 val p = (t - blinkStart) / 150f
                 if (p >= 1f) {
                     blinkStart = -1
-                    nextBlink = t + if (Random.nextFloat() < 0.2f) 180L else Random.nextLong(2500, 6500)
+                    nextBlink = t + if (blinkBurst > 0) { blinkBurst--; 120L }       // fluttery blinks while primping
+                        else if (Random.nextFloat() < 0.2f) 180L else Random.nextLong(2500, 6500)
                 } else blink = abs(1f - 2f * p)
             }
         }
@@ -514,6 +515,12 @@ class EyesView(context: Context) : View(context) {
         }
 
         if (coffee && !carMode && mood != Mood.SLEEP && mood != Mood.LOADING) drawCoffee(canvas, w, h, secs, col)
+
+        // Laura's here: best outfit on (a bow, a flower or a top hat), a quick tidy-up and a red carpet
+        if (dressUp != 0 && !carMode && mood != Mood.LOADING && mood != Mood.SLEEP && t < dressUntil)
+            drawOutfit(canvas, cx + gap / 2 + eyeW / 2, cy - eyeH * 0.5f * max(0.35f, openNow) - eyeH * 0.05f, eyeW, secs)
+        if (t < primpUntil && !carMode) drawPrimp(canvas, cx, cy - eyeH * 0.5f * max(0.35f, openNow), gap + eyeW * 2, eyeW, eyeH, (t - primpSince) / 1000f)
+        if (t < carpetUntil && !carMode) drawCarpet(canvas, w, h, (t - carpetSince) / 1000f)
 
         // seasonal hat on the left eye
         if (!carMode && mood != Mood.LOADING && (season == "xmas" || season == "party"))
@@ -829,6 +836,101 @@ class EyesView(context: Context) : View(context) {
             c.drawText(if (i == worst && v >= 5) "💀$v" else "$v", x + bw / 2, bottom - bh - numH * 0.2f, chartText)
             chartText.textSize = labelH * 0.75f; chartText.alpha = if (i == weekToday) 220 else 110
             c.drawText("MTWTFSS"[i].toString(), x + bw / 2, bottom + labelH * 0.85f, chartText)
+        }
+    }
+
+    // ---- making an effort for Laura
+    /** 1 bow, 2 flower, 3 top hat (on the right eye), until dressUntil. */
+    @Volatile var dressUp = 0
+    @Volatile var dressUntil = 0L
+    @Volatile private var primpSince = 0L
+    @Volatile private var primpUntil = 0L
+    @Volatile private var carpetSince = 0L
+    @Volatile private var carpetUntil = 0L
+    @Volatile var carpetName = ""
+    /** A quick "fix my hair": a comb swipes across the top, sparkles, fast blinks. */
+    fun primp() { primpSince = now(); primpUntil = primpSince + 2600; blinkBurst = 3; nextBlink = now() }
+    /** Drumroll, spotlight sweep and a name in lights. */
+    fun redCarpet(name: String) { carpetName = name; carpetSince = now(); carpetUntil = carpetSince + 4500 }
+    @Volatile var blinkBurst = 0
+    private val outfitPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private fun drawOutfit(c: Canvas, x: Float, baseY: Float, eyeW: Float, secs: Float) {
+        val sway = sin(secs * 1.6f) * eyeW * 0.03f
+        when (dressUp) {
+            1 -> {                                                        // a big pink bow
+                outfitPaint.color = Color.parseColor("#FF5FA8")
+                val bx = x + eyeW * 0.25f + sway; val by = baseY - eyeW * 0.12f
+                val l = android.graphics.Path().apply { moveTo(bx, by); lineTo(bx - eyeW * 0.42f, by - eyeW * 0.22f); lineTo(bx - eyeW * 0.42f, by + eyeW * 0.22f); close() }
+                val r = android.graphics.Path().apply { moveTo(bx, by); lineTo(bx + eyeW * 0.42f, by - eyeW * 0.22f); lineTo(bx + eyeW * 0.42f, by + eyeW * 0.22f); close() }
+                c.drawPath(l, outfitPaint); c.drawPath(r, outfitPaint)
+                outfitPaint.color = Color.parseColor("#D93E86"); c.drawCircle(bx, by, eyeW * 0.1f, outfitPaint)
+            }
+            2 -> {                                                        // a flower tucked over the eye
+                val fx = x + eyeW * 0.3f + sway; val fy = baseY - eyeW * 0.1f
+                outfitPaint.color = Color.parseColor("#FFD84A")
+                for (k in 0 until 6) {
+                    val a = k * Math.PI.toFloat() / 3f + secs * 0.3f
+                    c.drawCircle(fx + kotlin.math.cos(a) * eyeW * 0.15f, fy + sin(a) * eyeW * 0.15f, eyeW * 0.11f, outfitPaint)
+                }
+                outfitPaint.color = Color.parseColor("#FF8A3C"); c.drawCircle(fx, fy, eyeW * 0.1f, outfitPaint)
+            }
+            else -> {                                                     // a dapper top hat, tipped a little
+                c.save(); c.rotate(8f + sway / eyeW * 40f, x, baseY)
+                outfitPaint.color = Color.parseColor("#1C1C1C")
+                rect.set(x - eyeW * 0.6f, baseY - eyeW * 0.1f, x + eyeW * 0.6f, baseY + eyeW * 0.02f); c.drawRoundRect(rect, eyeW * 0.05f, eyeW * 0.05f, outfitPaint)
+                rect.set(x - eyeW * 0.38f, baseY - eyeW * 0.85f, x + eyeW * 0.38f, baseY - eyeW * 0.05f); c.drawRect(rect, outfitPaint)
+                outfitPaint.color = Color.parseColor("#C0283A")
+                rect.set(x - eyeW * 0.38f, baseY - eyeW * 0.25f, x + eyeW * 0.38f, baseY - eyeW * 0.13f); c.drawRect(rect, outfitPaint)
+                c.restore()
+            }
+        }
+    }
+
+    private fun sparkle(c: Canvas, x: Float, y: Float, r: Float) {
+        val p = android.graphics.Path().apply {
+            moveTo(x, y - r); quadTo(x, y, x + r, y); quadTo(x, y, x, y + r); quadTo(x, y, x - r, y); quadTo(x, y, x, y - r); close()
+        }
+        c.drawPath(p, outfitPaint)
+    }
+
+    private fun drawPrimp(c: Canvas, cx: Float, topY: Float, span: Float, eyeW: Float, eyeH: Float, age: Float) {
+        val p = (age / 1.4f).coerceIn(0f, 1f)                           // the comb swipes left to right in 1.4 s
+        if (age < 1.6f) {
+            val combX = cx - span / 2 + span * p; val combY = topY - eyeW * 0.18f
+            outfitPaint.color = Color.parseColor("#FF8FC8"); outfitPaint.alpha = 240
+            rect.set(combX - eyeW * 0.4f, combY - eyeW * 0.12f, combX + eyeW * 0.4f, combY); c.drawRoundRect(rect, eyeW * 0.05f, eyeW * 0.05f, outfitPaint)
+            for (k in 0 until 9) {
+                val tx = combX - eyeW * 0.36f + k * eyeW * 0.09f
+                rect.set(tx - eyeW * 0.02f, combY, tx + eyeW * 0.02f, combY + eyeW * 0.14f); c.drawRect(rect, outfitPaint)
+            }
+        }
+        outfitPaint.color = Color.WHITE
+        for (k in 0 until 6) {                                            // sparkles twinkling around the eyes
+            val tw = sin(age * 9f + k * 1.3f)
+            if (tw < 0f) continue
+            outfitPaint.alpha = (255 * tw * (1f - (age / 2.6f).coerceIn(0f, 1f) * 0.6f)).toInt()
+            val sx = cx + (if (k % 2 == 0) -1 else 1) * span * (0.35f + 0.12f * (k / 2))
+            val sy = topY + eyeH * (0.1f + 0.3f * (k % 3))
+            sparkle(c, sx, sy, eyeW * (0.06f + 0.05f * tw))
+        }
+        outfitPaint.alpha = 255
+    }
+
+    private fun drawCarpet(c: Canvas, w: Float, h: Float, age: Float) {
+        // a spotlight sweeping in from the left, then the name in lights
+        val sweep = (age / 1.8f).coerceIn(0f, 1f)
+        val lx = w * (0.1f + 0.4f * sweep)
+        outfitPaint.color = Color.parseColor("#FFF3B0"); outfitPaint.alpha = (60 * (1f - (age - 3.5f).coerceIn(0f, 1f))).toInt()
+        val beam = android.graphics.Path().apply { moveTo(w * 0.5f, -h * 0.05f); lineTo(lx - w * 0.18f, h * 1.05f); lineTo(lx + w * 0.18f, h * 1.05f); close() }
+        c.drawPath(beam, outfitPaint)
+        if (age > 1.6f) {
+            val a = ((age - 1.6f) / 0.4f).coerceIn(0f, 1f) * (1f - (age - 3.8f).coerceIn(0f, 0.7f) / 0.7f)
+            hudPaint.textAlign = Paint.Align.CENTER; hudPaint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            hudPaint.color = Color.parseColor("#FFD84A"); hudPaint.alpha = (255 * a).toInt()
+            hudPaint.textSize = h * 0.035f; c.drawText("✨ LADIES AND GENTLEMEN ✨", w / 2, h * 0.11f, hudPaint)
+            hudPaint.textSize = h * (0.085f + 0.01f * sin(age * 6f)); c.drawText(carpetName.uppercase(), w / 2, h * 0.2f, hudPaint)
+            hudPaint.textAlign = Paint.Align.LEFT; hudPaint.typeface = android.graphics.Typeface.MONOSPACE
         }
     }
 
