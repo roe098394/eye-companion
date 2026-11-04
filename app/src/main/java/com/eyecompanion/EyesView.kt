@@ -550,11 +550,21 @@ class EyesView(context: Context) : View(context) {
             }
             if (xmasNote.isNotEmpty()) { sleepPaint.textSize = h * 0.032f; sleepPaint.alpha = 140; canvas.drawText(xmasNote, w * 0.84f, h * 0.48f, sleepPaint) }
             if (napNote.isNotEmpty()) drawAlarmClock(canvas, w * 0.82f, h * 0.24f, h * 0.085f, napNote, secs)
-            for (i in 0..2) {
-                val ph = ((secs * 0.35f + i / 3f) % 1f)
-                sleepPaint.textSize = h * (0.035f + 0.04f * ph); sleepPaint.alpha = (200 * (1f - ph)).toInt()
-                canvas.drawText("z", cx + eyeW * (1.3f + ph * 0.9f), cy - eyeH * (0.4f + ph * 2.2f), sleepPaint)
+            // zzz: little Z's drifting up and away from the sleeping eyes, wobbling, growing, fading out
+            val startX = cx + gap / 2 + eyeW * 0.9f; val startY = cy - h * 0.04f
+            val bold = sleepPaint.typeface
+            sleepPaint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            for (i in 0..3) {
+                val ph = ((secs * 0.22f + i / 4f) % 1f)                      // each Z takes ~4.5 s to float away
+                val zx = startX + w * 0.16f * ph + sin(secs * 2.2f + i * 1.7f) * h * 0.015f
+                val zy = startY - h * 0.30f * ph
+                val fade = (if (ph < 0.15f) ph / 0.15f else 1f) * (1f - ph)
+                sleepPaint.textSize = h * (0.04f + 0.06f * ph); sleepPaint.alpha = (235 * fade).toInt().coerceIn(0, 255)
+                canvas.save(); canvas.rotate(-12f + 18f * ph, zx, zy)
+                canvas.drawText(if (i % 2 == 0) "Z" else "z", zx, zy, sleepPaint)
+                canvas.restore()
             }
+            sleepPaint.typeface = bold
         }
 
         // daily allowance meter, top-left
