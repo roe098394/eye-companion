@@ -2527,6 +2527,15 @@ class MainActivity : Activity() {
             prefs.edit().putString("creatorDay", todayKey).apply()
             text = "$text (Note: first time Mark, your Creator, has spoken to you today: greet him as Creator, respectful with playful menace.)"
         }
+        if (speaker?.equals("Brandon", true) == true && !overheard && !chloeMode &&
+            now - prefs.getLong("brandonBanter", 0L) > 3 * 3600_000L) {
+            // Brandon (20) often wanders in with no top on: friendly, over-the-top robot banter, now and then
+            prefs.edit().putLong("brandonBanter", now).apply()
+            text = "$text (Note: this is Brandon, he's 20 and often has no top on in the kitchen. Answer, then add ONE short bit of friendly, " +
+                "over-the-top robot banter to make him laugh and go a bit red: e.g. call him 'muscles', 'Player One', or 'the human " +
+                "who refuses shirts', say he's showing off, or that even the kettle wears more than him. Light and family-friendly, " +
+                "never romantic or rude.)"
+        }
         if (speaker?.equals("Mark", true) == true && rubbishDue() && now - lastRubbishAsk > 20 * 60_000 && !overheard) {
             lastRubbishAsk = now
             text = "$text (Note: it's after 8pm and Mark hasn't taken the rubbish out tonight: answer, then nag him to take it out and ask if he has.)"
