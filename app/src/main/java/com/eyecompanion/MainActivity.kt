@@ -1171,7 +1171,7 @@ class MainActivity : Activity() {
             }
             if (!on) { kettleOffAt = now; kettleForgotten = false }
             if (!chloeMode && phase != Phase.ASLEEP && phase != Phase.SETUP) {
-                if (on) { takeoverMode(240_000L); eyes.stareAt(1.8f, 0.12f, 4 * 60_000L) }      // red takeover glare at the kettle, far right
+                if (on) { takeoverMode(240_000L); eyes.stareAt(-1.8f, 0.12f, 4 * 60_000L) }      // red takeover glare at the kettle (on her right = screen left)
                 else if (System.currentTimeMillis() < eyes.takeoverUntil) {                          // it's stopped: stand down, look back
                     eyes.takeoverUntil = 0L; eyes.stareAt(0f, 0f, 1); eyes.feel(EyesView.Emotion.NEUTRAL, 1)
                 }
@@ -2121,7 +2121,7 @@ class MainActivity : Activity() {
         Appliances.tap = { b, n, r -> appliances.feed(b, n, r) }
         appliances.onChange = { snd, on -> main.post { applianceChanged(snd, on) } }
         appliances.onMaybe = { _ -> main.post {                          // "was that the kettle?": a quick suspicious glance
-            if (phase == Phase.LISTENING && !chloeMode) { eyes.stareAt(1.6f, 0.1f, 2500); eyes.feel(EyesView.Emotion.SUSPICIOUS, 2500) }
+            if (phase == Phase.LISTENING && !chloeMode) { eyes.stareAt(-1.6f, 0.1f, 2500); eyes.feel(EyesView.Emotion.SUSPICIOUS, 2500) }
         } }
         muted = prefs.getBoolean("muted", false)                // still zipped from before a restart?
         voice?.muted = muted; eyes.muted = muted; updateMuteButton()
