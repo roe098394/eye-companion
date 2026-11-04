@@ -141,7 +141,8 @@ class EyesView(context: Context) : View(context) {
         val t = now()
         val dt = if (lastFrame == 0L) 0.016f else min(0.1f, (t - lastFrame) / 1000f)
         lastFrame = t
-        val secs = t / 1000f
+        // seconds within the hour: the full clock time is too big for a Float and froze every animation
+        val secs = (t % 3_600_000L) / 1000f
 
         // --- targets for the current mood ---
         var tOpen = 1f; var tScale = 1f; var tHappy = 0.12f
