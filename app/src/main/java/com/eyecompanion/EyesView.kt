@@ -341,6 +341,30 @@ class EyesView(context: Context) : View(context) {
             blushPaint.alpha = 255; canvas.drawPath(nose, blushPaint)
         }
 
+        // mute button on: a zip across where a mouth would be (Pip hates it)
+        if (muted && !carMode && mood != Mood.LOADING && mood != Mood.SLEEP) {
+            val half = (gap / 2 + eyeW) * 0.62f
+            val my = cy + eyeH * 0.62f + (if (feeling == Emotion.ANGRY) sin(secs * 30f) * eyeW * 0.012f else 0f)
+            val zipCol = Color.parseColor("#C8CCD2")
+            mugLine.color = zipCol; mugLine.alpha = 255; mugLine.strokeWidth = eyeW * 0.05f
+            canvas.drawLine(cx - half, my, cx + half, my, mugLine)
+            mugLine.strokeWidth = eyeW * 0.03f
+            val n = 18
+            for (i in 0..n) {                                   // little interlocking teeth
+                val x = cx - half + (2 * half) * i / n
+                val up = if (i % 2 == 0) -1f else 1f
+                canvas.drawLine(x, my, x, my + up * eyeW * 0.07f, mugLine)
+            }
+            // the zip pull, hanging off the right-hand end
+            val px = cx + half; val py = my
+            mugLine.strokeWidth = eyeW * 0.035f
+            r0.set(px - eyeW * 0.05f, py - eyeW * 0.04f, px + eyeW * 0.07f, py + eyeW * 0.06f)
+            canvas.drawRoundRect(r0, eyeW * 0.02f, eyeW * 0.02f, mugLine)
+            r0.set(px - eyeW * 0.03f, py + eyeW * 0.06f, px + eyeW * 0.05f, py + eyeW * 0.26f)
+            canvas.drawRoundRect(r0, eyeW * 0.04f, eyeW * 0.04f, mugLine)
+            mugLine.color = col
+        }
+
         // round specs while one of the online brains is resting
         if (glasses && !carMode && mood != Mood.LOADING) {
             specLine.color = Color.parseColor("#E8E2D0"); specLine.strokeWidth = eyeW * 0.07f; specLine.alpha = 220
@@ -534,6 +558,17 @@ class EyesView(context: Context) : View(context) {
             canvas.drawRoundRect(volRect, volRect.height() / 2, volRect.height() / 2, chipBox)
             canvas.drawText(label, volRect.left + pad, volRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         } else volRect.setEmpty()
+        // mute button: awake only, just above the sleep button
+        if (mood != Mood.SLEEP && mood != Mood.LOADING && sleepChip.isNotEmpty() && !carMode) {
+            val label = if (muted) "🤐 Unmute" else "🔇 Mute"
+            chipPaint.textSize = h * 0.03f; chipPaint.color = eyeColor; chipPaint.alpha = if (muted) 200 else 95
+            val pad = h * 0.022f; val tw = chipPaint.measureText(label)
+            val top = h * 0.9f - (chipPaint.textSize + pad * 1.6f) - h * 0.025f
+            muteRect.set(w * 0.975f - tw - pad * 2, top, w * 0.975f, top + chipPaint.textSize + pad * 1.6f)
+            chipBox.color = eyeColor; chipBox.alpha = chipPaint.alpha / 3; chipBox.strokeWidth = h * 0.004f
+            canvas.drawRoundRect(muteRect, muteRect.height() / 2, muteRect.height() / 2, chipBox)
+            canvas.drawText(label, muteRect.left + pad, muteRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
+        } else muteRect.setEmpty()
 
         postInvalidateOnAnimation()
     }
@@ -709,6 +744,17 @@ class EyesView(context: Context) : View(context) {
         if (mood != Mood.SLEEP || !sleepScreen || volRect.isEmpty) return false
         val m = height * 0.03f
         val hit = x >= volRect.left - m && x <= volRect.right + m && y >= volRect.top - m && y <= volRect.bottom + m
+        if (hit) chipTappedAt = now()
+        return hit
+    }
+    /** Mute button (zips Pip's mouth). */
+    @Volatile var muted = false
+    private val muteRect = RectF()
+    private val r0 = RectF()
+    fun muteHit(x: Float, y: Float): Boolean {
+        if (muteRect.isEmpty) return false
+        val m = height * 0.02f
+        val hit = x >= muteRect.left - m && x <= muteRect.right + m && y >= muteRect.top - m && y <= muteRect.bottom + m
         if (hit) chipTappedAt = now()
         return hit
     }

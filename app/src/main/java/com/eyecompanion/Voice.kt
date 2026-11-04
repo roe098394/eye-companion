@@ -139,7 +139,11 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         try { tts.setPitch(pitch); tts.setSpeechRate(rate) } catch (_: Exception) {}
     }
 
+    /** Mouth zipped (mute button): nothing gets said. */
+    @Volatile var muted = false
+
     private fun say(raw: String) {
+        if (muted) return
         val clean = cleanForSpeech(raw)
         if (clean.isBlank()) return
         val online = activeKey().isNotBlank()
@@ -156,6 +160,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     private fun sayNow(clean: String) {
+        if (muted) return
         val key = activeKey()
         if (key.isNotBlank()) { sayCloud(clean, key, cloudVoice); return }
         sayTablet(clean)

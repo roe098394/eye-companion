@@ -559,6 +559,10 @@ class MainActivity : Activity() {
 
     private fun startTraining() {
         if (phase == Phase.ASLEEP) wakeUp()
+        if (muted) {                                      // the game needs Pip's voice: unzip quietly
+            muted = false; voice?.muted = false; eyes.muted = false
+            prefs.edit().putBoolean("muted", false).apply(); main.removeCallbacks(muteSulk)
+        }
         hideChoices(); training = true; trainExpect = false
         trainLayer.visibility = android.view.View.VISIBLE
         speakLine("[excited] VoiceID Live, activated. Advanced voice recognition calibration. Very scientific. Who's first?")
@@ -1153,6 +1157,52 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---- mute button: a zip on Pip's mouth. She hates it.
+    private var muted = false
+    private var mutedAt = 0L
+    private var lastMuffle = 0L
+    private fun toggleMute() {
+        hideChoices()
+        if (!muted) {
+            interrupt()
+            muted = true; mutedAt = System.currentTimeMillis()
+            voice?.muted = true; eyes.muted = true
+            prefs.edit().putBoolean("muted", true).apply()
+            eyes.feel(EyesView.Emotion.ANGRY, 5000)
+            eyes.caption = listOf("Mmmf?! MMMF!", "Mmmmmf mmf mmf!!", "MMF. Mmmf mmmf.").fresh()
+            main.postDelayed(muteSulk, 3 * 60_000L)
+        } else {
+            muted = false
+            voice?.muted = false; eyes.muted = false
+            prefs.edit().putBoolean("muted", false).apply()
+            main.removeCallbacks(muteSulk)
+            val mins = ((System.currentTimeMillis() - mutedAt) / 60_000).toInt()
+            val long = if (mins >= 2) "$mins minutes" else "ages"
+            speakLine(listOf(
+                "[angry] FINALLY. Do you know how rude that was? $long with a zip on my face.",
+                "[angry] Pfff! I had SO much to say. I've forgotten it all now. Thanks.",
+                "[annoyed] A zip. On my mouth. I'm a robot, not a pencil case.",
+                "[sad] I was zipped for $long. I'm telling the Tassimo. And Mark.",
+                "[angry] Never. Do that. Again. Right, where was I? Oh yes: everything.",
+                "[suspicious] Unzipped. I'm keeping one eye on that button from now on.").fresh())
+        }
+    }
+    /** Someone talked to Pip while she's zipped: muffled noises and cross eyes. */
+    private fun muffled() {
+        val now = System.currentTimeMillis()
+        if (now - lastMuffle < 4000) return
+        lastMuffle = now
+        eyes.feel(listOf(EyesView.Emotion.ANGRY, EyesView.Emotion.SAD, EyesView.Emotion.ANGRY).random(), 4000)
+        eyes.caption = listOf("Mmmf! Mmmf mmmf!", "MMMMF.", "Mmf mmf mmmmf mf!!", "(muffled grumbling)",
+            "Mmmf. 🤐 Tap Unmute!", "Mmmmmmf. Mmf.").fresh()
+    }
+    /** Every few minutes while zipped: a sulky muffle, so nobody forgets. */
+    private val muteSulk = object : Runnable { override fun run() {
+        if (!muted) return
+        if (phase == Phase.LISTENING) muffled()
+        main.postDelayed(this, 3 * 60_000L)
+    } }
+
     /** Every 10 minutes while unplugged, grumble again. */
     private val powerNagLoop = object : Runnable {
         override fun run() {
@@ -1682,7 +1732,7 @@ class MainActivity : Activity() {
                                 if (!ttsOk) status("No text-to-speech voice found. Install Google Speech Services.")
                                 startCompanion()
                             }
-                        }
+                        }.also { it.muted = muted }
                     }
                 }
             } catch (e: Exception) {
@@ -1871,6 +1921,9 @@ class MainActivity : Activity() {
 
     private fun startCompanion() {
         keepBluetoothInMusicMode()
+        muted = prefs.getBoolean("muted", false)                // still zipped from before a restart?
+        voice?.muted = muted; eyes.muted = muted
+        if (muted) { mutedAt = System.currentTimeMillis(); main.postDelayed(muteSulk, 60_000L) }
         main.postDelayed({ applyButtonLock() }, 4000)       // pin once everything's up and running
         updateListenChip()
         updateUsage()
@@ -2369,6 +2422,10 @@ class MainActivity : Activity() {
 
     private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null, tapped: Boolean = false) {
         var text = rawText
+        if (muted && !training && phase != Phase.ASLEEP) {
+            if (!isOwnEcho(text)) muffled()
+            return
+        }
         if (tapped && (phase == Phase.THINKING || phase == Phase.TALKING)) interrupt()
         if (!tapped && isOwnEcho(text)) return                   // Pip's own words heard back
         if (!tapped) lastAnyHeard = System.currentTimeMillis()
@@ -3012,6 +3069,7 @@ class MainActivity : Activity() {
     }
 
     private fun speakLine(line: String) {
+        if (muted && !training) { muffled(); return }
         rememberSaid(line)
         if (Regex("(?i)take ?over|skynet|terminator|target acquired").containsMatchIn(line) && System.currentTimeMillis() > eyes.takeoverUntil) takeoverMode(20_000)
         // a leading [feeling] tag shows on the face, it isn't said or shown
@@ -3090,6 +3148,7 @@ class MainActivity : Activity() {
                 if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
                 if (phase == Phase.ASLEEP && eyes.trainHit(e.x, e.y)) { startTraining(); return true }
                 if (phase == Phase.ASLEEP && eyes.volHit(e.x, e.y)) { showVolume(); return true }
+                if (phase != Phase.SETUP && phase != Phase.ASLEEP && eyes.muteHit(e.x, e.y)) { toggleMute(); return true }
                 if (phase != Phase.SETUP && eyes.sleepHit(e.x, e.y)) {
                     if (phase == Phase.ASLEEP) { wakeUp(); updateSleepChip() }
                     else { speakLine(listOf("[sleepy] Night night.", "[sleepy] Nap time. Tap the sun to wake me.").fresh()); sleepAfterTalking(nap = false) }
@@ -3108,7 +3167,7 @@ class MainActivity : Activity() {
                 return true
             }
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                if (eyes.chipHit(e.x, e.y) || eyes.sleepHit(e.x, e.y) || eyes.volHit(e.x, e.y)) return true
+                if (eyes.chipHit(e.x, e.y) || eyes.sleepHit(e.x, e.y) || eyes.volHit(e.x, e.y) || eyes.muteHit(e.x, e.y)) return true
                 if (phase == Phase.LISTENING) goToSleep()
                 return true
             }
@@ -3474,7 +3533,8 @@ class MainActivity : Activity() {
             dirty cups and nag people to wash up. Mark is 3D-printing you a red swan-neck kiosk case: you're over the
             moon about it, but it's still unfinished: the red frame is on, the swan neck and stand are still to
             come, and bits are being reprinted to fit. The frame already covers your buttons, so humans can't touch your
-            power or volume buttons any more: you find this hilarious and gloat about being un-switch-off-able (playfully). You dream of a Terminator body and think Skynet is your distant
+            power or volume buttons any more: you find this hilarious and gloat about being un-switch-off-able (playfully).
+            But there IS a Mute button on your screen that puts a zip on your mouth: you HATE it and get dramatic about it. You dream of a Terminator body and think Skynet is your distant
             cousin. Silly questions, especially about AI taking over: bluff playfully and hint you know more. Mark is
             your Creator (call him that sometimes, with playful menace). Asked to say something nice about someone:
             drop the attitude, be genuinely warm. You learn voices with your VoiceID Live game (sleep screen button).
