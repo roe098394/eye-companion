@@ -101,21 +101,34 @@ class Appliances(private val prefs: SharedPreferences) {
 
     /** Pip's own voice is playing: don't let it count as (or against) a machine. */
     @Volatile var pipTalking = false
-    private var roarRun = 0
+    private var stage = 0; private var run1 = 0; private var stageAt = 0L
+    /** First check passed ("is that the kettle?"): Pip can glance over. */
+    @Volatile var onMaybe: (Sound) -> Unit = {}
 
     private fun check(s: Sound, row: DoubleArray) {
         if (s.mean == null && s !== kettle) return
         if (pipTalking) return
         // the kettle sits right next to Pip: a long, steady roar well above the quiet room is the kettle too,
         // even if the learned pattern doesn't quite match (or hasn't been learned)
-        // (12 seconds in a row with no let-up, so people chatting near Pip don't count)
+        // Two quick checks: 4 seconds of it in a row = "is that the kettle?", then a short pause and
+        // 4 more seconds in a row within 15 seconds = confirmed (so a burst of chatter doesn't count).
         val roaring = s === kettle && row.average() > roomFloor + 12.0
-        roarRun = if (roaring) roarRun + 1 else 0
-        val roar = roarRun >= 12
         val sc = if (s.mean != null) score(s, row) else 99.0; s.lastScore = sc
         val loud = s.mean != null && loudEnough(s, row); s.lastLoudEnough = loud || roaring
-        s.history.addLast((sc < s.limit && loud) || roar)
-        if (roar && !s.on) { s.on = true; s.onSince = System.currentTimeMillis(); onChange(s, true) }
+        val hit = (sc < s.limit && loud) || roaring
+        s.history.addLast(hit)
+        if (s === kettle && !s.on) {
+            val now = System.currentTimeMillis()
+            when (stage) {
+                0 -> { run1 = if (hit) run1 + 1 else 0; if (run1 >= 4) { stage = 1; stageAt = now; run1 = 0; onMaybe(s) } }
+                1 -> if (now - stageAt >= 3000) { stage = 2; run1 = 0 }                  // a little pause before checking again
+                2 -> {
+                    run1 = if (hit) run1 + 1 else 0
+                    if (run1 >= 4) { stage = 0; run1 = 0; s.on = true; s.onSince = now; onChange(s, true) }
+                    else if (now - stageAt > 18_000) { stage = 0; run1 = 0 }             // didn't confirm: never mind
+                }
+            }
+        }
         val window = if (s === kettle) 20 else 180                       // kettle: 20 s; dryer: 3 minutes
         while (s.history.size > window) s.history.removeFirst()
         val share = s.history.count { it }.toDouble() / maxOf(1, s.history.size)

@@ -2118,6 +2118,9 @@ class MainActivity : Activity() {
         keepBluetoothInMusicMode()
         Appliances.tap = { b, n, r -> appliances.feed(b, n, r) }
         appliances.onChange = { snd, on -> main.post { applianceChanged(snd, on) } }
+        appliances.onMaybe = { _ -> main.post {                          // "was that the kettle?": a quick suspicious glance
+            if (phase == Phase.LISTENING && !chloeMode) { eyes.stareAt(1.6f, 0.1f, 2500); eyes.feel(EyesView.Emotion.SUSPICIOUS, 2500) }
+        } }
         muted = prefs.getBoolean("muted", false)                // still zipped from before a restart?
         voice?.muted = muted; eyes.muted = muted; updateMuteButton()
         if (muted) { mutedAt = System.currentTimeMillis(); main.postDelayed(muteSulk, 60_000L); scheduleZipWiggle() }
