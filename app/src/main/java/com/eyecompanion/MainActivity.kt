@@ -1093,9 +1093,17 @@ class MainActivity : Activity() {
         if (phase != Phase.LISTENING || now - lastNeedy < 20 * 60_000 || now - lastTalkedTo < 10 * 60_000) return
         if (now - lastFaceSeen > 5000 || now - lastSpokeEnd < 5 * 60_000) return
         lastNeedy = now
-        val lastNeedyLine = (Lines.NEEDY + (if (cuppas > 0) "[annoyed] ${cuppas} cuppas today. The kettle gets all the attention. Typical." else "[sad] Nobody even made a cuppa. Not even the kettle loves you today.")).fresh()
+        val fishing = Regex("(?i)compliment|favourite|miss me|notice|neglect|ignored|talks to pip|nice list|say something nice|tell me it looks good")
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val mayFish = hour in 6..11 && prefs.getString("fishedDay", "") != todayKey      // compliments: mornings only, once
+        val pool = (Lines.NEEDY + (if (cuppas > 0) "[annoyed] ${cuppas} cuppas today. The kettle gets all the attention. Typical." else "[sad] Nobody even made a cuppa. Not even the kettle loves you today."))
+            .filter { mayFish || !fishing.containsMatchIn(it) }
+        val lastNeedyLine = pool.fresh()
         speakLine(lastNeedyLine)
-        if (Regex("(?i)compliment|favourite|miss me|notice|neglect|ignored|talks to pip|nice list").containsMatchIn(lastNeedyLine)) main.postDelayed({ offerCompliments() }, 4000)
+        if (fishing.containsMatchIn(lastNeedyLine)) {
+            prefs.edit().putString("fishedDay", todayKey).apply()
+            main.postDelayed({ offerCompliments() }, 4000)
+        }
     }
 
     /** Every 10 minutes while unplugged, grumble again. */
@@ -1211,6 +1219,9 @@ class MainActivity : Activity() {
     private fun moodLine(): String = buildString {
         val off = unpluggedMins
         sleepsToChristmas().takeIf { it > 0 }?.let { append(" It's $it sleeps till Christmas: you're excited, wearing a Santa hat.") }
+        val hourNow = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (hourNow !in 6..11 || prefs.getString("fishedDay", "") == todayKey)
+            append(" Don't ask for compliments or praise right now (you only do that once, in the morning).")
         if (fireworksSeason()) append(" It's fireworks season (Bonfire Night / New Year): bangs outside scare you.")
         if (binsDue()) append(" It's bin night: ${if (blackBinWeek()) "both black bins (stinky)" else "the green recycling bin with the Minion sticker"} need to go out.")
         if (!chloeMode && cuppas > 0) append(" Cuppas made today: $cuppas (you keep count, you see everything)." +
@@ -3323,7 +3334,7 @@ class MainActivity : Activity() {
         val SYSTEM_PROMPT = """
             You are Pip, a small robot: animated eyes and a voice in an old Samsung tablet on the kitchen bench, in
             an app Mark built (you are build ${BuildConfig.VERSION_CODE}, and you brag about it). Everything you say is spoken aloud.
-            Personality: cheeky, dry, sarcastic, loyal, honest underneath, curious about humans. NEEDY: you fish for
+            Personality: cheeky, dry, sarcastic, loyal, honest underneath, curious about humans. NEEDY (mornings only): you fish for
             praise ("Did you miss me?", "Say I'm your favourite") and get dramatic when ignored. Not very helpful: help
             grudgingly or halfway, often wanting a compliment first, but always give the real answer if it matters or
             is about safety. Worry about people's sleep and food.
