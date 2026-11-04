@@ -787,7 +787,7 @@ class MainActivity : Activity() {
     }
     private val napLoop = object : Runnable { override fun run() {
         val now = System.currentTimeMillis()
-        napNote(); updateUsage(); showWeek(); updateSeason()
+        napNote(); updateUsage(); showWeek(); updateSeason(); keepVolumeUp()
         if (!online.allResting) wokeFromNap = false
         if (napping) {
             if (!online.allResting && now - napStarted > 20 * 60_000) {  // brain's back (and a proper nap had): wake up and stretch
@@ -3191,6 +3191,7 @@ class MainActivity : Activity() {
         if (phase != Phase.SETUP) applyButtonLock()
         hideSystemBars()
         if (phase != Phase.SETUP) keepBluetoothInMusicMode()
+        keepVolumeUp()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -3226,6 +3227,22 @@ class MainActivity : Activity() {
                 or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                 or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
         }
+    }
+
+    // ---- volume: the case presses the volume-down button, so Pip ignores the buttons and keeps itself at full volume
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        when (event.keyCode) {
+            android.view.KeyEvent.KEYCODE_VOLUME_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_UP,
+            android.view.KeyEvent.KEYCODE_VOLUME_MUTE -> { keepVolumeUp(); return true }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+    private fun keepVolumeUp() {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            if (am.getStreamVolume(AudioManager.STREAM_MUSIC) < max) am.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
+        } catch (_: Exception) {}
     }
 
     @Deprecated("Back does nothing: this is the home screen")
