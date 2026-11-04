@@ -1167,6 +1167,7 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         if (snd === appliances.kettle) {
             if (on && !carMode) addCuppa()                              // every boil is a cuppa
+            if (!on) { kettleOffAt = now; kettleForgotten = false }
             if (!chloeMode && phase != Phase.ASLEEP && phase != Phase.SETUP) {
                 if (on) { takeoverMode(240_000L); eyes.stareAt(1.8f, 0.12f, 4 * 60_000L) }      // red takeover glare at the kettle, far right
                 else if (System.currentTimeMillis() < eyes.takeoverUntil) {                          // it's stopped: stand down, look back
@@ -1196,6 +1197,28 @@ class MainActivity : Activity() {
                     else "[happy] Dryer's finished. Clothes are probably dry. Probably.")
         }
     }
+    /** Boiled the kettle and walked off? Nobody about for 10 minutes after it clicked off: tell the next person. */
+    private var kettleOffAt = 0L
+    private var kettleForgotten = false
+    private fun kettleCheck() {
+        if (kettleOffAt == 0L) return
+        val now = System.currentTimeMillis()
+        if (!kettleForgotten) {
+            if (maxOf(lastFaceSeen, lastAnyHeard) > kettleOffAt + 3000) { kettleOffAt = 0L; return }    // someone was there for it
+            if (now - kettleOffAt > 10 * 60_000) kettleForgotten = true
+            return
+        }
+        if (now - kettleOffAt > 3 * 3_600_000L) { kettleOffAt = 0L; kettleForgotten = false; return }   // too long ago to bother
+        if (now - lastFaceSeen < 5000 && phase == Phase.LISTENING && !chloeMode) {
+            kettleOffAt = 0L; kettleForgotten = false
+            speakLine(listOf(
+                "[suspicious] You boiled the kettle and walked off. Classic. It's cold now. The kettle's furious. I'm delighted.",
+                "[laughing] Oh, you're back! You boiled the kettle ages ago and just left. Classic human.",
+                "[wink] Psst. You boiled the kettle and wandered off. It's gone cold. Shall I tell it you're sorry? No. I won't.",
+                "[annoyed] Boil the kettle, walk off, forget. Every time. You'd forget your head if it wasn't screwed on.").fresh())
+        }
+    }
+
     /** Every minute: how long has the dryer been on? Getting hot after 45 minutes. */
     private fun dryerCheck() {
         val d = appliances.dryer
@@ -1280,11 +1303,12 @@ class MainActivity : Activity() {
             eyes.zipOpen = 0f; Mmf.unzip(0.4f)
             main.postDelayed({ lastMuffle = 0L; muffled() }, 900)
             main.postDelayed(muteSulk, 2 * 60_000L)
+            scheduleZipWiggle()
         } else {
             muted = false
             voice?.muted = false; eyes.muted = false
             prefs.edit().putBoolean("muted", false).apply()
-            main.removeCallbacks(muteSulk)
+            main.removeCallbacks(muteSulk); main.removeCallbacks(zipWiggle); main.removeCallbacks(zipWiggleStart)
             updateMuteButton()
             val mins = ((System.currentTimeMillis() - mutedAt) / 60_000).toInt()
             val left = 5 - zipsToday()
@@ -1304,6 +1328,7 @@ class MainActivity : Activity() {
                 "[suspicious] Unzipped. I'm keeping one eye on that button from now on.").fresh())
         }
     }
+    private var zipDrag = false
     /** Let go too early: the zip slides itself shut again. */
     private val zipSnap = object : Runnable { override fun run() {
         eyes.zipOpen = (eyes.zipOpen - 0.08f).coerceAtLeast(0f)
@@ -1323,6 +1348,38 @@ class MainActivity : Activity() {
             "Mmmf. 🤐 (pull my zip!)", "Mmmmmmf. Mmf.").fresh()
         Mmf.grumble(cross = true)
     }
+    /** Zip escape artist: every so often she wiggles the zip open a crack by herself... and gets caught. */
+    private var wiggleStep = 0
+    private val zipWiggle = object : Runnable { override fun run() {
+        if (!muted || zipDrag || phase == Phase.ASLEEP) { if (!zipDrag) eyes.zipOpen = 0f; return }
+        wiggleStep++
+        when {
+            wiggleStep <= 40 -> {                                          // sneakily inching it open, eyes darting about
+                eyes.zipOpen = 0.28f * wiggleStep / 40f
+                if (wiggleStep == 1) { eyes.feel(EyesView.Emotion.SUSPICIOUS, 4000); eyes.stareAt(-0.9f, 0f, 1000) }
+                if (wiggleStep == 20) eyes.stareAt(0.9f, 0f, 1000)
+                main.postDelayed(this, 50)
+            }
+            wiggleStep == 41 -> {                                          // caught!
+                eyes.feel(EyesView.Emotion.EMBARRASSED, 3500); eyes.stareAt(0f, 0f, 1)
+                eyes.caption = listOf("Mmf! …I wasn't doing anything.", "Mmmf. (It slipped. On its own.)",
+                    "…Mmf? What zip? I didn't touch it.", "Mmf mmf. (You didn't see that.)").fresh()
+                main.postDelayed(this, 900)
+            }
+            else -> {                                                      // snap it back shut, innocently
+                eyes.zipOpen = (eyes.zipOpen - 0.06f).coerceAtLeast(0f)
+                if (eyes.zipOpen > 0f) main.postDelayed(this, 16) else scheduleZipWiggle()
+            }
+        }
+    } }
+    private val zipWiggleStart = Runnable {
+        if (muted && phase == Phase.LISTENING && !zipDrag) { wiggleStep = 0; zipWiggle.run() } else scheduleZipWiggle()
+    }
+    private fun scheduleZipWiggle() {
+        main.removeCallbacks(zipWiggle); main.removeCallbacks(zipWiggleStart); wiggleStep = 0
+        if (muted) main.postDelayed(zipWiggleStart, (6 + Math.random() * 8).toLong() * 60_000)
+    }
+
     /** Every few minutes while zipped: a sulky muffle, so nobody forgets. */
     private val muteSulk = object : Runnable { override fun run() {
         if (!muted) return
@@ -1336,6 +1393,7 @@ class MainActivity : Activity() {
         override fun run() {
             updateMuteButton()                         // new day: the Mute button comes back
             dryerCheck()
+            kettleCheck()
             if (training) { main.postDelayed(this, 60_000); return }
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
@@ -2062,7 +2120,7 @@ class MainActivity : Activity() {
         appliances.onChange = { snd, on -> main.post { applianceChanged(snd, on) } }
         muted = prefs.getBoolean("muted", false)                // still zipped from before a restart?
         voice?.muted = muted; eyes.muted = muted; updateMuteButton()
-        if (muted) { mutedAt = System.currentTimeMillis(); main.postDelayed(muteSulk, 60_000L) }
+        if (muted) { mutedAt = System.currentTimeMillis(); main.postDelayed(muteSulk, 60_000L); scheduleZipWiggle() }
         main.postDelayed({ applyButtonLock() }, 4000)       // pin once everything's up and running
         updateListenChip()
         updateUsage()
@@ -3317,11 +3375,11 @@ class MainActivity : Activity() {
             override fun onLongPress(e: MotionEvent) { askPasscode() }
         })
         // the zip: grab it and drag left to open it, like a real one
-        var zipDrag = false; var zipStartX = 0f
+        var zipStartX = 0f
         eyes.setOnTouchListener { _, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> if (muted && phase != Phase.ASLEEP && eyes.zipHit(ev.x, ev.y)) {
-                    zipDrag = true; zipStartX = ev.x; main.removeCallbacks(zipSnap)
+                    zipDrag = true; zipStartX = ev.x; main.removeCallbacks(zipSnap); main.removeCallbacks(zipWiggle)
                 }
                 MotionEvent.ACTION_MOVE -> if (zipDrag) {
                     val span = (eyes.zipRight - eyes.zipLeft).coerceAtLeast(1f)
