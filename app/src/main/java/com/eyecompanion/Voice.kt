@@ -142,22 +142,13 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     /** Mouth zipped (mute button): nothing gets said. */
     @Volatile var muted = false
 
-    /** "Mwahaha" and friends are played as a real evil laugh, not read out. */
+    /** "Mwahaha" and friends become a cheeky laugh in Pip's own voice (the online voice is told to giggle it). */
+    private val GIGGLE = "Hee hee hee! Ha ha ha!"
     private val EVIL = Regex("(?i)\\(?\\bevil laugh(ter)?\\b\\)?|\\b(mw|mu|bw)a+([- ]?h+a+)+h*\\b[!.]*")
 
     private fun say(raw: String) {
         if (muted) return
-        if (EVIL.containsMatchIn(raw)) {
-            var at = 0
-            for (m in EVIL.findAll(raw)) {
-                say(raw.substring(at, m.range.first))
-                flushCloudBatch()
-                sayLaugh()
-                at = m.range.last + 1
-            }
-            say(raw.substring(at))
-            return
-        }
+        if (EVIL.containsMatchIn(raw)) { say(raw.replace(EVIL, " $GIGGLE ")); return }
         val clean = cleanForSpeech(raw)
         if (clean.isBlank()) return
         val online = activeKey().isNotBlank()
@@ -171,15 +162,6 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             return
         }
         sayNow(clean)
-    }
-
-    private fun sayLaugh() {
-        val gen = generation
-        pending.incrementAndGet()
-        player.execute {
-            if (gen == generation) { onStartedTalking(); Mmf.evilLaughNow() }
-            finishedOne()
-        }
     }
 
     private fun sayNow(clean: String) {
@@ -296,8 +278,9 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private val REST_MS = 3 * 60 * 60 * 1000L
 
     private fun fetchOnce(text: String, key: String, voiceName: String, quietOn429: Boolean): ByteArray? = try {
+        val said = if (text.contains(GIGGLE) && !text.startsWith("[")) "[giggling] $text" else text
         val body = JSONObject().put("model", "canopylabs/orpheus-v1-english").put("voice", voiceName)
-            .put("input", text).put("response_format", "wav")
+            .put("input", said).put("response_format", "wav")
         val conn = (URL("https://api.groq.com/openai/v1/audio/speech").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"; doOutput = true
             connectTimeout = 4000; readTimeout = 15_000
