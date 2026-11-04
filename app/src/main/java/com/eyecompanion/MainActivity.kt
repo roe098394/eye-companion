@@ -1188,7 +1188,7 @@ class MainActivity : Activity() {
             eyes.caption = listOf("Mmmf?! MMMF!", "Mmmmmf mmf mmf!!", "MMF. Mmmf mmmf.").fresh()
             eyes.zipOpen = 0f; Mmf.unzip(0.4f)
             main.postDelayed({ lastMuffle = 0L; muffled() }, 900)
-            main.postDelayed(muteSulk, 3 * 60_000L)
+            main.postDelayed(muteSulk, 2 * 60_000L)
         } else {
             muted = false
             voice?.muted = false; eyes.muted = false
@@ -1223,6 +1223,10 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         if (now - lastMuffle < 4000) return
         lastMuffle = now
+        if (now - mutedAt > 5 * 60_000L) {              // after 5 minutes she gives up mumbling: just a silent glare
+            eyes.feel(EyesView.Emotion.ANGRY, 3000)
+            return
+        }
         eyes.feel(listOf(EyesView.Emotion.ANGRY, EyesView.Emotion.SAD, EyesView.Emotion.ANGRY).random(), 4000)
         eyes.caption = listOf("Mmmf! Mmmf mmmf!", "MMMMF.", "Mmf mmf mmmmf mf!!", "(muffled grumbling)",
             "Mmmf. 🤐 (pull my zip!)", "Mmmmmmf. Mmf.").fresh()
@@ -1231,8 +1235,9 @@ class MainActivity : Activity() {
     /** Every few minutes while zipped: a sulky muffle, so nobody forgets. */
     private val muteSulk = object : Runnable { override fun run() {
         if (!muted) return
-        if (phase == Phase.LISTENING) muffled()
-        main.postDelayed(this, 3 * 60_000L)
+        if (System.currentTimeMillis() - mutedAt > 5 * 60_000L) return      // gone quiet: no more sulky mumbles
+        if (phase == Phase.LISTENING) { lastMuffle = 0L; muffled() }
+        main.postDelayed(this, 2 * 60_000L)
     } }
 
     /** Every 10 minutes while unplugged, grumble again. */
