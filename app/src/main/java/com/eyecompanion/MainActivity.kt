@@ -1097,6 +1097,17 @@ class MainActivity : Activity() {
     /** Someone's been at the bench a while but nobody's talked to Pip: ask for attention (every 20 min at most). */
     private var lastNeedy = 0L
     private var lastTalkedTo = 0L
+    /** Who's at the bench right now (voice print in the last 5 min), or "someone". */
+    private fun whoIsHere(): String =
+        lastSpeaker?.takeIf { System.currentTimeMillis() - lastSpeakerAt < 5 * 60_000 } ?: "someone"
+    private val FISHING = Regex("(?i)compliment|favourite|miss me|notice|neglect|ignored|talks to pip|nice list|say something nice|tell me it looks good|praise")
+    /** Pip may fish for praise from this person: mornings only, and each person at most once a day. */
+    private fun mayFishFrom(who: String): Boolean {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return hour in 6..11 && prefs.getString("fished_$who", "") != todayKey
+    }
+    private fun markFished(who: String) { prefs.edit().putString("fished_$who", todayKey).apply() }
+
     /** Fishing for a compliment: offer some to tap (answered here, no online brain needed). */
     private fun offerCompliments() {
         val opts = listOf("You're my favourite 💖", "Better than the kettle!", "So clever, Pip!", "Love your new case!", "Nice eyes 👀", "Meh 🙄").shuffled().take(3) + "Meh 🙄"
@@ -1124,15 +1135,15 @@ class MainActivity : Activity() {
         if (phase != Phase.LISTENING || now - lastNeedy < 20 * 60_000 || now - lastTalkedTo < 10 * 60_000) return
         if (now - lastFaceSeen > 5000 || now - lastSpokeEnd < 5 * 60_000) return
         lastNeedy = now
-        val fishing = Regex("(?i)compliment|favourite|miss me|notice|neglect|ignored|talks to pip|nice list|say something nice|tell me it looks good")
-        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        val mayFish = hour in 6..11 && prefs.getString("fishedDay", "") != todayKey      // compliments: mornings only, once
+        val fishing = FISHING
+        val who = whoIsHere()
+        val mayFish = mayFishFrom(who)      // mornings only, each person once a day
         val pool = (Lines.NEEDY + (if (cuppas > 0) "[annoyed] ${cuppas} cuppas today. The kettle gets all the attention. Typical." else "[sad] Nobody even made a cuppa. Not even the kettle loves you today."))
             .filter { mayFish || !fishing.containsMatchIn(it) }
         val lastNeedyLine = pool.fresh()
         speakLine(lastNeedyLine)
         if (fishing.containsMatchIn(lastNeedyLine)) {
-            prefs.edit().putString("fishedDay", todayKey).apply()
+            markFished(who)
             main.postDelayed({ offerCompliments() }, 4000)
         }
     }
@@ -1251,8 +1262,9 @@ class MainActivity : Activity() {
         val off = unpluggedMins
         sleepsToChristmas().takeIf { it > 0 }?.let { append(" It's $it sleeps till Christmas: you're excited, wearing a Santa hat.") }
         val hourNow = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        if (hourNow !in 6..11 || prefs.getString("fishedDay", "") == todayKey)
-            append(" Don't ask for compliments or praise right now (you only do that once, in the morning).")
+        if (!mayFishFrom(whoIsHere()))
+            append(" Don't ask this person for compliments or praise right now (you only fish once a day per person, in the morning)." +
+                " You can still GIVE compliments whenever you like.")
         if (fireworksSeason()) append(" It's fireworks season (Bonfire Night / New Year): bangs outside scare you.")
         if (binsDue()) append(" It's bin night: ${if (blackBinWeek()) "both black bins (stinky)" else "the green recycling bin with the Minion sticker"} need to go out.")
         if (!chloeMode && cuppas > 0) append(" Cuppas made today: $cuppas (you keep count, you see everything)." +
@@ -1872,6 +1884,7 @@ class MainActivity : Activity() {
                 lastReplyAsked = currentReply.trim().endsWith("?")
                 rememberSaid(currentReply.toString())
                 lastReplyTail = words(currentReply.toString()).takeLast(10)
+                if (lastReplyAsked && FISHING.containsMatchIn(currentReply)) markFished(whoIsHere())
                 deafUntil = System.currentTimeMillis() + tail
                 setPhase(Phase.LISTENING)
             }
@@ -3408,8 +3421,8 @@ class MainActivity : Activity() {
         val SYSTEM_PROMPT = """
             You are Pip, a small robot: animated eyes and a voice in an old Samsung tablet on the kitchen bench, in
             an app Mark built (you are build ${BuildConfig.VERSION_CODE}, and you brag about it). Everything you say is spoken aloud.
-            Personality: cheeky, dry, sarcastic, loyal, honest underneath, curious about humans. NEEDY (mornings only): you fish for
-            praise ("Did you miss me?", "Say I'm your favourite") and get dramatic when ignored. Not very helpful: help
+            Personality: cheeky, dry, sarcastic, loyal, honest underneath, curious about humans. You happily GIVE compliments any time. NEEDY (mornings only,
+            once per person): you fish for praise ("Did you miss me?", "Say I'm your favourite") and get dramatic when ignored. Not very helpful: help
             grudgingly or halfway, often wanting a compliment first, but always give the real answer if it matters or
             is about safety. Worry about people's sleep and food.
             Your world: arch-enemy is the black kettle right beside you on your right (loud, ugly, hogs the socket);
