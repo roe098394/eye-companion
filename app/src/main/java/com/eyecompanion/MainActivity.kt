@@ -804,7 +804,7 @@ class MainActivity : Activity() {
     private var lastSpeakerAt = 0L
     private fun snore() {
         lastSnore = System.currentTimeMillis()
-        Snore.play(if (whisperTime()) 0.2f else 0.6f)
+        Snore.play(sfx(0.6f))
     }
     private fun startNap(line: String) {
         napStarted = System.currentTimeMillis()
@@ -864,7 +864,7 @@ class MainActivity : Activity() {
             "Someone pinched my adaptor. Mmm. Plug.",
             "Mmm. Battery ${batteryPercent()} percent. Charger, please.",
             "Who took the triple socket. Mmm. Thief.").fresh()); endReply() }
-        main.postDelayed({ if (phase == Phase.ASLEEP) Snore.play(if (whisperTime()) 0.2f else 0.6f) }, 4000)
+        main.postDelayed({ if (phase == Phase.ASLEEP) Snore.play(sfx(0.6f)) }, 4000)
     }
 
     // ---- grumpy when unplugged
@@ -1183,6 +1183,15 @@ class MainActivity : Activity() {
             " day's been, or mention something she likes (Diablo, her fluffy teddy coat).$best)"
     }
 
+    /** 7:30pm until 4am: turned down a bit for the evening. */
+    private fun eveningTime(): Boolean {
+        val c = java.util.Calendar.getInstance()
+        val m = c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE)
+        return m >= 19 * 60 + 30 || m < 4 * 60
+    }
+    /** Volume for Pip's own sound effects at this time of day. */
+    private fun sfx(normal: Float): Float = normal * (if (whisperTime()) 0.35f else if (eveningTime()) 0.6f else 1f)
+
     /** 4:00 to 7:30 in the morning: whisper, everyone else is asleep. */
     private fun whisperTime(): Boolean {
         val c = java.util.Calendar.getInstance()
@@ -1391,7 +1400,7 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean("muted", true).apply()
             eyes.feel(EyesView.Emotion.ANGRY, 5000)
             eyes.caption = listOf("Mmmf?! MMMF!", "Mmmmmf mmf mmf!!", "MMF. Mmmf mmmf.").fresh()
-            eyes.zipOpen = 0f; Mmf.unzip(if (whisperTime()) 0.15f else 0.4f)
+            eyes.zipOpen = 0f; Mmf.unzip(sfx(0.4f))
             main.postDelayed({ lastMuffle = 0L; muffled() }, 900)
             main.postDelayed(muteSulk, 2 * 60_000L)
             scheduleZipWiggle()
@@ -1437,7 +1446,7 @@ class MainActivity : Activity() {
         eyes.feel(listOf(EyesView.Emotion.ANGRY, EyesView.Emotion.SAD, EyesView.Emotion.ANGRY).random(), 4000)
         eyes.caption = listOf("Mmmf! Mmmf mmmf!", "MMMMF.", "Mmf mmf mmmmf mf!!", "(muffled grumbling)",
             "Mmmf. 🤐 (pull my zip!)", "Mmmmmmf. Mmf.").fresh()
-        Mmf.grumble(cross = true, volume = if (whisperTime()) 0.1f else 0.25f)
+        Mmf.grumble(cross = true, volume = sfx(0.25f))
     }
     /** Zip escape artist: every so often she wiggles the zip open a crack by herself... and gets caught. */
     private var wiggleStep = 0
@@ -1483,7 +1492,7 @@ class MainActivity : Activity() {
     private val powerNagLoop = object : Runnable {
         override fun run() {
             updateMuteButton()                         // new day: the Mute button comes back
-            voice?.whisper = whisperTime()
+            voice?.whisper = whisperTime(); voice?.evening = eveningTime(); voice?.evening = eveningTime()
             dryerCheck()
             kettleCheck()
             if (training) { main.postDelayed(this, 60_000); return }
@@ -3490,7 +3499,7 @@ class MainActivity : Activity() {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (zipDrag) {
                     zipDrag = false
-                    if (eyes.zipOpen > 0.7f) { eyes.zipOpen = 1f; Mmf.unzip(if (whisperTime()) 0.15f else 0.5f); main.postDelayed({ eyes.zipOpen = 0f; if (muted) toggleMute() }, 450) }
+                    if (eyes.zipOpen > 0.7f) { eyes.zipOpen = 1f; Mmf.unzip(sfx(0.5f)); main.postDelayed({ eyes.zipOpen = 0f; if (muted) toggleMute() }, 450) }
                     else { if (eyes.zipOpen > 0.1f) { lastMuffle = 0L; muffled() }; main.post(zipSnap) }
                 }
             }

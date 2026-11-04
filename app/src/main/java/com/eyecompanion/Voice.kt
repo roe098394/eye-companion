@@ -141,9 +141,11 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
 
     /** Early morning (4:00-7:30): whisper so nobody else wakes up. Quieter and, with the online voice, whispered. */
     @Volatile var whisper = false
-    private val WHISPER_VOL = 0.3f
-    private fun ttsParams(): android.os.Bundle? = if (!whisper) null
-        else android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, WHISPER_VOL) }
+    /** Evening (after 7:30pm): a bit quieter, but still her normal voice. */
+    @Volatile var evening = false
+    private val vol get() = if (whisper) 0.3f else if (evening) 0.55f else 1f
+    private fun ttsParams(): android.os.Bundle? = if (vol >= 1f) null
+        else android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol) }
 
     /** Mouth zipped (mute button): nothing gets said. */
     @Volatile var muted = false
@@ -346,7 +348,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track = t
-        if (whisper) try { t.setVolume(WHISPER_VOL) } catch (_: Exception) {}
+        if (vol < 1f) try { t.setVolume(vol) } catch (_: Exception) {}
         try {
             t.play()
             onStartedTalking()
