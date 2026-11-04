@@ -19,6 +19,10 @@ class EyesView(context: Context) : View(context) {
     enum class Mood { LOADING, SLEEP, IDLE, LISTEN, THINK, TALK, HAPPY }
 
     /** How Pip feels about what it's saying; shown on top of the mood for a while. */
+    companion object {
+        const val KS_STEAM = 1; const val KS_RACE = 2; const val KS_HANDS = 3; const val KS_SHIFTY = 4
+        const val KS_HEARTBREAK = 5; const val KS_TALLY = 6; const val KS_BUBBLES = 7
+    }
     enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY,
         SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING, STONED, SNIGGER, HOT }
 
@@ -295,6 +299,56 @@ class EyesView(context: Context) : View(context) {
                     canvas.drawCircle(tx, ty - ew * 0.05f, ew * 0.045f, tearPaint)
                 }
             }
+            // ---- kettle shows (one picked at random each boil)
+            if (kettleShow != 0 && !carMode && mood != Mood.SLEEP) {
+                val kt = (t - kettleSince) / 1000f
+                val boil = (kt / 150f).coerceIn(0f, 1f)                   // a kettle takes ~2.5 minutes
+                when (kettleShow) {
+                    KS_STEAM -> for (k in 0..4) {                           // steam puffing out of the sides, faster as it boils
+                        val p = ((kt * (0.5f + boil * 1.2f) + k / 5f) % 1f)
+                        kPaint.color = Color.WHITE; kPaint.alpha = (170 * (1f - p)).toInt()
+                        canvas.drawCircle(ex + side * (ew / 2 + ew * (0.1f + p * 0.9f)), cy - eh * 0.2f - p * ew * 0.6f,
+                            ew * (0.07f + p * 0.2f), kPaint)
+                    }
+                    KS_HANDS -> {                                           // hands over the ears
+                        kPaint.color = Color.parseColor("#F2C9A0"); kPaint.alpha = 255
+                        val hx = ex + side * (ew / 2 + ew * 0.05f); val hy = cy + sin(kt * 7f) * ew * 0.02f
+                        r1.set(hx - ew * 0.22f, hy - ew * 0.38f, hx + ew * 0.22f, hy + ew * 0.38f)
+                        canvas.drawRoundRect(r1, ew * 0.18f, ew * 0.18f, kPaint)
+                        for (f in 0..3) {                                    // fingers pointing up
+                            val fx = hx - ew * 0.15f + f * ew * 0.1f
+                            r1.set(fx - ew * 0.045f, hy - ew * 0.62f + abs(f - 1.5f) * ew * 0.05f, fx + ew * 0.045f, hy - ew * 0.25f)
+                            canvas.drawRoundRect(r1, ew * 0.045f, ew * 0.045f, kPaint)
+                        }
+                        r1.set(hx - side * ew * 0.42f - ew * 0.06f, hy - ew * 0.05f, hx - side * ew * 0.12f, hy + ew * 0.1f)   // thumb
+                        canvas.drawRoundRect(r1, ew * 0.06f, ew * 0.06f, kPaint)
+                    }
+                    KS_HEARTBREAK -> {                                      // a crack zig-zagging down each heart
+                        kLine.color = Color.parseColor("#14070A"); kLine.strokeWidth = ew * 0.06f
+                        val crack = minOf(1f, kt / 2.5f)
+                        val pth = android.graphics.Path(); pth.moveTo(ex, cy - eh * 0.45f)
+                        for (j in 1..6) { if (j / 6f > crack) break
+                            pth.lineTo(ex + (if (j % 2 == 0) -1 else 1) * ew * 0.1f, cy - eh * 0.45f + j * eh * 0.15f) }
+                        canvas.drawPath(pth, kLine)
+                    }
+                    KS_BUBBLES -> {                                         // filling up and bubbling like a kettle
+                        canvas.save(); r1.set(ex - ew / 2, cy - eh / 2, ex + ew / 2, cy + eh / 2); canvas.clipRect(r1)
+                        val level = cy + eh / 2 - eh * (0.15f + 0.8f * boil)
+                        kPaint.color = Color.parseColor("#1E5BFF"); kPaint.alpha = 150
+                        canvas.drawRect(ex - ew / 2, level + sin(kt * 6f + side) * ew * 0.03f, ex + ew / 2, cy + eh / 2, kPaint)
+                        kPaint.color = Color.WHITE
+                        val n = 4 + (boil * 10).toInt()
+                        for (k in 0 until n) {
+                            val p = ((kt * (0.6f + boil * 1.5f) + k * 0.37f) % 1f)
+                            val bx = ex - ew * 0.4f + ((k * 0.61f + side * 0.3f) % 1f).let { if (it < 0) it + 1 else it } * ew * 0.8f
+                            val by = cy + eh / 2 - p * (cy + eh / 2 - level)
+                            kPaint.alpha = (200 * (1f - p)).toInt()
+                            canvas.drawCircle(bx, by, ew * (0.025f + 0.03f * ((k % 3) / 2f)), kPaint)
+                        }
+                        canvas.restore()
+                    }
+                }
+            }
             // too hot: sweat drops running down from the outer top corner, and heat shimmer above
             if (feeling == Emotion.HOT && !carMode) {
                 for (d in 0..1) {
@@ -517,6 +571,32 @@ class EyesView(context: Context) : View(context) {
             if (a1 > 0f) drawWrapped(canvas, caption, w / 2, h * 0.90f, w * 0.85f, textPaint)
             if (a2 > 0f && subCaption.isNotEmpty()) canvas.drawText(subCaption.take(90), w / 2, h * 0.08f, subPaint)
         }
+        // kettle shows drawn over the whole screen: the race bar and the cuppa tally
+        if (kettleShow == KS_RACE && !carMode) {
+            val kt = (t - kettleSince) / 1000f; val boil = (kt / 150f).coerceIn(0f, 1f)
+            hudPaint.color = Color.parseColor("#FF5A3C"); hudPaint.textSize = h * 0.045f; hudPaint.alpha = 230
+            hudPaint.textAlign = Paint.Align.CENTER
+            c2(canvas, "KETTLE  vs  PIP", w / 2, h * 0.12f)
+            kLine.color = Color.parseColor("#FF5A3C"); kLine.strokeWidth = h * 0.006f; kLine.alpha = 230
+            r1.set(w * 0.3f, h * 0.15f, w * 0.7f, h * 0.19f); canvas.drawRoundRect(r1, h * 0.02f, h * 0.02f, kLine)
+            kPaint.color = Color.parseColor("#FF5A3C"); kPaint.alpha = 200
+            r1.set(w * 0.3f, h * 0.15f, w * (0.3f + 0.4f * boil), h * 0.19f); canvas.drawRoundRect(r1, h * 0.02f, h * 0.02f, kPaint)
+            hudPaint.textSize = h * 0.03f
+            c2(canvas, "BOILING… ${(boil * 100).toInt()}%", w / 2, h * 0.235f)
+            hudPaint.textAlign = Paint.Align.LEFT
+        }
+        if (kettleShow == KS_TALLY && !carMode) {
+            val kt = (t - kettleSince) / 1000f
+            hudPaint.textAlign = Paint.Align.CENTER; hudPaint.color = eyeColor
+            hudPaint.textSize = h * 0.07f; hudPaint.alpha = 230
+            c2(canvas, "☕ $cuppas", w * 0.86f, h * 0.2f)
+            val p = (kt % 3f) / 3f                                          // "+1" floating up and away, again and again
+            hudPaint.textSize = h * (0.05f + 0.03f * p); hudPaint.alpha = (255 * (1f - p)).toInt()
+            hudPaint.color = Color.parseColor("#7CFF8A")
+            c2(canvas, "+1", w * 0.86f + sin(kt * 3f) * h * 0.01f, h * 0.12f - p * h * 0.1f)
+            hudPaint.textAlign = Paint.Align.LEFT
+        }
+
         // kettle / dryer test readout: low down in the middle, clear of the corner labels and the takeover HUD
         if (testLine.isNotEmpty()) {
             subPaint.textSize = h * 0.032f; subPaint.alpha = 220
@@ -776,6 +856,13 @@ class EyesView(context: Context) : View(context) {
     /** Sleep screen extras: clock, cuppas made today, and when the online brain is back. */
     var sleepScreen = false
     var cuppas = 0
+    /** Which kettle show is on (0 = none), and since when. */
+    @Volatile var kettleShow = 0
+    @Volatile var kettleSince = 0L
+    private val kPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val kLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val r1 = RectF()
+    private fun c2(c: Canvas, text: String, x: Float, y: Float) = c.drawText(text, x, y, hudPaint)
     var napNote = ""
     var plugNote = ""
     private val sleepPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }

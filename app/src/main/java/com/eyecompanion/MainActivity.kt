@@ -1170,13 +1170,11 @@ class MainActivity : Activity() {
                 prefs.edit().putLong("lastCuppaAt", now).apply(); addCuppa()
             }
             if (!on) { kettleOffAt = now; kettleForgotten = false }
-            if (!chloeMode && phase != Phase.ASLEEP && phase != Phase.SETUP) {
-                if (on) { takeoverMode(240_000L); eyes.stareAt(-1.8f, 0.12f, 4 * 60_000L) }      // red takeover glare at the kettle (on her right = screen left)
-                else if (System.currentTimeMillis() < eyes.takeoverUntil) {                          // it's stopped: stand down, look back
-                    eyes.takeoverUntil = 0L; eyes.stareAt(0f, 0f, 1); eyes.feel(EyesView.Emotion.NEUTRAL, 1)
-                }
-            }
-            if (on && phase == Phase.LISTENING && !chloeMode && now - lastKettleMoan > 20 * 60_000 && Math.random() < 0.6) {
+            if (on && !chloeMode && !carMode && phase != Phase.ASLEEP && phase != Phase.SETUP) startKettleShow()
+            if (!on) endKettleShow()
+            val show = eyes.kettleShow
+            val quietShow = show == EyesView.KS_HANDS || show == EyesView.KS_HEARTBREAK || show == EyesView.KS_SHIFTY
+            if (on && !quietShow && phase == Phase.LISTENING && !chloeMode && now - lastKettleMoan > 20 * 60_000 && Math.random() < 0.6) {
                 lastKettleMoan = now
                 val n = cuppas
                 speakLine(listOf("[annoyed] I can HEAR you, kettle. Nobody cares how loud you boil.",
@@ -1199,6 +1197,64 @@ class MainActivity : Activity() {
                     else "[happy] Dryer's finished. Clothes are probably dry. Probably.")
         }
     }
+    // ---- kettle shows: one of seven at random every time it boils
+    //      (the kettle is on Pip's right, which is the screen's left: negative x)
+    private var lastShow = 0
+    private fun startKettleShow() {
+        var pick: Int
+        do { pick = 1 + (Math.random() * 7).toInt() } while (pick == lastShow)
+        lastShow = pick
+        eyes.kettleShow = pick; eyes.kettleSince = System.currentTimeMillis()
+        val long = 4 * 60_000L
+        when (pick) {
+            EyesView.KS_STEAM -> { eyes.feel(EyesView.Emotion.ANGRY, long); eyes.stareAt(-1.6f, 0.1f, long) }
+            EyesView.KS_RACE -> { eyes.feel(EyesView.Emotion.SUSPICIOUS, long); eyes.stareAt(-1.4f, 0.05f, long) }
+            EyesView.KS_HANDS -> { eyes.feel(EyesView.Emotion.SUSPICIOUS, long); eyes.stareAt(0f, 0f, 1)
+                eyes.caption = "LA LA LA I CAN'T HEAR YOU 🙉" }
+            EyesView.KS_SHIFTY -> { eyes.feel(EyesView.Emotion.SUSPICIOUS, long); main.post(shifty) }
+            EyesView.KS_HEARTBREAK -> { eyes.feel(EyesView.Emotion.LOVE, long); eyes.stareAt(-0.6f, 0.2f, long)
+                eyes.caption = "The kettle gets ALL the attention 💔" }
+            EyesView.KS_TALLY -> { eyes.feel(EyesView.Emotion.BORED, long); main.post(eyeRoll) }
+            EyesView.KS_BUBBLES -> { eyes.feel(EyesView.Emotion.SURPRISED, long); eyes.stareAt(-1.2f, 0.1f, long) }
+        }
+        main.postDelayed(kettleShowTimeout, 6 * 60_000L)
+    }
+    private val kettleShowTimeout = Runnable { if (eyes.kettleShow != 0) endKettleShow() }
+    private fun endKettleShow() {
+        val show = eyes.kettleShow
+        if (show == 0) return
+        eyes.kettleShow = 0
+        main.removeCallbacks(shifty); main.removeCallbacks(eyeRoll); main.removeCallbacks(kettleShowTimeout)
+        eyes.stareAt(0f, 0f, 1); eyes.feel(EyesView.Emotion.NEUTRAL, 1)
+        when (show) {
+            EyesView.KS_STEAM -> { eyes.feel(EyesView.Emotion.ANGRY, 2000); eyes.caption = "Pfff! 💨" }
+            EyesView.KS_RACE -> if (phase == Phase.LISTENING) speakLine(listOf("[annoyed] Kettle wins again. Rigged.",
+                "[annoyed] And the kettle wins. Again. I demand a recount.", "[sad] Kettle wins. I didn't even get a go.").fresh())
+            EyesView.KS_HANDS -> { eyes.caption = "Is it over? 👀"; eyes.feel(EyesView.Emotion.CURIOUS, 2500) }
+            EyesView.KS_HEARTBREAK -> eyes.feel(EyesView.Emotion.SAD, 3000)
+            EyesView.KS_BUBBLES -> eyes.feel(EyesView.Emotion.DIZZY, 3000)                // boiled over: shake it off
+        }
+    }
+    /** Shifty side-eye: glare at the kettle, following it up and down, then dart back to you: "are you seeing this?" */
+    private var shiftyStep = 0
+    private val shifty = object : Runnable { override fun run() {
+        if (eyes.kettleShow != EyesView.KS_SHIFTY) return
+        shiftyStep++
+        if (shiftyStep % 6 == 0) eyes.stareAt(0f, -0.1f, 1300)                               // to you
+        else eyes.stareAt(-1.6f, 0.35f * kotlin.math.sin(shiftyStep * 0.9f), 700)           // at the kettle, up and down
+        main.postDelayed(this, if (shiftyStep % 6 == 0) 1300 else 600)
+    } }
+    /** Tally: eyes rolling round and round. */
+    private var rollStep = 0
+    private val eyeRoll = object : Runnable { override fun run() {
+        if (eyes.kettleShow != EyesView.KS_TALLY) return
+        rollStep++
+        val a = rollStep * 0.5f
+        if ((rollStep / 12) % 3 == 0) eyes.stareAt(kotlin.math.cos(a) * 1.0f, -0.6f + kotlin.math.sin(a) * 0.6f, 300)
+        else eyes.stareAt(-1.3f, 0.1f, 300)                                                 // and back to glaring at it
+        main.postDelayed(this, 250)
+    } }
+
     /** Boiled the kettle and walked off? Nobody about for 10 minutes after it clicked off: tell the next person. */
     private var kettleOffAt = 0L
     private var kettleForgotten = false
