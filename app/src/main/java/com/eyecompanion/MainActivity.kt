@@ -156,9 +156,19 @@ class MainActivity : Activity() {
     private var leavingOnPurpose = false
     private var lastPinAsk = 0L
     private fun applyButtonLock() {
-        // No screen pinning any more: the case covers the buttons. Unpin if an older build pinned Pip.
         leavingOnPurpose = false
-        try { if (pinned) stopLockTask() } catch (_: Exception) {}
+        if (!lockButtons) { try { if (pinned) stopLockTask() } catch (_: Exception) {}; return }
+        if (phase == Phase.SETUP || pinned) return
+        val now = System.currentTimeMillis()
+        if (now - lastPinAsk < 10 * 60_000) return            // they said no a moment ago: don't nag
+        lastPinAsk = now; lastPermissionAsk = now             // don't let the pop-up closer shut Android's "pin?" question
+        try { startLockTask() } catch (_: Exception) {}
+        main.postDelayed({
+            if (!pinned && !askedToPin && lockButtons && hasWindowFocus()) {
+                askedToPin = true
+                eyes.subCaption = "To lock me in: Settings → Lock screen and security → Other security settings → Pin windows: On"
+            }
+        }, 6000)
     }
     private fun isDefaultHome(): Boolean {
         val r = packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
