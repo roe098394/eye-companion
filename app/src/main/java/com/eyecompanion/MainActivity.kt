@@ -1104,9 +1104,14 @@ class MainActivity : Activity() {
     /** Pip may fish for praise from this person: mornings only, and each person at most once a day. */
     private fun mayFishFrom(who: String): Boolean {
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        return hour in 6..11 && prefs.getString("fished_$who", "") != todayKey
+        if (hour !in 6..11 || prefs.getString("fished_$who", "") == todayKey) return false
+        // Laura finds it annoying: only every few days for her
+        if (who == "Laura" && System.currentTimeMillis() - prefs.getLong("fishedAt_Laura", 0L) < 3 * 24 * 3600_000L) return false
+        return true
     }
-    private fun markFished(who: String) { prefs.edit().putString("fished_$who", todayKey).apply() }
+    private fun markFished(who: String) {
+        prefs.edit().putString("fished_$who", todayKey).putLong("fishedAt_$who", System.currentTimeMillis()).apply()
+    }
 
     /** Fishing for a compliment: offer some to tap (answered here, no online brain needed). */
     private fun offerCompliments() {
