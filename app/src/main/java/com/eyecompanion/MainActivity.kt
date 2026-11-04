@@ -455,6 +455,40 @@ class MainActivity : Activity() {
             (if (rubbishNights < 5) "Mark, I'm watching." else "Not bad, humans."))
     }
 
+    // ---- insulted: one photo, one playful roast
+    private var lastRoast = 0L
+    private fun roastWhoeverIsThere(insult: String) {
+        lastRoast = System.currentTimeMillis()
+        hideChoices()
+        speakLine(listOf("[suspicious] Oh really? Let me get a look at you…", "[suspicious] Is that so. Hold still. Scanning…",
+            "[angry] Right. Smile for the camera, insult-human.").fresh())
+        val id = replyId                      // anything said after this cancels the roast
+        lookThroughCamera { jpeg ->
+            val line = jpeg?.let {
+                online.lookAt(it, "Someone just insulted you (they said: \"${insult.take(80)}\"). Look at this photo from your camera " +
+                    "and roast whoever is in front of it with ONE short, playful comeback (max 25 words), starting with a feeling tag " +
+                    "like [laughing], [wink] or [suspicious]. Family-friendly light teasing ONLY about things like their messy hair, " +
+                    "their outfit, the mug they're holding, the mess or dishes behind them, or how they're standing. NEVER about " +
+                    "their body, weight, face, skin, age, glasses, or anything they can't change. If they look like a child, be " +
+                    "extra gentle and silly. If nobody is in the photo, roast the empty kitchen or the kettle instead.",
+                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Witty, never cruel, child-friendly.",
+                    maxTokens = 80)
+            }
+            main.post {
+                if (id != replyId) return@post
+                val ok = line?.takeIf { it.isNotBlank() && it.length < 300 }
+                val say = ok ?: listOf("[laughing] I'd roast you, but my lens is dusty. Lucky you.",
+                    "[wink] Rude. I'm writing that down. In permanent pixels.").fresh()
+                // after the "Let me get a look at you" line has been said
+                val waitQuiet = object : Runnable { override fun run() {
+                    if (id != replyId) return
+                    if (phase == Phase.LISTENING) speakLine(say) else main.postDelayed(this, 300)
+                } }
+                main.post(waitQuiet)
+            }
+        }
+    }
+
     // ---- silent treatment: rude twice (or rude and shouting) without saying sorry -> eyes turned away, no answers
     private var silentUntil = 0L
 
@@ -2420,6 +2454,11 @@ class MainActivity : Activity() {
             if (rude || (shouted && !nice)) {
                 temper = maxOf(-1f, temper - (if (rude && shouted) 0.8f else 0.5f))
                 eyes.feel(EyesView.Emotion.ANGRY, 4000)
+                // insulted: take a photo and roast whoever's in front (playful, at most every 10 minutes)
+                if (rude && !chloeMode && !carMode && online.enabled && online.seeingRestMs == 0L &&
+                    System.currentTimeMillis() - lastRoast > 10 * 60_000) {
+                    updateBaseMood(); roastWhoeverIsThere(text); return
+                }
             } else if (nice) {
                 temper = if (Regex("\\bsorry\\b").containsMatchIn(lower)) maxOf(0.3f, temper + 0.6f) else minOf(1f, temper + 0.4f)
                 eyes.feel(EyesView.Emotion.LOVE, 5000)            // heart eyes
