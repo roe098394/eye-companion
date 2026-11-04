@@ -458,6 +458,52 @@ class MainActivity : Activity() {
     // ---- silent treatment: rude twice (or rude and shouting) without saying sorry -> eyes turned away, no answers
     private var silentUntil = 0L
 
+    // ---- Honey (the dog, a pig really): one friendly reminder for Laura after 10am, at most twice a day
+    private var lastLauraSeen = 0L
+    private fun dogDue(): Boolean {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (carMode || hour !in 10..20 || prefs.getString("dogDone", "") == todayKey) return false
+        val asks = if (prefs.getString("dogAskDay", "") == todayKey) prefs.getInt("dogAsks", 0) else 0
+        return asks < 2 && System.currentTimeMillis() - prefs.getLong("dogLastAsk", 0) > 2 * 3_600_000L
+    }
+    /** A joke not heard for a long while (remembered across restarts). */
+    private fun dogJoke(): String {
+        val used = (prefs.getString("dogUsed", "") ?: "").split(",").mapNotNull { it.toIntOrNull() }
+        val fresh = Honey.JOKES.indices.filter { it !in used }.ifEmpty { Honey.JOKES.indices.toList() }
+        val pick = fresh.random()
+        prefs.edit().putString("dogUsed", (used + pick).takeLast(Honey.JOKES.size - 4).joinToString(",")).apply()
+        return Honey.JOKES[pick]
+    }
+    private var lastDogAsk = 0L
+    private fun remindDog() {
+        if (!dogDue() || phase != Phase.LISTENING || chloeMode) return
+        val asks = if (prefs.getString("dogAskDay", "") == todayKey) prefs.getInt("dogAsks", 0) else 0
+        prefs.edit().putString("dogAskDay", todayKey).putInt("dogAsks", asks + 1).putLong("dogLastAsk", System.currentTimeMillis()).apply()
+        lastDogAsk = System.currentTimeMillis()
+        speakLine(dogJoke())
+        showChoices(listOf("Honey's fed ✓", "Not yet")) { pick ->
+            hideChoices()
+            if (pick.startsWith("Honey")) { prefs.edit().putString("dogDone", todayKey).apply(); speakLine(Honey.THANKS.fresh()) }
+            else speakLine(Honey.LATER.fresh())
+        }
+    }
+    /** "I've fed Honey" / "dog's been fed" (or yes/no just after asking). */
+    private fun dogAnswer(lower: String): Boolean {
+        if (prefs.getString("dogDone", "") == todayKey) return false
+        val justAsked = System.currentTimeMillis() - lastDogAsk < 5 * 60_000
+        val about = Regex("\\b(honey|dog|doggy|pup|puppy)\\b").containsMatchIn(lower) && Regex("\\b(fed|feed|fed her|breakfast|food)\\b").containsMatchIn(lower)
+        if (!justAsked && !about) return false
+        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|soon)").containsMatchIn(lower)
+        val done = !no && (Regex("\\b(fed|done|given|gave|had)\\b").containsMatchIn(lower) ||
+            (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
+        when {
+            done -> { prefs.edit().putString("dogDone", todayKey).apply(); speakLine(Honey.THANKS.fresh()) }
+            no && justAsked -> speakLine(Honey.LATER.fresh())
+            else -> return false
+        }
+        return true
+    }
+
     // ---- updates: check GitHub now and then, download quietly, ask a human to tap Install
     private var lastUpdateCheck = 0L
     private var updateAskedFor = 0
@@ -764,6 +810,7 @@ class MainActivity : Activity() {
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
             }
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
+            if (isLaura) lastLauraSeen = System.currentTimeMillis()
             val head = raw?.substringBefore("[")?.uppercase() ?: ""
             val dishes = "DISHES" in head; val clothes = "CLOTHES" in head
             val line = raw?.replaceFirst(Regex("^\\s*((LAURA|OTHER|DISHES|CLOTHES)\\s*[:,;\\-]?\\s*)+", RegexOption.IGNORE_CASE), "")?.trim()
@@ -872,6 +919,12 @@ class MainActivity : Activity() {
             messCheck()
             maybeRoastDiablo()
             checkForUpdate()
+            run {   // Honey: remind when Laura's been heard or seen in the last few minutes
+                val now = System.currentTimeMillis()
+                if (dogDue() && (now - lastLauraHeard < 3 * 60_000 || now - lastLauraSeen < 3 * 60_000) && now - lastSpokeEnd > 15_000) remindDog()
+            }
+            // keep the Echo's Bluetooth link from going idle and dropping
+            if (bluetoothOut()) BtKeepAlive.start() else BtKeepAlive.stop()
             maybeSundayReport()
             run {
                 val now = System.currentTimeMillis()
@@ -2076,6 +2129,7 @@ class MainActivity : Activity() {
         val shouted = lastShouted; lastShouted = false
         // tablets answer ("I've taken them") counts whoever it's said to
         if (phase == Phase.LISTENING && tabletAnswer(removeName(text).lowercase())) return
+        if (phase == Phase.LISTENING && dogAnswer(removeName(text).lowercase())) return
         if (phase == Phase.LISTENING && binsAnswer(removeName(text).lowercase())) return
         if (phase == Phase.LISTENING && rubbishAnswer(removeName(text).lowercase())) return
 
@@ -3003,6 +3057,7 @@ class MainActivity : Activity() {
         try { unregisterReceiver(powerWatcher) } catch (_: Exception) {}
         try { unregisterReceiver(powerMenuWatcher) } catch (_: Exception) {}
         try { unregisterReceiver(installStatus) } catch (_: Exception) {}
+        BtKeepAlive.stop()
         main.removeCallbacks(powerNagLoop)
         ears?.stop()
         voice?.shutdown()

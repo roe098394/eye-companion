@@ -176,5 +176,42 @@ object Lines {
     )
 }
 
+/** Feed-the-dog reminders for Laura. Honey is a very greedy dog (a pig, basically). */
+object Honey {
+    val JOKES = listOf(
+        "[curious] Laura! Honey's been staring at the treat cupboard so hard I think it's starting to melt.",
+        "[laughing] Honey breakfast time, Laura. She oinked at me earlier. I'm not saying she's a pig. She's saying it.",
+        "[wink] Laura, Honey's doing her 'nobody has ever fed me' face again. Award-winning stuff. Feed her before she gets an Oscar.",
+        "[curious] Quick one, Laura: has Honey been fed? She's eyeing up the kettle. Honestly, I'd allow it.",
+        "[happy] Laura, Honey licked her bowl so clean I can see my reflection in it. Breakfast, please?",
+        "[surprised] Honey alert! Hunger levels critical. She's started eyeing up the fruit bowl, Laura.",
+        "[wink] Laura, if Honey doesn't get fed soon she'll start charging rent on that bowl.",
+        "[laughing] Laura, Honey wants me to tell you she's wasting away. She is not. But feed her anyway.",
+        "[happy] Ding ding! The Honey restaurant is open, Laura. One customer. Very hungry. Terrible tipper.",
+        "[wink] Laura, scientists confirm: Honey is ninety percent stomach, ten percent wag. Feeding time.",
+        "[curious] Laura, is Honey a dog, or a pig in a dog costume? Either way, she's hungry.",
+        "[happy] Honey's sitting by her bowl like it's a bus stop, Laura. The breakfast bus is late.",
+        "[surprised] Laura, Honey's thought about food four hundred times this morning. That's a record. Even for her.",
+        "[suspicious] Psst, Laura. Honey asked me to hack the treat cupboard. I said no. Please feed her before she tries the Tassimo.",
+        "[curious] Laura! Honey has filed a complaint. Subject: empty bowl. Priority: extremely high.",
+        "[surprised] Honey's tummy rumble just set off my microphone, Laura. Feeding time, I think.",
+        "[laughing] Laura, Honey's doing laps of the kitchen. It's either exercise or a protest about breakfast. It's breakfast.",
+        "[scared] Laura, Honey's looking at me like I'm a sausage. I'm a tablet. Please feed her before she checks.",
+        "[wink] Gentle reminder, Laura: the oinky one needs her breakfast. I mean Honey. Obviously.",
+        "[laughing] Laura, if Honey were any hungrier she'd be a hoover. Breakfast, please!",
+        "[happy] Laura, Honey has written you a song. It goes: food, food, food. Catchy.",
+        "[laughing] Laura, Honey says she hasn't eaten since the dawn of time. I checked. It was yesterday.",
+        "[happy] Breakfast o'clock for Honey, Laura. She's already set the table. By which I mean she's drooling on it.",
+        "[love] Laura! Honey just pulled her best piggy face. Ten out of ten. Feed her, she's earned it.",
+        "[curious] Laura, my sensors detect one hungry Honey and zero dog food. Science says fix it.",
+    )
+    val THANKS = listOf("[love] Yay! Honey's fed. One happy piggy. Sorry, doggy.",
+        "[happy] Breakfast served. Honey will love you forever. Or until lunch.",
+        "[love] Thank you, Laura. Honey's tail just broke the sound barrier.",
+        "[happy] Honey's fed. The oinking has stopped. Peace returns to the kitchen.")
+    val LATER = listOf("[neutral] Okay. I'll ask later. Honey will be counting the seconds.",
+        "[wink] No rush. Honey's only been waiting her entire life.", "[neutral] Okay, later. I'll tell Honey to hold the drama.")
+}
+
 /** A random line, avoiding ones said lately. */
 fun List<String>.fresh(): String = Lines.fresh(this)
