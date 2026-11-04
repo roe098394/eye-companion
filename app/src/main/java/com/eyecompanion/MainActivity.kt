@@ -1209,13 +1209,27 @@ class MainActivity : Activity() {
             "[hot] I'm melting. I'm literally melting. Thanks, tumble dryer.",
             "[hot] Phew. Someone open a window. I'm sweating and I don't even have skin.").fresh())
     }
+    /** Live readout for a minute: how well what Pip hears right now matches the learned sound. */
+    private fun testSound(snd: Appliances.Sound, label: String) {
+        eyes.showCaptions = true
+        val until = System.currentTimeMillis() + 60_000
+        val tick = object : Runnable { override fun run() {
+            val pct = (snd.share * 100).toInt()
+            eyes.subCaption = "${label.replaceFirstChar { it.uppercase() }} test: match ${"%.1f".format(snd.lastScore)} (needs under ${"%.1f".format(snd.limit)})" +
+                (if (snd.lastLoudEnough) "" else " · too quiet") + " · recent $pct% · ${if (snd.on) "ON ✅" else "off"}"
+            if (System.currentTimeMillis() < until) main.postDelayed(this, 1000) else eyes.subCaption = ""
+        } }
+        main.post(tick)
+    }
     /** Menu: teach Pip the dryer's or the kettle's sound. */
     private fun learnSoundMenu(snd: Appliances.Sound, label: String, howTo: String) {
         val known = appliances.learned(snd)
         val status = if (!known) "Not learned yet." else if (snd.on) "Learned. I can hear it right now." else "Learned. I can't hear it right now."
         val b = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Learn the $label sound")
-            .setMessage("$status\n\n$howTo, then press Listen. Keep it quiet for 20 seconds (no talking) while I learn its sound.")
+            .setMessage("$status\n\n$howTo, then press Listen. Keep it quiet for 20 seconds (no talking) while I learn its sound." +
+                "\n\nBest time: when it's properly going (for the kettle, about a minute after switching on)." +
+                (if (known) "\n\nTest it shows for a minute how well what I hear matches." else ""))
             .setPositiveButton("Listen") { _, _ ->
                 interrupt()
                 eyes.feel(EyesView.Emotion.CURIOUS, 26_000)
@@ -1234,7 +1248,7 @@ class MainActivity : Activity() {
                     } }
                 }, 3000)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(if (known) "Test it" else "Cancel") { _, _ -> if (known) testSound(snd, label) }
         if (known) b.setNeutralButton("Forget it") { _, _ -> appliances.forget(snd); if (snd === appliances.dryer) { dryerHot = false; updateBaseMood() } }
         b.showOwn()
     }

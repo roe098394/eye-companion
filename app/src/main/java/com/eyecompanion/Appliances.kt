@@ -22,6 +22,9 @@ class Appliances(private val prefs: SharedPreferences) {
         @Volatile var on = false
         @Volatile var onSince = 0L
         @Volatile var lastScore = 99.0
+        @Volatile var lastLoudEnough = false
+        /** share of recent seconds that matched (0..1), for the menu's test readout */
+        @Volatile var share = 0.0
     }
 
     val dryer = Sound("dryer")
@@ -65,6 +68,8 @@ class Appliances(private val prefs: SharedPreferences) {
         // one second's worth: loudness per band in decibels
         val row = DoubleArray(16) { 10 * log10(secAcc[it] / secFrames + 1.0) }
         secAcc = DoubleArray(16); secFrames = 0
+        val avg = row.average()
+        roomFloor = if (avg < roomFloor) avg else roomFloor + 0.02
         val l = learning
         if (l != null) {
             learnRows.add(row)
@@ -74,28 +79,41 @@ class Appliances(private val prefs: SharedPreferences) {
         for (s in all) check(s, row)
     }
 
+    /**
+     * How different this second's sound "shape" is from the learned one (0 = identical). Shape means the
+     * balance between low and high pitches, with the overall loudness taken out, so a kettle that's still
+     * getting going (quieter) or roaring away (louder) still counts as the kettle.
+     */
     private fun score(s: Sound, row: DoubleArray): Double {
         val m = s.mean ?: return 99.0; val sp = s.spread!!
+        val rowAvg = row.average(); val mAvg = m.average()
         var tot = 0.0
-        for (b in row.indices) {
-            val d = row[b] - m[b]
-            // quieter than the machine is a strong "no"; a bit louder (someone talking over it) counts less
-            tot += (if (d < 0) -d else d * 0.35) / maxOf(sp[b], 2.0)
-        }
+        for (b in row.indices) tot += abs((row[b] - rowAvg) - (m[b] - mAvg)) / maxOf(sp[b], 2.0)
         return tot / row.size
+    }
+    /** the quiet room's background level (drifts up slowly, drops straight down to anything quieter) */
+    @Volatile var roomFloor = 200.0
+        private set
+    private fun loudEnough(s: Sound, row: DoubleArray): Boolean {
+        val a = row.average()
+        return a > s.mean!!.average() - 10.0 && a > roomFloor + 4.0
     }
 
     private fun check(s: Sound, row: DoubleArray) {
         if (s.mean == null) return
         val sc = score(s, row); s.lastScore = sc
-        s.history.addLast(sc < s.limit)
-        val window = if (s === kettle) 30 else 180                       // kettle: 30 s; dryer: 3 minutes
+        val loud = loudEnough(s, row); s.lastLoudEnough = loud
+        s.history.addLast(sc < s.limit && loud)
+        val window = if (s === kettle) 20 else 180                       // kettle: 20 s; dryer: 3 minutes
         while (s.history.size > window) s.history.removeFirst()
+        val share = s.history.count { it }.toDouble() / maxOf(1, s.history.size)
+        s.share = share
         if (s.history.size < window / 2) return
-        val share = s.history.count { it }.toDouble() / s.history.size
         val now = System.currentTimeMillis()
-        if (!s.on && share > 0.6) { s.on = true; s.onSince = now; onChange(s, true) }
-        else if (s.on && share < 0.25) { s.on = false; onChange(s, false) }
+        val onAt = if (s === kettle) 0.5 else 0.6
+        val offAt = if (s === kettle) 0.15 else 0.25
+        if (!s.on && share > onAt) { s.on = true; s.onSince = now; onChange(s, true) }
+        else if (s.on && share < offAt) { s.on = false; onChange(s, false) }
     }
 
     private fun finishLearning(s: Sound) {
@@ -105,18 +123,18 @@ class Appliances(private val prefs: SharedPreferences) {
         s.mean = mean; s.spread = spread
         // how far its own seconds were from the average: allow a bit more than that
         val own = rows.map { score(s, it) }.sorted()
-        s.limit = maxOf(2.6, own[(own.size * 0.9).toInt().coerceAtMost(own.size - 1)] * 1.6)
+        s.limit = maxOf(2.0, own[(own.size * 0.9).toInt().coerceAtMost(own.size - 1)] * 1.8)
         s.history.clear(); s.on = false
         save(s)
-        val ok = mean.average() > 5
+        val ok = mean.average() > roomFloor + 4.0                       // clearly louder than the quiet room
         learnDone?.invoke(ok); learnDone = null
     }
 
     private fun save(s: Sound) {
-        prefs.edit().putString("snd_${s.name}", s.mean!!.joinToString(",") + "|" + s.spread!!.joinToString(",") + "|" + s.limit).apply()
+        prefs.edit().putString("snd2_${s.name}", s.mean!!.joinToString(",") + "|" + s.spread!!.joinToString(",") + "|" + s.limit).apply()
     }
     private fun load(s: Sound) {
-        val t = prefs.getString("snd_${s.name}", null) ?: return
+        val t = prefs.getString("snd2_${s.name}", null) ?: return
         try {
             val p = t.split("|")
             s.mean = p[0].split(",").map { it.toDouble() }.toDoubleArray()
@@ -125,7 +143,7 @@ class Appliances(private val prefs: SharedPreferences) {
         } catch (_: Exception) { s.mean = null }
     }
     fun learned(s: Sound) = s.mean != null
-    fun forget(s: Sound) { s.mean = null; s.on = false; s.history.clear(); prefs.edit().remove("snd_${s.name}").apply() }
+    fun forget(s: Sound) { s.mean = null; s.on = false; s.history.clear(); prefs.edit().remove("snd2_${s.name}").apply() }
 
     companion object {
         /** The mic hands every chunk here (whichever Ears is running). */
