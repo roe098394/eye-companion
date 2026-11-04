@@ -70,6 +70,7 @@ class Appliances(private val prefs: SharedPreferences) {
         secAcc = DoubleArray(16); secFrames = 0
         val avg = row.average()
         roomFloor = if (avg < roomFloor) avg else roomFloor + 0.02
+        if (!kettle.on && stage == 0 && !pipTalking) { recent.addLast(avg); while (recent.size > 120) recent.removeFirst() }
         val l = learning
         if (l != null) {
             learnRows.add(row)
@@ -108,38 +109,60 @@ class Appliances(private val prefs: SharedPreferences) {
     private fun check(s: Sound, row: DoubleArray) {
         if (s.mean == null && s !== kettle) return
         if (pipTalking) return
-        // the kettle sits right next to Pip: a long, steady roar well above the quiet room is the kettle too,
-        // even if the learned pattern doesn't quite match (or hasn't been learned)
-        // Two quick checks: 4 seconds of it in a row = "is that the kettle?", then a short pause and
-        // 4 more seconds in a row within 15 seconds = confirmed (so a burst of chatter doesn't count).
-        val roaring = s === kettle && row.average() > roomFloor + 12.0
+        val now = System.currentTimeMillis()
         val sc = if (s.mean != null) score(s, row) else 99.0; s.lastScore = sc
-        val loud = s.mean != null && loudEnough(s, row); s.lastLoudEnough = loud || roaring
-        val hit = (sc < s.limit && loud) || roaring
-        s.history.addLast(hit)
-        if (s === kettle && !s.on) {
-            val now = System.currentTimeMillis()
-            when (stage) {
-                0 -> { run1 = if (hit) run1 + 1 else 0; if (run1 >= 4) { stage = 1; stageAt = now; run1 = 0; onMaybe(s) } }
-                1 -> if (now - stageAt >= 3000) { stage = 2; run1 = 0 }                  // a little pause before checking again
-                2 -> {
-                    run1 = if (hit) run1 + 1 else 0
-                    if (run1 >= 4) { stage = 0; run1 = 0; s.on = true; s.onSince = now; onChange(s, true) }
-                    else if (now - stageAt > 18_000) { stage = 0; run1 = 0 }             // didn't confirm: never mind
-                }
-            }
-        }
-        val window = if (s === kettle) 20 else 180                       // kettle: 20 s; dryer: 3 minutes
-        while (s.history.size > window) s.history.removeFirst()
+        val loud = s.mean != null && loudEnough(s, row)
+        if (s === kettle) { checkKettle(row, sc < s.limit && loud); return }
+        // the dryer: most of the last 3 minutes sounded like it
+        s.lastLoudEnough = loud
+        s.history.addLast(sc < s.limit && loud)
+        while (s.history.size > 180) s.history.removeFirst()
         val share = s.history.count { it }.toDouble() / maxOf(1, s.history.size)
         s.share = share
-        if (s.history.size < window / 2) return
-        val now = System.currentTimeMillis()
-        val onAt = if (s === kettle) 0.35 else 0.5
-        val offAt = if (s === kettle) 0.1 else 0.2
-        if (!s.on && share > onAt) { s.on = true; s.onSince = now; onChange(s, true) }
-        else if (s.on && share < offAt) { s.on = false; onChange(s, false) }
+        if (s.history.size < 90) return
+        if (!s.on && share > 0.5) { s.on = true; s.onSince = now; onChange(s, true) }
+        else if (s.on && share < 0.2) { s.on = false; onChange(s, false) }
     }
+
+    /**
+     * The kettle sits right next to Pip, so it's a sudden jump in loudness over whatever the kitchen sounded like
+     * a minute or two ago (that way the dryer droning away doesn't count), or its learned pattern (unless it
+     * sounds more like the dryer). Two quick checks: 4 seconds of it = "is that the kettle?", a short pause,
+     * then 4 more seconds = confirmed. One odd second in the middle is forgiven.
+     */
+    private fun checkKettle(row: DoubleArray, patternHit: Boolean) {
+        val s = kettle; val now = System.currentTimeMillis()
+        val avg = row.average()
+        val base = if (recent.size >= 20) baseline() else roomFloor
+        val roaring = recent.size >= 20 && avg > base + 8.0
+        val newSound = avg > base + 3.0                             // something louder than the kitchen was a minute ago
+        val d = dryer
+        val dryerLike = d.mean != null && score(d, row) < d.limit && !patternHit
+        val hit = (patternHit && !dryerLike && newSound) || roaring
+        s.lastLoudEnough = roaring || patternHit
+        s.history.addLast(hit); while (s.history.size > 20) s.history.removeFirst()
+        s.share = s.history.count { it }.toDouble() / s.history.size
+        if (s.on) {
+            quiet = if (hit) 0 else quiet + 1
+            if (quiet >= 15 || now - s.onSince > 6 * 60_000) { s.on = false; quiet = 0; onChange(s, false) }   // clicked off
+            return
+        }
+        fun counted(): Boolean {                                   // 4 hits, forgiving one miss at a time
+            if (hit) { run1++; misses = 0 } else if (++misses >= 2) { run1 = 0; misses = 0 }
+            return run1 >= 4
+        }
+        when (stage) {
+            0 -> if (counted()) { stage = 1; stageAt = now; run1 = 0; misses = 0; onMaybe(s) }
+            1 -> if (now - stageAt >= 3000) { stage = 2; run1 = 0; misses = 0 }          // a little pause, then check again
+            2 -> if (counted()) { stage = 0; run1 = 0; s.on = true; s.onSince = now; quiet = 0; onChange(s, true) }
+                 else if (now - stageAt > 18_000) { stage = 0; run1 = 0 }               // didn't confirm: never mind
+        }
+    }
+
+    /** what the kitchen has sounded like over the last two minutes (frozen while the kettle's going) */
+    private val recent = ArrayDeque<Double>()
+    private fun baseline(): Double { val l = recent.sorted(); return l[l.size / 4] }
+    private var quiet = 0; private var misses = 0
 
     private fun finishLearning(s: Sound) {
         val rows = learnRows; learning = null

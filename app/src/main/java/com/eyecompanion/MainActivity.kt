@@ -1166,7 +1166,9 @@ class MainActivity : Activity() {
     private fun applianceChanged(snd: Appliances.Sound, on: Boolean) {
         val now = System.currentTimeMillis()
         if (snd === appliances.kettle) {
-            if (on && !carMode) addCuppa()                              // every boil is a cuppa
+            if (on && !carMode && now - prefs.getLong("lastCuppaAt", 0L) > 5 * 60_000) {      // a re-boil isn't a new cuppa
+                prefs.edit().putLong("lastCuppaAt", now).apply(); addCuppa()
+            }
             if (!on) { kettleOffAt = now; kettleForgotten = false }
             if (!chloeMode && phase != Phase.ASLEEP && phase != Phase.SETUP) {
                 if (on) { takeoverMode(240_000L); eyes.stareAt(1.8f, 0.12f, 4 * 60_000L) }      // red takeover glare at the kettle, far right
