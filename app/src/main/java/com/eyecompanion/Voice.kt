@@ -142,8 +142,22 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     /** Mouth zipped (mute button): nothing gets said. */
     @Volatile var muted = false
 
+    /** "Mwahaha" and friends are played as a real evil laugh, not read out. */
+    private val EVIL = Regex("(?i)\\(?\\bevil laugh(ter)?\\b\\)?|\\b(mw|mu|bw)a+([- ]?h+a+)+h*\\b[!.]*")
+
     private fun say(raw: String) {
         if (muted) return
+        if (EVIL.containsMatchIn(raw)) {
+            var at = 0
+            for (m in EVIL.findAll(raw)) {
+                say(raw.substring(at, m.range.first))
+                flushCloudBatch()
+                sayLaugh()
+                at = m.range.last + 1
+            }
+            say(raw.substring(at))
+            return
+        }
         val clean = cleanForSpeech(raw)
         if (clean.isBlank()) return
         val online = activeKey().isNotBlank()
@@ -157,6 +171,15 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             return
         }
         sayNow(clean)
+    }
+
+    private fun sayLaugh() {
+        val gen = generation
+        pending.incrementAndGet()
+        player.execute {
+            if (gen == generation) { onStartedTalking(); Mmf.evilLaughNow() }
+            finishedOne()
+        }
     }
 
     private fun sayNow(clean: String) {
