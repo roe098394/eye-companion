@@ -2949,7 +2949,7 @@ class MainActivity : Activity() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
                 if (phase == Phase.ASLEEP && eyes.trainHit(e.x, e.y)) { startTraining(); return true }
-                if (phase != Phase.SETUP && phase != Phase.ASLEEP && eyes.volHit(e.x, e.y)) { showVolume(); return true }
+                if (phase == Phase.ASLEEP && eyes.volHit(e.x, e.y)) { showVolume(); return true }
                 if (phase != Phase.SETUP && eyes.sleepHit(e.x, e.y)) {
                     if (phase == Phase.ASLEEP) { wakeUp(); updateSleepChip() }
                     else { speakLine(listOf("[sleepy] Night night.", "[sleepy] Nap time. Tap the sun to wake me.").fresh()); sleepAfterTalking(nap = false) }
@@ -3290,9 +3290,11 @@ class MainActivity : Activity() {
     private var lastVolTest = 0L
     private fun sayVolumeTest() {
         val now = System.currentTimeMillis()
-        if (now - lastVolTest < 1500 || phase != Phase.LISTENING) return
+        if (now - lastVolTest < 1500 || voice?.busy == true) return
         lastVolTest = now
-        speakLine(listOf("[happy] Like this?", "[happy] How's this?", "[wink] Better?", "[happy] Testing, testing.").fresh())
+        val line = listOf("Like this?", "How's this?", "Better?", "Testing, testing.").fresh()
+        if (phase == Phase.LISTENING) speakLine("[happy] $line")
+        else voice?.apply { beginReply(); feed(line); endReply() }
     }
 
     @Deprecated("Back does nothing: this is the home screen")

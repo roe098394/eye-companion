@@ -524,7 +524,7 @@ class EyesView(context: Context) : View(context) {
             canvas.drawRoundRect(sleepRect, sleepRect.height() / 2, sleepRect.height() / 2, chipBox)
             canvas.drawText(sleepChip, sleepRect.left + pad, sleepRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         }
-        if (mood != Mood.SLEEP && mood != Mood.LOADING && !carMode) {
+        if (mood == Mood.SLEEP && sleepScreen) {
             val label = "🔊 Volume"
             chipPaint.textSize = h * 0.03f; chipPaint.color = eyeColor; chipPaint.alpha = 95
             val pad = h * 0.022f; val tw = chipPaint.measureText(label)
@@ -703,10 +703,10 @@ class EyesView(context: Context) : View(context) {
         val m = height * 0.04f
         return x >= trainRect.left - m && x <= trainRect.right + m && y >= trainRect.top - m && y <= trainRect.bottom + m
     }
-    /** Volume button, just above the sleep button (awake only). */
+    /** Volume button, just above the wake button (sleep screen only). */
     private val volRect = RectF()
     fun volHit(x: Float, y: Float): Boolean {
-        if (mood == Mood.SLEEP || volRect.isEmpty) return false
+        if (mood != Mood.SLEEP || !sleepScreen || volRect.isEmpty) return false
         val m = height * 0.03f
         val hit = x >= volRect.left - m && x <= volRect.right + m && y >= volRect.top - m && y <= volRect.bottom + m
         if (hit) chipTappedAt = now()
