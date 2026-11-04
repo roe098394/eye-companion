@@ -339,9 +339,10 @@ class MainActivity : Activity() {
     /** true = both black (stinky) bins, false = green recycling bin. */
     private fun blackBinWeek(): Boolean {
         val thu = binThursday() ?: java.util.Calendar.getInstance()
+        // Thu 5 Nov 2026 is the green recycling bin; the black bins are the week after, and so on
         val ref = java.util.Calendar.getInstance().apply { set(2026, java.util.Calendar.NOVEMBER, 5, 12, 0, 0) }
         val weeks = Math.round((thu.timeInMillis - ref.timeInMillis) / (7 * 86_400_000.0))
-        return weeks % 2 == 0L
+        return Math.floorMod(weeks, 2L) == 1L
     }
     private fun remindBins() {
         if (!binsDue() || phase != Phase.LISTENING || chloeMode) return
