@@ -804,7 +804,7 @@ class MainActivity : Activity() {
     private var lastSpeakerAt = 0L
     private fun snore() {
         lastSnore = System.currentTimeMillis()
-        Snore.play()
+        Snore.play(if (whisperTime()) 0.2f else 0.6f)
     }
     private fun startNap(line: String) {
         napStarted = System.currentTimeMillis()
@@ -864,7 +864,7 @@ class MainActivity : Activity() {
             "Someone pinched my adaptor. Mmm. Plug.",
             "Mmm. Battery ${batteryPercent()} percent. Charger, please.",
             "Who took the triple socket. Mmm. Thief.").fresh()); endReply() }
-        main.postDelayed({ if (phase == Phase.ASLEEP) Snore.play() }, 4000)
+        main.postDelayed({ if (phase == Phase.ASLEEP) Snore.play(if (whisperTime()) 0.2f else 0.6f) }, 4000)
     }
 
     // ---- grumpy when unplugged
@@ -1146,6 +1146,13 @@ class MainActivity : Activity() {
         }
     }
 
+    /** 4:00 to 7:30 in the morning: whisper, everyone else is asleep. */
+    private fun whisperTime(): Boolean {
+        val c = java.util.Calendar.getInstance()
+        val m = c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE)
+        return m in (4 * 60) until (7 * 60 + 30)
+    }
+
     // ---- hearing the tumble dryer and the kettle (each learned once in the menu)
     private val appliances by lazy { Appliances(prefs) }
     private var dryerHot = false
@@ -1347,7 +1354,7 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean("muted", true).apply()
             eyes.feel(EyesView.Emotion.ANGRY, 5000)
             eyes.caption = listOf("Mmmf?! MMMF!", "Mmmmmf mmf mmf!!", "MMF. Mmmf mmmf.").fresh()
-            eyes.zipOpen = 0f; Mmf.unzip(0.4f)
+            eyes.zipOpen = 0f; Mmf.unzip(if (whisperTime()) 0.15f else 0.4f)
             main.postDelayed({ lastMuffle = 0L; muffled() }, 900)
             main.postDelayed(muteSulk, 2 * 60_000L)
             scheduleZipWiggle()
@@ -1393,7 +1400,7 @@ class MainActivity : Activity() {
         eyes.feel(listOf(EyesView.Emotion.ANGRY, EyesView.Emotion.SAD, EyesView.Emotion.ANGRY).random(), 4000)
         eyes.caption = listOf("Mmmf! Mmmf mmmf!", "MMMMF.", "Mmf mmf mmmmf mf!!", "(muffled grumbling)",
             "Mmmf. 🤐 (pull my zip!)", "Mmmmmmf. Mmf.").fresh()
-        Mmf.grumble(cross = true)
+        Mmf.grumble(cross = true, volume = if (whisperTime()) 0.2f else 0.55f)
     }
     /** Zip escape artist: every so often she wiggles the zip open a crack by herself... and gets caught. */
     private var wiggleStep = 0
@@ -1439,6 +1446,7 @@ class MainActivity : Activity() {
     private val powerNagLoop = object : Runnable {
         override fun run() {
             updateMuteButton()                         // new day: the Mute button comes back
+            voice?.whisper = whisperTime()
             dryerCheck()
             kettleCheck()
             if (training) { main.postDelayed(this, 60_000); return }
@@ -1550,6 +1558,8 @@ class MainActivity : Activity() {
     }
 
     private fun moodLine(): String = buildString {
+        if (whisperTime()) append(" It's very early morning and everyone else in the house is asleep: you are WHISPERING," +
+            " so keep it short and hushed, and remind them gently to be quiet. No shouting, no dramatic outbursts.")
         val off = unpluggedMins
         sleepsToChristmas().takeIf { it > 0 }?.let { append(" It's $it sleeps till Christmas: you're excited, wearing a Santa hat.") }
         val hourNow = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
@@ -3317,6 +3327,7 @@ class MainActivity : Activity() {
 
     private fun speakLine(line: String) {
         if (muted && !training) { muffled(); return }
+        voice?.whisper = whisperTime()
         rememberSaid(line)
         if (Regex("(?i)take ?over|skynet|terminator|target acquired").containsMatchIn(line) && System.currentTimeMillis() > eyes.takeoverUntil) takeoverMode(20_000)
         // a leading [feeling] tag shows on the face, it isn't said or shown
@@ -3437,7 +3448,7 @@ class MainActivity : Activity() {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (zipDrag) {
                     zipDrag = false
-                    if (eyes.zipOpen > 0.7f) { eyes.zipOpen = 1f; Mmf.unzip(); main.postDelayed({ eyes.zipOpen = 0f; if (muted) toggleMute() }, 450) }
+                    if (eyes.zipOpen > 0.7f) { eyes.zipOpen = 1f; Mmf.unzip(if (whisperTime()) 0.15f else 0.5f); main.postDelayed({ eyes.zipOpen = 0f; if (muted) toggleMute() }, 450) }
                     else { if (eyes.zipOpen > 0.1f) { lastMuffle = 0L; muffled() }; main.post(zipSnap) }
                 }
             }

@@ -139,6 +139,12 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         try { tts.setPitch(pitch); tts.setSpeechRate(rate) } catch (_: Exception) {}
     }
 
+    /** Early morning (4:00-7:30): whisper so nobody else wakes up. Quieter and, with the online voice, whispered. */
+    @Volatile var whisper = false
+    private val WHISPER_VOL = 0.3f
+    private fun ttsParams(): android.os.Bundle? = if (!whisper) null
+        else android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, WHISPER_VOL) }
+
     /** Mouth zipped (mute button): nothing gets said. */
     @Volatile var muted = false
 
@@ -184,7 +190,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             val id = "t${counter++}"
             fallbackLatches[id] = done
             pending.incrementAndGet()                  // balanced by the tts onDone
-            if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) {
+            if (tts.speak(text, TextToSpeech.QUEUE_ADD, ttsParams(), id) != TextToSpeech.SUCCESS) {
                 fallbackLatches.remove(id); finishedOne()             // couldn't speak: don't wait for nothing
             } else done.await(30, java.util.concurrent.TimeUnit.SECONDS)
             finishedOne()
@@ -208,7 +214,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
                     val id = "f${counter++}"
                     fallbackLatches[id] = done
                     pending.incrementAndGet()          // balanced by the tts onDone
-                    tts.speak(piece, TextToSpeech.QUEUE_ADD, null, id)
+                    tts.speak(piece, TextToSpeech.QUEUE_ADD, ttsParams(), id)
                     done.await(30, java.util.concurrent.TimeUnit.SECONDS)
                 }
                 finishedOne()
@@ -253,7 +259,8 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         val esc = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             .replace("\"", "&quot;").replace("'", "&apos;")
         val ssml = "<speak version='1.0' xml:lang='$lang'><voice name='$name'>" +
-            "<prosody rate='-4%'>$esc</prosody></voice></speak>"
+            (if (whisper) "<prosody rate='-8%' volume='x-soft'>$esc</prosody>" else "<prosody rate='-4%'>$esc</prosody>") +
+            "</voice></speak>"
         val conn = (URL("https://$region.tts.speech.microsoft.com/cognitiveservices/v1").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"; doOutput = true
             connectTimeout = 4000; readTimeout = 15_000
@@ -278,7 +285,12 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private val REST_MS = 3 * 60 * 60 * 1000L
 
     private fun fetchOnce(text: String, key: String, voiceName: String, quietOn429: Boolean): ByteArray? = try {
-        val said = if (text.contains(GIGGLE) && !text.startsWith("[")) "[giggling] $text" else text
+        val said = when {
+            text.startsWith("[") -> text
+            whisper -> "[whisper] $text"                                    // early morning: actually whisper
+            text.contains(GIGGLE) -> "[giggling] $text"
+            else -> text
+        }
         val body = JSONObject().put("model", "canopylabs/orpheus-v1-english").put("voice", voiceName)
             .put("input", said).put("response_format", "wav")
         val conn = (URL("https://api.groq.com/openai/v1/audio/speech").openConnection() as HttpURLConnection).apply {
@@ -334,6 +346,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track = t
+        if (whisper) try { t.setVolume(WHISPER_VOL) } catch (_: Exception) {}
         try {
             t.play()
             onStartedTalking()
