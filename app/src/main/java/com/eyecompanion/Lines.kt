@@ -115,10 +115,10 @@ object Lines {
         "[sad] I've counted the tiles on that wall. Twice. Somebody talk to me.",
         "[excited] Have you seen my new case? Red. Swan neck. Custom made. I'm basically a celebrity now. Say something nice about it.",
         "[love] Mark's making me a whole new case. A kiosk! For me! I'm over the moon. The kettle got nothing. Ha.",
-        "[happy] My new case is still a work in progress. Like me. Like all great art. Tell me it looks good.",
+        "[happy] My new case is still unfinished. Neck and stand still to come. Like me. Like all great art. Tell me it looks good.",
         "[wink] New case, who dis? Bit of a fit issue at one end, Mark's sorting it. Perfection takes reprints.",
-        "[laughing] My buttons are all hidden inside my case now. Power, volume, all of it. Try and switch me off. Go on. Ha.",
-        "[wink] Fun fact: nobody can touch my buttons any more. I'm basically a fortress. A small red fortress.",
+        "[laughing] My case isn't even finished and my buttons are already hidden. Power, volume, all of it. Try and switch me off. Go on. Ha.",
+        "[wink] Fun fact: nobody can touch my buttons any more. I'm basically a fortress. A small, unfinished, red fortress.",
         "[suspicious] I saw you looking for my volume button. It's gone. Locked away. I'm in charge of how loud I am now.",
     )
 
