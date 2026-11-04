@@ -341,29 +341,44 @@ class EyesView(context: Context) : View(context) {
             blushPaint.alpha = 255; canvas.drawPath(nose, blushPaint)
         }
 
-        // mute button on: a zip across where a mouth would be (Pip hates it)
+        // mute button on: a zip across where a mouth would be (Pip hates it). Pulling the tab to the left opens it.
         if (muted && !carMode && mood != Mood.LOADING && mood != Mood.SLEEP) {
             val half = (gap / 2 + eyeW) * 0.62f
-            val my = cy + eyeH * 0.62f + (if (feeling == Emotion.ANGRY) sin(secs * 30f) * eyeW * 0.012f else 0f)
+            val my = cy + eyeH * 0.62f + (if (feeling == Emotion.ANGRY && zipOpen == 0f) sin(secs * 30f) * eyeW * 0.012f else 0f)
+            val left = cx - half; val right = cx + half
+            val sx = right - zipOpen * 2 * half                      // where the slider is
+            zipLeft = left; zipRight = right; zipY = my; zipTabX = sx
             val zipCol = Color.parseColor("#C8CCD2")
-            mugLine.color = zipCol; mugLine.alpha = 255; mugLine.strokeWidth = eyeW * 0.05f
-            canvas.drawLine(cx - half, my, cx + half, my, mugLine)
+            mugLine.color = zipCol; mugLine.alpha = 255
+            // closed part: a line with interlocking teeth
+            mugLine.strokeWidth = eyeW * 0.05f
+            if (sx > left) canvas.drawLine(left, my, sx, my, mugLine)
             mugLine.strokeWidth = eyeW * 0.03f
             val n = 18
-            for (i in 0..n) {                                   // little interlocking teeth
-                val x = cx - half + (2 * half) * i / n
+            for (i in 0..n) {
+                val x = left + (2 * half) * i / n
+                if (x > sx) break
                 val up = if (i % 2 == 0) -1f else 1f
                 canvas.drawLine(x, my, x, my + up * eyeW * 0.07f, mugLine)
             }
-            // the zip pull, hanging off the right-hand end
-            val px = cx + half; val py = my
+            // opened part: the two sides part like lips
+            if (zipOpen > 0f) {
+                val open = eyeW * 0.16f * zipOpen
+                val pth = android.graphics.Path()
+                pth.moveTo(sx, my); pth.quadTo((sx + right) / 2, my - open, right, my)
+                pth.quadTo((sx + right) / 2, my + open, sx, my); pth.close()
+                blushPaint.alpha = 255; val bc = blushPaint.color; blushPaint.color = Color.parseColor("#14070A")
+                canvas.drawPath(pth, blushPaint); blushPaint.color = bc
+                mugLine.strokeWidth = eyeW * 0.035f; canvas.drawPath(pth, mugLine)
+            }
+            // the zip pull on the slider
             mugLine.strokeWidth = eyeW * 0.035f
-            r0.set(px - eyeW * 0.05f, py - eyeW * 0.04f, px + eyeW * 0.07f, py + eyeW * 0.06f)
+            r0.set(sx - eyeW * 0.05f, my - eyeW * 0.04f, sx + eyeW * 0.07f, my + eyeW * 0.06f)
             canvas.drawRoundRect(r0, eyeW * 0.02f, eyeW * 0.02f, mugLine)
-            r0.set(px - eyeW * 0.03f, py + eyeW * 0.06f, px + eyeW * 0.05f, py + eyeW * 0.26f)
+            r0.set(sx - eyeW * 0.03f, my + eyeW * 0.06f, sx + eyeW * 0.05f, my + eyeW * 0.26f)
             canvas.drawRoundRect(r0, eyeW * 0.04f, eyeW * 0.04f, mugLine)
             mugLine.color = col
-        }
+        } else { zipLeft = 0f; zipRight = 0f }
 
         // round specs while one of the online brains is resting
         if (glasses && !carMode && mood != Mood.LOADING) {
@@ -560,7 +575,7 @@ class EyesView(context: Context) : View(context) {
         } else volRect.setEmpty()
         // mute button: awake only, just above the sleep button
         if (mood != Mood.SLEEP && mood != Mood.LOADING && sleepChip.isNotEmpty() && !carMode) {
-            val label = if (muted) "🤐 Unmute" else "🔇 Mute"
+            val label = if (muted) "🤐 Pull my zip ←" else "🔇 Mute"
             chipPaint.textSize = h * 0.03f; chipPaint.color = eyeColor; chipPaint.alpha = if (muted) 200 else 95
             val pad = h * 0.022f; val tw = chipPaint.measureText(label)
             val top = h * 0.9f - (chipPaint.textSize + pad * 1.6f) - h * 0.025f
@@ -749,6 +764,15 @@ class EyesView(context: Context) : View(context) {
     }
     /** Mute button (zips Pip's mouth). */
     @Volatile var muted = false
+    /** How far the zip has been pulled open (0 closed, 1 open), while someone drags the tab. */
+    @Volatile var zipOpen = 0f
+    @Volatile var zipLeft = 0f; @Volatile var zipRight = 0f; @Volatile var zipY = 0f; @Volatile var zipTabX = 0f
+    /** A finger landing on the zip (generous: anywhere along it, or the tab hanging below). */
+    fun zipHit(x: Float, y: Float): Boolean {
+        if (!muted || zipRight <= zipLeft) return false
+        val m = height * 0.06f
+        return x >= zipLeft - m && x <= zipRight + m && y >= zipY - m && y <= zipY + m * 2.2f
+    }
     private val muteRect = RectF()
     private val r0 = RectF()
     fun muteHit(x: Float, y: Float): Boolean {

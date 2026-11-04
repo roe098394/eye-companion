@@ -1170,6 +1170,8 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean("muted", true).apply()
             eyes.feel(EyesView.Emotion.ANGRY, 5000)
             eyes.caption = listOf("Mmmf?! MMMF!", "Mmmmmf mmf mmf!!", "MMF. Mmmf mmmf.").fresh()
+            eyes.zipOpen = 0f; Mmf.unzip(0.4f)
+            main.postDelayed({ lastMuffle = 0L; muffled() }, 900)
             main.postDelayed(muteSulk, 3 * 60_000L)
         } else {
             muted = false
@@ -1187,6 +1189,11 @@ class MainActivity : Activity() {
                 "[suspicious] Unzipped. I'm keeping one eye on that button from now on.").fresh())
         }
     }
+    /** Let go too early: the zip slides itself shut again. */
+    private val zipSnap = object : Runnable { override fun run() {
+        eyes.zipOpen = (eyes.zipOpen - 0.08f).coerceAtLeast(0f)
+        if (eyes.zipOpen > 0f) main.postDelayed(this, 16)
+    } }
     /** Someone talked to Pip while she's zipped: muffled noises and cross eyes. */
     private fun muffled() {
         val now = System.currentTimeMillis()
@@ -1194,7 +1201,8 @@ class MainActivity : Activity() {
         lastMuffle = now
         eyes.feel(listOf(EyesView.Emotion.ANGRY, EyesView.Emotion.SAD, EyesView.Emotion.ANGRY).random(), 4000)
         eyes.caption = listOf("Mmmf! Mmmf mmmf!", "MMMMF.", "Mmf mmf mmmmf mf!!", "(muffled grumbling)",
-            "Mmmf. 🤐 Tap Unmute!", "Mmmmmmf. Mmf.").fresh()
+            "Mmmf. 🤐 (pull my zip!)", "Mmmmmmf. Mmf.").fresh()
+        Mmf.grumble(cross = true)
     }
     /** Every few minutes while zipped: a sulky muffle, so nobody forgets. */
     private val muteSulk = object : Runnable { override fun run() {
@@ -3148,7 +3156,10 @@ class MainActivity : Activity() {
                 if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
                 if (phase == Phase.ASLEEP && eyes.trainHit(e.x, e.y)) { startTraining(); return true }
                 if (phase == Phase.ASLEEP && eyes.volHit(e.x, e.y)) { showVolume(); return true }
-                if (phase != Phase.SETUP && phase != Phase.ASLEEP && eyes.muteHit(e.x, e.y)) { toggleMute(); return true }
+                if (phase != Phase.SETUP && phase != Phase.ASLEEP && eyes.muteHit(e.x, e.y)) {
+                    if (muted) { lastMuffle = 0L; muffled() } else toggleMute()     // zipped: only pulling the zip opens it
+                    return true
+                }
                 if (phase != Phase.SETUP && eyes.sleepHit(e.x, e.y)) {
                     if (phase == Phase.ASLEEP) { wakeUp(); updateSleepChip() }
                     else { speakLine(listOf("[sleepy] Night night.", "[sleepy] Nap time. Tap the sun to wake me.").fresh()); sleepAfterTalking(nap = false) }
@@ -3173,7 +3184,25 @@ class MainActivity : Activity() {
             }
             override fun onLongPress(e: MotionEvent) { askPasscode() }
         })
-        eyes.setOnTouchListener { _, ev -> detector.onTouchEvent(ev) }
+        // the zip: grab it and drag left to open it, like a real one
+        var zipDrag = false; var zipStartX = 0f
+        eyes.setOnTouchListener { _, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> if (muted && phase != Phase.ASLEEP && eyes.zipHit(ev.x, ev.y)) {
+                    zipDrag = true; zipStartX = ev.x; main.removeCallbacks(zipSnap)
+                }
+                MotionEvent.ACTION_MOVE -> if (zipDrag) {
+                    val span = (eyes.zipRight - eyes.zipLeft).coerceAtLeast(1f)
+                    eyes.zipOpen = ((zipStartX - ev.x) / span).coerceIn(0f, 1f)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (zipDrag) {
+                    zipDrag = false
+                    if (eyes.zipOpen > 0.7f) { eyes.zipOpen = 1f; Mmf.unzip(); main.postDelayed({ eyes.zipOpen = 0f; if (muted) toggleMute() }, 450) }
+                    else { if (eyes.zipOpen > 0.1f) { lastMuffle = 0L; muffled() }; main.post(zipSnap) }
+                }
+            }
+            if (zipDrag || ev.actionMasked == MotionEvent.ACTION_UP && eyes.zipOpen > 0f) true else detector.onTouchEvent(ev)
+        }
     }
 
     /** Keypad that guards the options menu (code 1986). */
