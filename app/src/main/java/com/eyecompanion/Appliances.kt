@@ -99,11 +99,23 @@ class Appliances(private val prefs: SharedPreferences) {
         return a > s.mean!!.average() - 15.0 && a > roomFloor + 2.5
     }
 
+    /** Pip's own voice is playing: don't let it count as (or against) a machine. */
+    @Volatile var pipTalking = false
+    private var roarRun = 0
+
     private fun check(s: Sound, row: DoubleArray) {
-        if (s.mean == null) return
-        val sc = score(s, row); s.lastScore = sc
-        val loud = loudEnough(s, row); s.lastLoudEnough = loud
-        s.history.addLast(sc < s.limit && loud)
+        if (s.mean == null && s !== kettle) return
+        if (pipTalking) return
+        // the kettle sits right next to Pip: a long, steady roar well above the quiet room is the kettle too,
+        // even if the learned pattern doesn't quite match (or hasn't been learned)
+        // (12 seconds in a row with no let-up, so people chatting near Pip don't count)
+        val roaring = s === kettle && row.average() > roomFloor + 12.0
+        roarRun = if (roaring) roarRun + 1 else 0
+        val roar = roarRun >= 12
+        val sc = if (s.mean != null) score(s, row) else 99.0; s.lastScore = sc
+        val loud = s.mean != null && loudEnough(s, row); s.lastLoudEnough = loud || roaring
+        s.history.addLast((sc < s.limit && loud) || roar)
+        if (roar && !s.on) { s.on = true; s.onSince = System.currentTimeMillis(); onChange(s, true) }
         val window = if (s === kettle) 20 else 180                       // kettle: 20 s; dryer: 3 minutes
         while (s.history.size > window) s.history.removeFirst()
         val share = s.history.count { it }.toDouble() / maxOf(1, s.history.size)

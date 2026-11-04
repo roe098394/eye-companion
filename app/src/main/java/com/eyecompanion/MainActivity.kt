@@ -3221,6 +3221,7 @@ class MainActivity : Activity() {
     private fun setPhase(p: Phase) {
         if (p != phase) phaseSince = System.currentTimeMillis()
         phase = p
+        appliances.pipTalking = p == Phase.TALKING || p == Phase.THINKING
         // Keep listening while thinking/talking so you can interrupt by voice.
         ears?.paused = when (p) {
             Phase.LISTENING -> false
