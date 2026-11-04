@@ -1167,6 +1167,10 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         if (snd === appliances.kettle) {
             if (on && !carMode) addCuppa()                              // every boil is a cuppa
+            if (!chloeMode && phase != Phase.ASLEEP && phase != Phase.SETUP) {
+                if (on) { eyes.stareAt(1.8f, 0.12f, 4 * 60_000L); eyes.feel(EyesView.Emotion.SUSPICIOUS, 4 * 60_000L) }  // side-eye the kettle, far right
+                else { eyes.stareAt(0f, 0f, 1); eyes.feel(EyesView.Emotion.NEUTRAL, 1) }                               // it's stopped: look back
+            }
             if (on && phase == Phase.LISTENING && !chloeMode && now - lastKettleMoan > 20 * 60_000 && Math.random() < 0.6) {
                 lastKettleMoan = now
                 val n = cuppas
