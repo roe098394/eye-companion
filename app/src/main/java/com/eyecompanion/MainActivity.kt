@@ -2675,7 +2675,7 @@ class MainActivity : Activity() {
                 else -> "Your ears don't recognise this voice."
             }
             text = "$text\n(Note: they're asking who is talking. $ears Use the photo to help: the family are Mark (a grown-up man with facial hair), Laura (a grown-up woman), " +
-                "Brandon (a 20-year-old man with no facial hair), Sophie, Amelia (a smaller girl with glasses) and Chloe (5, the smallest). If the photo agrees with your ears, " +
+                "Brandon (a 20-year-old man with no facial hair), Sophie (a girl who wears earrings), Amelia (a smaller girl with glasses) and Chloe (5, the smallest). If the photo agrees with your ears, " +
                 "say who it is with confidence (and brag). If it doesn't, or you can't see anyone, give your best guess cheekily and ask them " +
                 "to say their name. Talk about their name, never their body or looks.)"
         }
