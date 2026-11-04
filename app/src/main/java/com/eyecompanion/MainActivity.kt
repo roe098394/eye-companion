@@ -1018,8 +1018,9 @@ class MainActivity : Activity() {
                     "is an adult woman wearing glasses, or wearing a black or green dressing gown, or a long fluffy brown teddy-bear coat, otherwise OTHER. Then add the word DISHES if you can see used dishes, " +
                     "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
                     "clothes or laundry. Then, on the same line, say hello " +
-                    "and give one short, warm, genuine compliment about something you can really see (smile, top, " +
-                    "hair, glasses...), starting with the [love] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
+                    "and give one short, warm, genuine compliment about the PERSON themselves: their smile, hair, top, " +
+                    "glasses, earrings, how they look today. Never compliment the kitchen, the room, the background or " +
+                    "objects. Never mention the dishes or clothes in this line. Start it with the [love] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
                     "gown matches the kettle (forgiven), a green one matches the recycling bin (very eco), the teddy coat makes her a cuddly bear. If nobody is in the photo, write OTHER and just say hello.",
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
             }
