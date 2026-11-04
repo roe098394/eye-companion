@@ -62,6 +62,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     @Volatile private var stopRequested = false
     @Volatile private var lastFailure = 0L
     @Volatile private var modelIndex = 0
+    @Volatile private var turn = 0
     @Volatile private var lastRateLimit = 0L
 
     val enabled get() = apiKey.isNotBlank()
@@ -80,7 +81,11 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         image: ByteArray? = null,
     ) = worker.execute {
         stopRequested = false
-        if (modelIndex != 0 && System.currentTimeMillis() - lastRateLimit > 90_000) modelIndex = 0   // per-minute limit has passed
+        // share the work: alternate between the two chat brains; the seeing brain (photos) only if both are resting
+        if (image == null) {
+            val order = listOf(turn % 2, (turn + 1) % 2, 2); turn++
+            modelIndex = order.firstOrNull { !resting(MODELS[it]) } ?: order[0]
+        }
         history.add("user" to (if (image != null) "$userText (shown a photo from your camera)" else userText))
         while (history.size > maxTurns) history.removeAt(0)
         while (history.isNotEmpty() && history[0].first != "user") history.removeAt(0)
