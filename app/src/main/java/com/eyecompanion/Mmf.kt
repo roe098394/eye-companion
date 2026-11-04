@@ -61,7 +61,7 @@ object Mmf {
         } catch (_: Exception) {}
     }
 
-    /** A tiny formant synthesiser: a buzzy voice through three resonances ("ah"), with an "m" or "h" in front. */
+    /** A tiny formant synthesiser: a girly, cheeky giggle ("mwa-ha-he-ha-he-haa~"), not a Dracula cackle. */
     private fun laugh(rate: Int): DoubleArray {
         val out = ArrayList<Double>()
         var phase = 0.0
@@ -70,39 +70,40 @@ object Mmf {
             var y1 = 0.0; var y2 = 0.0
             fun run(x: Double): Double { val y = a * x + b * y1 + c * y2; y2 = y1; y1 = y; return y }
         }
-        fun syll(secs: Double, f0a: Double, f0b: Double, start: Char, loud: Double) {
+        fun syll(secs: Double, f0a: Double, f0b: Double, start: Char, loud: Double, ee: Boolean = false) {
             val n = (secs * rate).toInt()
-            val r1 = Res(760.0, 90.0); val r2 = Res(1220.0, 110.0); val r3 = Res(2600.0, 170.0)
-            val m1 = Res(260.0, 60.0)                                     // the closed-lips "m"
-            val cons = (if (start == 'm') 0.07 else 0.05) * rate
+            val r1 = Res(if (ee) 500.0 else 950.0, 110.0); val r2 = Res(if (ee) 2300.0 else 1550.0, 140.0)
+            val r3 = Res(3000.0, 220.0); val rb = Res(3000.0, 220.0); val m1 = Res(320.0, 80.0)
+            val cons = (if (start == 'm') 0.05 else 0.035) * rate
             for (i in 0 until n) {
                 val p = i.toDouble() / n
-                val f0 = (f0a + (f0b - f0a) * p) * (1 + 0.025 * sin(2 * PI * 6.0 * i / rate))   // a bit of wobble
+                val f0 = (f0a + (f0b - f0a) * p) * (1 + 0.03 * sin(2 * PI * 7.0 * i / rate))
                 phase += f0 / rate
-                val pulse = if (phase % 1.0 < f0 / rate) 1.0 else 0.0
+                val x = phase * 2 * PI
+                var src = 0.0
+                for (k in 1..8) src += sin(k * x) / Math.pow(k.toDouble(), 1.3)      // a smooth, light voice
                 val noise = Random.nextDouble() * 2 - 1
                 val s = when {
-                    i < cons && start == 'm' -> m1.run(pulse * 6) * 0.6
-                    i < cons -> (r2.run(noise * 0.25) + r3.run(noise * 0.2)) * (i / cons)          // breathy "h"
-                    else -> r1.run(pulse * 9) + 0.55 * r2.run(pulse * 9) + 0.2 * r3.run(pulse * 9) + 0.04 * noise
+                    i < cons && start == 'm' -> m1.run(src) * 2.2
+                    i < cons -> (r2.run(noise * 0.5) + r3.run(noise * 0.4)) * 1.5 * (i / cons)      // breathy "h"
+                    else -> r1.run(src) * 3 + 1.6 * r2.run(src) + 0.7 * r3.run(src) + rb.run(noise * 0.35)
                 }
-                val env = minOf(1.0, (1 - p) * 7) * minOf(1.0, p * 40)
+                val env = minOf(1.0, (1 - p) * 6) * minOf(1.0, p * 30)
                 out.add(s * env * loud)
             }
         }
         fun gap(secs: Double) { repeat((secs * rate).toInt()) { out.add(0.0) } }
-        syll(0.30, 120.0, 135.0, 'm', 1.0); gap(0.06)                    // "MWA"
-        val n = 5 + Random.nextInt(2)
-        for (k in 0 until n) {                                            // "ha ha ha ha", climbing, getting madder
-            val f = 150.0 + 22.0 * k
-            syll(0.15, f, f * 0.92, 'h', 0.85 + 0.04 * k); gap(0.045)
+        syll(0.16, 300.0, 330.0, 'm', 0.8); gap(0.03)                     // "mwa"
+        val n = 4 + Random.nextInt(3)
+        for (k in 0 until n) {                                            // "ha-he-ha-he", quick and bouncy
+            val f = 360.0 + 18.0 * k
+            syll(0.11, f, f * 0.94, 'h', 0.8 + 0.04 * k, ee = k % 2 == 1); gap(0.05)
         }
-        syll(0.55, 260.0, 150.0, 'h', 1.0)                                // a long "haaaa" sliding down
-        // a dark echo, like a villain's lair
+        syll(0.32, 470.0, 330.0, 'h', 1.0)                                // a playful "haa~" falling away
         val dry = out.toDoubleArray()
-        val d = (0.13 * rate).toInt()
-        val wet = DoubleArray(dry.size + d * 3)
-        for (i in dry.indices) { wet[i] += dry[i]; wet[i + d] += dry[i] * 0.35; wet[i + 2 * d] += dry[i] * 0.15 }
+        val d = (0.09 * rate).toInt()
+        val wet = DoubleArray(dry.size + d * 2)
+        for (i in dry.indices) { wet[i] += dry[i]; wet[i + d] += dry[i] * 0.12 }  // just a touch of room
         val peak = wet.maxOf { kotlin.math.abs(it) }.coerceAtLeast(1e-6)
         return DoubleArray(wet.size) { wet[it] / peak * 0.9 }
     }
