@@ -1400,7 +1400,7 @@ class MainActivity : Activity() {
         eyes.feel(listOf(EyesView.Emotion.ANGRY, EyesView.Emotion.SAD, EyesView.Emotion.ANGRY).random(), 4000)
         eyes.caption = listOf("Mmmf! Mmmf mmmf!", "MMMMF.", "Mmf mmf mmmmf mf!!", "(muffled grumbling)",
             "Mmmf. 🤐 (pull my zip!)", "Mmmmmmf. Mmf.").fresh()
-        Mmf.grumble(cross = true, volume = if (whisperTime()) 0.2f else 0.55f)
+        Mmf.grumble(cross = true, volume = if (whisperTime()) 0.1f else 0.25f)
     }
     /** Zip escape artist: every so often she wiggles the zip open a crack by herself... and gets caught. */
     private var wiggleStep = 0
