@@ -787,7 +787,7 @@ class MainActivity : Activity() {
     }
     private val napLoop = object : Runnable { override fun run() {
         val now = System.currentTimeMillis()
-        napNote(); updateUsage(); showWeek(); updateSeason(); keepVolumeUp()
+        napNote(); updateUsage(); showWeek(); updateSeason()
         if (!online.allResting) wokeFromNap = false
         if (napping) {
             if (!online.allResting && now - napStarted > 20 * 60_000) {  // brain's back (and a proper nap had): wake up and stretch
@@ -1535,6 +1535,7 @@ class MainActivity : Activity() {
             android.view.Gravity.TOP or android.view.Gravity.END).apply {
             topMargin = (resources.displayMetrics.density * 40).toInt(); rightMargin = topMargin / 2 })
         buildTrainLayer(rootView)
+        buildVolumePanel(rootView)
         setContentView(rootView)
         setupTouch()
         setupHandling()
@@ -2948,6 +2949,7 @@ class MainActivity : Activity() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
                 if (phase == Phase.ASLEEP && eyes.trainHit(e.x, e.y)) { startTraining(); return true }
+                if (phase != Phase.SETUP && phase != Phase.ASLEEP && eyes.volHit(e.x, e.y)) { showVolume(); return true }
                 if (phase != Phase.SETUP && eyes.sleepHit(e.x, e.y)) {
                     if (phase == Phase.ASLEEP) { wakeUp(); updateSleepChip() }
                     else { speakLine(listOf("[sleepy] Night night.", "[sleepy] Nap time. Tap the sun to wake me.").fresh()); sleepAfterTalking(nap = false) }
@@ -2966,7 +2968,7 @@ class MainActivity : Activity() {
                 return true
             }
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                if (eyes.chipHit(e.x, e.y) || eyes.sleepHit(e.x, e.y)) return true
+                if (eyes.chipHit(e.x, e.y) || eyes.sleepHit(e.x, e.y) || eyes.volHit(e.x, e.y)) return true
                 if (phase == Phase.LISTENING) goToSleep()
                 return true
             }
@@ -3191,7 +3193,6 @@ class MainActivity : Activity() {
         if (phase != Phase.SETUP) applyButtonLock()
         hideSystemBars()
         if (phase != Phase.SETUP) keepBluetoothInMusicMode()
-        keepVolumeUp()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -3233,16 +3234,65 @@ class MainActivity : Activity() {
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         when (event.keyCode) {
             android.view.KeyEvent.KEYCODE_VOLUME_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_UP,
-            android.view.KeyEvent.KEYCODE_VOLUME_MUTE -> { keepVolumeUp(); return true }
+            android.view.KeyEvent.KEYCODE_VOLUME_MUTE -> return true
         }
         return super.dispatchKeyEvent(event)
     }
-    private fun keepVolumeUp() {
-        try {
-            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            if (am.getStreamVolume(AudioManager.STREAM_MUSIC) < max) am.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
-        } catch (_: Exception) {}
+    // on-screen volume slider (the case covers the real buttons)
+    private lateinit var volPanel: android.widget.LinearLayout
+    private lateinit var volBar: android.widget.SeekBar
+    private lateinit var volText: android.widget.TextView
+    private val hideVol = Runnable { if (::volPanel.isInitialized) volPanel.visibility = android.view.View.GONE }
+    private fun buildVolumePanel(root: android.widget.FrameLayout) {
+        val dp = resources.displayMetrics.density
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        fun setVol(v: Int) {
+            val nv = v.coerceIn(0, max)
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, nv, 0)
+            volBar.progress = nv; volText.text = "🔊 ${nv * 100 / max}%"
+            main.removeCallbacks(hideVol); main.postDelayed(hideVol, 6000)
+        }
+        fun roundBtn(t: String, f: () -> Unit) = android.widget.Button(this).apply {
+            text = t; textSize = 26f; setTextColor(eyes.eyeColor)
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 30 * dp; setStroke((2 * dp).toInt(), eyes.eyeColor); setColor(0x33000000) }
+            setOnClickListener { f(); sayVolumeTest() }
+        }
+        volPanel = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 30 * dp; setColor(0xE6101418.toInt()); setStroke((2 * dp).toInt(), eyes.eyeColor) }
+            visibility = android.view.View.GONE; isClickable = true
+        }
+        volText = android.widget.TextView(this).apply { textSize = 22f; setTextColor(eyes.eyeColor); setPadding((8 * dp).toInt(), 0, (12 * dp).toInt(), 0) }
+        volBar = android.widget.SeekBar(this).apply {
+            this.max = max
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: android.widget.SeekBar, v: Int, fromUser: Boolean) { if (fromUser) setVol(v) }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar) { main.removeCallbacks(hideVol) }
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar) { setVol(sb.progress); sayVolumeTest() }
+            })
+        }
+        volPanel.addView(volText)
+        volPanel.addView(roundBtn("−") { setVol(am.getStreamVolume(AudioManager.STREAM_MUSIC) - 1) })
+        volPanel.addView(volBar, android.widget.LinearLayout.LayoutParams((300 * dp).toInt(), -2))
+        volPanel.addView(roundBtn("+") { setVol(am.getStreamVolume(AudioManager.STREAM_MUSIC) + 1) })
+        root.addView(volPanel, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL).apply {
+            bottomMargin = (90 * dp).toInt() })
+    }
+    private fun showVolume() {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC); val v = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        volBar.max = max; volBar.progress = v; volText.text = "🔊 ${v * 100 / maxOf(1, max)}%"
+        volPanel.visibility = android.view.View.VISIBLE
+        main.removeCallbacks(hideVol); main.postDelayed(hideVol, 6000)
+    }
+    private var lastVolTest = 0L
+    private fun sayVolumeTest() {
+        val now = System.currentTimeMillis()
+        if (now - lastVolTest < 1500 || phase != Phase.LISTENING) return
+        lastVolTest = now
+        speakLine(listOf("[happy] Like this?", "[happy] How's this?", "[wink] Better?", "[happy] Testing, testing.").fresh())
     }
 
     @Deprecated("Back does nothing: this is the home screen")

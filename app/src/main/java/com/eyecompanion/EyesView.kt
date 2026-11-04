@@ -524,6 +524,16 @@ class EyesView(context: Context) : View(context) {
             canvas.drawRoundRect(sleepRect, sleepRect.height() / 2, sleepRect.height() / 2, chipBox)
             canvas.drawText(sleepChip, sleepRect.left + pad, sleepRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         }
+        if (mood != Mood.SLEEP && mood != Mood.LOADING && !carMode) {
+            val label = "🔊 Volume"
+            chipPaint.textSize = h * 0.03f; chipPaint.color = eyeColor; chipPaint.alpha = 95
+            val pad = h * 0.022f; val tw = chipPaint.measureText(label)
+            val top = h * 0.9f - (chipPaint.textSize + pad * 1.6f) - h * 0.025f
+            volRect.set(w * 0.975f - tw - pad * 2, top, w * 0.975f, top + chipPaint.textSize + pad * 1.6f)
+            chipBox.color = eyeColor; chipBox.alpha = chipPaint.alpha / 3; chipBox.strokeWidth = h * 0.004f
+            canvas.drawRoundRect(volRect, volRect.height() / 2, volRect.height() / 2, chipBox)
+            canvas.drawText(label, volRect.left + pad, volRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
+        } else volRect.setEmpty()
 
         postInvalidateOnAnimation()
     }
@@ -692,6 +702,15 @@ class EyesView(context: Context) : View(context) {
         if (!sleepScreen || trainRect.isEmpty) return false
         val m = height * 0.04f
         return x >= trainRect.left - m && x <= trainRect.right + m && y >= trainRect.top - m && y <= trainRect.bottom + m
+    }
+    /** Volume button, just above the sleep button (awake only). */
+    private val volRect = RectF()
+    fun volHit(x: Float, y: Float): Boolean {
+        if (mood == Mood.SLEEP || volRect.isEmpty) return false
+        val m = height * 0.03f
+        val hit = x >= volRect.left - m && x <= volRect.right + m && y >= volRect.top - m && y <= volRect.bottom + m
+        if (hit) chipTappedAt = now()
+        return hit
     }
     /** The sleep / wake button, bottom-right ("" hides it). */
     var sleepChip = ""
