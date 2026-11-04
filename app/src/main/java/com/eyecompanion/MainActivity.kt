@@ -455,6 +455,13 @@ class MainActivity : Activity() {
             (if (rubbishNights < 5) "Mark, I'm watching." else "Not bad, humans."))
     }
 
+    // ---- per-person memory: was this person nice or nasty last time they spoke?
+    private fun rememberTone(name: String?, tone: String) {
+        if (name == null || tone.isEmpty()) return
+        prefs.edit().putString("tone_$name", tone).putLong("toneAt_$name", System.currentTimeMillis()).apply()
+    }
+    private fun whoFromPrint(print: FloatArray?): String? = print?.let { voices.identify(it)?.first }
+
     // ---- insulted: one photo, one playful roast
     private var lastRoast = 0L
     private fun roastWhoeverIsThere(insult: String) {
@@ -2434,6 +2441,7 @@ class MainActivity : Activity() {
             val nowS = System.currentTimeMillis()
             if (nowS < silentUntil) {
                 if (nice && !rude) {
+                    rememberTone(whoFromPrint(print), "nice")
                     silentUntil = 0L; temper = maxOf(0.2f, temper + 0.6f); updateBaseMood()
                     eyes.stareAt(0f, 0f, 1); eyes.feel(EyesView.Emotion.LOVE, 3000)
                     speakLine(listOf("[suspicious] Hmph. Fine. Apology accepted. This time.", "[love] Okay. Friends again. I'm still writing it down though.").fresh())
@@ -2444,6 +2452,7 @@ class MainActivity : Activity() {
                 return
             }
             if (rude && (temper < -0.3f || shouted)) {
+                rememberTone(whoFromPrint(print), "rude")
                 silentUntil = nowS + 3 * 60_000
                 temper = maxOf(-1f, temper - 0.5f); updateBaseMood()
                 eyes.feel(EyesView.Emotion.ANGRY, 3000); eyes.stareAt(-1.6f, 0.1f, 15_000)
@@ -2457,6 +2466,7 @@ class MainActivity : Activity() {
                 // insulted: take a photo and roast whoever's in front (playful, at most every 10 minutes)
                 if (rude && !chloeMode && !carMode && online.enabled && online.seeingRestMs == 0L &&
                     System.currentTimeMillis() - lastRoast > 10 * 60_000) {
+                    rememberTone(whoFromPrint(print), "rude")
                     updateBaseMood(); roastWhoeverIsThere(text); return
                 }
             } else if (nice) {
@@ -2511,6 +2521,27 @@ class MainActivity : Activity() {
         if (speaker?.equals("Mark", true) == true && rubbishDue() && now - lastRubbishAsk > 20 * 60_000 && !overheard) {
             lastRubbishAsk = now
             text = "$text (Note: it's after 8pm and Mark hasn't taken the rubbish out tonight: answer, then nag him to take it out and ask if he has.)"
+        }
+        if (speaker != null && !overheard) {
+            val prev = prefs.getString("tone_$speaker", "") ?: ""
+            val lastSpoke = prefs.getLong("spokeAt_$speaker", 0L)
+            if (prev.isNotEmpty() && lastSpoke > 0 && now - lastSpoke > 10 * 60_000) {
+                if (prev == "rude") {
+                    eyes.feel(EyesView.Emotion.SUSPICIOUS, 4000)
+                    text = "$text (Note: last time $speaker spoke to you they were rude to you. Mention it with a bit of playful huffiness, but forgive them straight away if they're nice or say sorry now.)"
+                } else if (prev == "nice") {
+                    eyes.feel(EyesView.Emotion.LOVE, 3000)
+                    text = "$text (Note: last time $speaker spoke to you they were lovely to you. Be extra warm and mention it.)"
+                }
+            }
+            val lowerNow = lower
+            val toneNow = when {
+                RUDE.containsMatchIn(lowerNow) || (shouted && !NICE.containsMatchIn(lowerNow)) -> "rude"
+                NICE.containsMatchIn(lowerNow) -> "nice"
+                else -> ""
+            }
+            rememberTone(speaker, toneNow)
+            prefs.edit().putLong("spokeAt_$speaker", now).apply()
         }
         if (speaker?.equals("Chloe", true) == true) startChloeMode(say = false)
         if (chloeMode) chloeLastActive = System.currentTimeMillis()
