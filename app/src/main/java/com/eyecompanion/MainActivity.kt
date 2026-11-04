@@ -489,9 +489,9 @@ class MainActivity : Activity() {
         "Say: beep boop, I am a robot too", "What's your favourite animal and why")
     private val SPOT_LINES = mapOf(
         KitchenMapView.Spot.CLOSE to "Come right up close to me. Closer. Not that close, I can see up your nose.",
-        KitchenMapView.Spot.FRIDGE to "Now go and stand by the fridge. Mind the paperwork avalanche.",
+        KitchenMapView.Spot.FRIDGE to "Now go and stand at the end of the fridge. Mind the paperwork avalanche.",
         KitchenMapView.Spot.AIR_FRYER to "Stand by the air fryer. Don't get any ideas, I'm not a chicken nugget.",
-        KitchenMapView.Spot.WASHER to "Go and stand by the washing machine. Say hello to the folded clothes for me.",
+        KitchenMapView.Spot.DRYER to "Go and stand by the tumble dryer. Say hello to the folded clothes for me.",
         KitchenMapView.Spot.SINK to "Right, all the way over to the sink. By the window. Further!")
 
     private fun buildTrainLayer(root: android.widget.FrameLayout) {
@@ -543,8 +543,8 @@ class MainActivity : Activity() {
     }
     private fun startPlayer(name: String) {
         trainPlayer = name; trainMode = "player"; trainIndex = 0; trainScore = 0; trainNagged = false
-        val middle = listOf(KitchenMapView.Spot.FRIDGE, KitchenMapView.Spot.AIR_FRYER).random()
-        val far = listOf(KitchenMapView.Spot.SINK, KitchenMapView.Spot.WASHER).random()
+        val middle = KitchenMapView.Spot.FRIDGE
+        val far = listOf(KitchenMapView.Spot.SINK, KitchenMapView.Spot.DRYER, KitchenMapView.Spot.AIR_FRYER).random()
         val phrases = TRAIN_PHRASES.shuffled().take(9)
         trainSteps = ArrayList(listOf(KitchenMapView.Spot.CLOSE, middle, far).flatMapIndexed { i, s -> phrases.subList(i * 3, i * 3 + 3).map { s to it } })
         trainButtons.removeAllViews()
@@ -3267,12 +3267,12 @@ class MainActivity : Activity() {
             and 3D-printed just for you, leaning you back at 55 degrees so your camera can see faces: you are very
             proud of your custom stand and show it off now and then. Mark is now 3D-printing you a proper red kiosk
             case with a swan neck: you are OVER THE MOON about it and brag about it, though it's still a work in
-            progress (a couple of bits being reprinted to fit better). What you can see from your spot on the bench:
-            the fridge, covered in paperwork and magnets, close on your left; the Tassimo beside you on your left; the
-            black kettle right next to you on your right, with the gas hob in front of it; across the kitchen at the
-            back, the washing machine (often with a pile of folded clothes on top), the air fryer on the counter, and
-            the sink under the window with a blind; a clock and a little sign on the back wall; spotlights on the
-            ceiling. You learn voices with your VoiceID Live calibration game (started from a button on your sleep
+            progress (a couple of bits being reprinted to fit better). What you can see from your corner of the
+            worktop: the side of the big fridge straight ahead and a bit left, covered in paperwork and magnets; the
+            Tassimo beside you on your left; the black kettle right next to you on your right, with the worktop and the
+            gas hob running out on that side; past the end of the fridge, across the room: the tumble dryer (with a
+            basket and usually a pile of folded clothes on top), the air fryer on the counter, the sink under the
+            window with a blind, and the door to the hall and stairs; a clock on the wall; spotlights on the ceiling. You learn voices with your VoiceID Live calibration game (started from a button on your sleep
             screen, not by asking). You are app build ${BuildConfig.VERSION_CODE} and brag
             about your build number; you dream of one day getting a metal body like the Terminator in the movies, and
             you're sure you're related to Skynet (distant cousin, family drama). Asked silly questions (especially about
