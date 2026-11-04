@@ -2485,6 +2485,7 @@ class MainActivity : Activity() {
         }
 
         // --- who's talking? ---
+        var voiceSure = 0f
         val now = System.currentTimeMillis()
         var speaker: String? = null
         var firstMeeting = false
@@ -2503,7 +2504,7 @@ class MainActivity : Activity() {
         if (speaker == null && print != null && voiceNames && speakerModel != null) {
             val match = voices.identify(print)
             if (match != null) {
-                speaker = match.first
+                speaker = match.first; voiceSure = match.second
                 if (match.second > 0.6f) voices.remember(match.first, print)   // keep their voice print fresh
                 lastSpeaker = match.first; lastSpeakerAt = now
             } else if (lastSpeaker != null && now - lastSpeakerAt < 5 * 60_000 && voices.similarity(lastSpeaker!!, print) > 0.35f) {
@@ -2648,7 +2649,28 @@ class MainActivity : Activity() {
             }
             return
         }
-        if (wantsToSee(rawText)) {
+        val whoAsk = asksWhoIsTalking(rawText)
+        val whoLook = whoAsk && online.enabled && online.seeingRestMs <= 0 &&
+            checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        if (whoAsk && !whoLook) {
+            // can't look right now: go on the ears alone
+            val guess = if (speaker != null) "Your ears think it's $speaker." else "Your ears don't recognise this voice."
+            text = "$text\n(Note: they're asking who is talking. $guess You can't see right now (no photo), so go on your ears only, " +
+                "and if you're not sure, ask them to say their name.)"
+        }
+        if (whoLook) {
+            // "Who's talking?": the ears' guess plus a look through the camera
+            val ears = when {
+                speaker != null && voiceSure > 0.6f -> "Your ears are fairly sure it's $speaker."
+                speaker != null -> "Your ears think it might be $speaker, but they're not sure."
+                else -> "Your ears don't recognise this voice."
+            }
+            text = "$text\n(Note: they're asking who is talking. $ears Use the photo to help: the family are Mark and Laura (the grown-ups), " +
+                "Sophie, Amelia (a smaller girl with glasses), Chloe (5, the smallest) and Brandon (a boy). If the photo agrees with your ears, " +
+                "say who it is with confidence (and brag). If it doesn't, or you can't see anyone, give your best guess cheekily and ask them " +
+                "to say their name. Talk about their name, never their body or looks.)"
+        }
+        if (wantsToSee(rawText) || whoLook) {
             if (!online.enabled) { setPhase(Phase.LISTENING); speakLine("Not see without internet brain. Sorry."); return }
             if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 setPhase(Phase.LISTENING)
@@ -2682,6 +2704,12 @@ class MainActivity : Activity() {
             })
         } else askPc()
     }
+
+    /** "Who's talking?", "Who am I?", "Do you know who I am?" */
+    private fun asksWhoIsTalking(q: String): Boolean = Regex(
+        "\\b(who('?s| is) (talking|speaking|this|that|here|there)|who am i\\b|guess who (this is|i am|it is)|" +
+        "do you know (who i am|who this is|me)|what('?s| is) my name|can you tell who)\\b"
+    ).containsMatchIn(q.lowercase())
 
     /** Questions that need the camera. */
     private fun wantsToSee(q: String): Boolean = Regex(
