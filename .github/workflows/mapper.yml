@@ -1,0 +1,41 @@
+name: Build Projection Mapper
+
+on:
+  push:
+    branches: [main]
+    paths: ["mapper/**", ".github/workflows/mapper.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: mapper
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          if ! ./gradlew assembleRelease > gradle.log 2>&1; then
+            MSG=$( (grep -E "error:|error -|FAILED|What went wrong|e: " gradle.log | sort -u | head -25; echo ----; grep -A8 "What went wrong" gradle.log | head -20) | cut -c1-300 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Build log::$MSG"
+            exit 1
+          fi
+          cp app/build/outputs/apk/release/app-release.apk ../ProjectionMapper.apk
+      - name: Publish as a release (download this on the projector)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mapper-${{ github.run_number }}
+          name: Projection Mapper build ${{ github.run_number }}
+          files: ProjectionMapper.apk
+          make_latest: false
