@@ -2352,8 +2352,18 @@ class MainActivity : Activity() {
      * A sentence has been heard. With internet, re-hear it with Whisper online (much better with
      * accents); otherwise use what the offline ears made of it.
      */
+    /** Mic sensitivity: 0 low (only close, clear voices), 1 normal, 2 high (hears everything, like before). */
+    private var micSensitivity: Int
+        get() = prefs.getInt("micSens", 1)
+        set(v) { prefs.edit().putInt("micSens", v).apply() }
     private fun heardSound(h: Heard) {
         if (training) { trainingHeard(h); return }
+        // 1. too far away or too quiet (a phone video, the next room): let it go, unless it's her name
+        if (phase == Phase.LISTENING && micSensitivity < 2 && !chloeMode && !calledByName(h.text)) {
+            val followUp = System.currentTimeMillis() - lastSpokeEnd < 10_000
+            val need = (if (micSensitivity == 0) 18f else 12f) - (if (followUp) 4f else 0f)
+            if (h.loudDb < need) { lastQuietIgnored = "${h.text.take(30)} (${h.loudDb.toInt()} dB)"; return }
+        }
         val shouted = isShout(h.audio)
         lastShouted = shouted
         val useWhisper = onlineEars && online.enabled && h.audio != null && phase == Phase.LISTENING && h.conf >= 0.3f
@@ -2370,6 +2380,8 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    private var lastQuietIgnored = ""
 
     /** Only reply when someone says Pip's name (or carries on just after Pip spoke). */
     private var onlyWhenCalled: Boolean
@@ -2778,8 +2790,14 @@ class MainActivity : Activity() {
             val looking = System.currentTimeMillis() - lastFaceSeen < 10_000 && faces?.running == true
             // two different voices talking in the last half minute = people chatting to each other
             val chatting = print != null && recentPrints.any { now0 - it.first < 25_000 && !voices.sameVoice(it.second, print) }
-            if (!tapped && !calledByName(text) && !followUp && !looking && chatting) {
-                // people chatting to each other: ignore it (sending it all online used up the daily allowance)
+            // 2. a voice that isn't one of the family (a video, the telly) has to say "Pip"
+            val who = whoFromPrint(print)
+            val stranger = print != null && (who == null || who !in FAMILY)
+            // 3. nobody in front of Pip (and the camera's on): not talking to her
+            val nobodyThere = faces?.running == true && !looking
+            // (anyone standing in front of Pip and looking at her always gets an answer)
+            if (!tapped && !calledByName(text) && !followUp && !looking && (chatting || stranger || nobodyThere)) {
+                // people chatting to each other, a video, or the next room: ignore it
                 eyes.subCaption = ""; return
             }
         }
@@ -3640,6 +3658,7 @@ class MainActivity : Activity() {
             "Check for update (this is build ${BuildConfig.VERSION_CODE})",
             "Learn the tumble dryer sound" + (if (appliances.learned(appliances.dryer)) " ✓" else ""),
             "Learn the kettle sound" + (if (appliances.learned(appliances.kettle)) " ✓" else ""),
+            "Mic sensitivity: " + listOf("Low", "Normal", "High")[micSensitivity.coerceIn(0, 2)],
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -3699,6 +3718,18 @@ class MainActivity : Activity() {
                     27 -> { speakLine("[curious] Checking for a newer me…"); checkForUpdate(manual = true) }
                     28 -> learnSoundMenu(appliances.dryer, "tumble dryer", "Switch the tumble dryer on")
                     29 -> learnSoundMenu(appliances.kettle, "kettle", "Fill the kettle and switch it on")
+                    30 -> AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("Mic sensitivity")
+                        .setSingleChoiceItems(arrayOf(
+                            "Low: only people close by, talking clearly",
+                            "Normal: ignores far-off voices and phone videos",
+                            "High: hears everything (like before)"), micSensitivity) { d, which ->
+                            micSensitivity = which; d.dismiss()
+                            speakLine(listOf("[curious] Ears set to low. Come closer if you want me.",
+                                "[happy] Normal ears. Far-off chatter, I'm ignoring you.", "[excited] Big ears! I'll hear everything.")[which])
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .showOwn()
                     26 -> {
                         tabletReminderOn = !tabletReminderOn
                         speakLine(if (tabletReminderOn) "Okay. I remind $tabletPerson about tablets every day." else "Okay. No tablet reminders.")

@@ -17,7 +17,9 @@ import kotlin.math.sqrt
  * so a Bluetooth speaker can stay in high-quality music mode for output.
  */
 /** One finished sentence. audio is 16-bit mono at [rate], or null if not captured. */
-class Heard(val text: String, val conf: Float, val print: FloatArray?, val audio: ShortArray?, val rate: Int)
+class Heard(val text: String, val conf: Float, val print: FloatArray?, val audio: ShortArray?, val rate: Int,
+            /** how much louder the sentence was than the room's background, in dB (close voices are much louder) */
+            val loudDb: Float = 99f)
 
 class Ears(
     private val context: Context,
@@ -153,6 +155,9 @@ class Ears(
         var loudest = 0
         // Software volume boost: some tablets record very quietly, which the speech model can't hear.
         var recentPeak = 0f
+        // loudness of the sentence vs. the room's background (raw sound, before the boost)
+        var floorPeak = 300f
+        var sentPeak = 0
         try {
             while (running) {
                 val m = mic ?: break
@@ -189,6 +194,8 @@ class Ears(
                 }
 
                 this.peak = peak
+                if (capturing) { if (peak > sentPeak) sentPeak = peak }
+                else floorPeak = if (peak < floorPeak) floorPeak * 0.9f + peak * 0.1f else floorPeak * 0.998f + peak * 0.002f
                 Appliances.tap?.let { t -> try { t(buf, n, m.rate) } catch (_: Exception) {} }   // dryer / kettle ears
                 if (paused) { onLevel(0f); continue }
                 if (needReset) { recognizer.reset(); needReset = false; lastPartial = ""; sentence.clear(); preRoll.clear(); capturing = false }
@@ -216,7 +223,7 @@ class Ears(
                 var resultJson: String? = if (finished) recognizer.result else null
                 if (!finished) {
                     val p = JSONObject(recognizer.partialResult).optString("partial").trim()
-                    if (p.isNotEmpty() && !capturing) { capturing = true; sentence.addAll(preRoll); preRoll.clear() }
+                    if (p.isNotEmpty() && !capturing) { capturing = true; sentPeak = peak; sentence.addAll(preRoll); preRoll.clear() }
                     if (p != lastPartial) {
                         lastPartial = p; partialSince = System.currentTimeMillis()
                         if (p.isNotEmpty()) lastHeardText = p
@@ -243,7 +250,9 @@ class Ears(
                         ShortArray(total).also { out -> var o = 0; for (c in sentence) { c.copyInto(out, o); o += c.size } }
                     }
                     sentence.clear(); capturing = false
-                    if (isRealSpeech(text)) onHeard(Heard(text, conf, print, audio, m.rate))
+                    val loudDb = (20 * kotlin.math.log10(maxOf(sentPeak, 1).toFloat() / maxOf(floorPeak, 30f)))
+                    sentPeak = 0
+                    if (isRealSpeech(text)) onHeard(Heard(text, conf, print, audio, m.rate, loudDb))
                 }
             }
         } finally {
