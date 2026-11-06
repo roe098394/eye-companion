@@ -2383,6 +2383,10 @@ class MainActivity : Activity() {
     }
 
     private var lastQuietIgnored = ""
+    private var lastHelloPhoto = 0L
+    private val GREETING = Regex("^(hello|hiya|hi|hey|heya|hey up|ey up|morning|good morning|afternoon|good afternoon|" +
+        "evening|good evening|alright|all right|you alright|how do|yo|wotcha|hello pip|hi pip)\\b")
+    private fun isGreeting(t: String) = GREETING.containsMatchIn(removeName(t).lowercase().trim().ifBlank { "hello" })
 
     /** Only answer questions (or requests), not every bit of chat she overhears. On by default. */
     private var questionsOnly: Boolean
@@ -2821,7 +2825,8 @@ class MainActivity : Activity() {
         // Only questions (and things asked of her): no joining in with random chat, unless she's called by
         // name, it's a reply straight after she spoke, or someone tapped her
         if (phase == Phase.LISTENING && questionsOnly && !tapped && !chloeMode && !calledByName(text) &&
-            System.currentTimeMillis() - lastSpokeEnd > (if (lastReplyAsked) 25_000 else 10_000) && !isQuestionOrAsk(text)) {
+            System.currentTimeMillis() - lastSpokeEnd > (if (lastReplyAsked) 25_000 else 10_000) && !isQuestionOrAsk(text) &&
+            !(isGreeting(text) && System.currentTimeMillis() - lastFaceSeen < 5000)) {
             eyes.subCaption = ""; return
         }
         text = removeName(text).ifBlank { if (calledByName(rawText)) "Hello" else text }
@@ -3064,16 +3069,31 @@ class MainActivity : Activity() {
             }
             return
         }
-        val whoAsk = asksWhoIsTalking(rawText)
-        val whoLook = whoAsk && online.enabled && online.seeingRestMs <= 0 &&
+        // "Hello" from someone standing in front of Pip: have a look to be sure who it is (once in a while)
+        val camOk = online.enabled && online.seeingRestMs <= 0 &&
             checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        val helloLook = camOk && !overheard && isGreeting(rawText) && System.currentTimeMillis() - lastFaceSeen < 5000 &&
+            System.currentTimeMillis() - lastHelloPhoto > 20 * 60_000
+        if (helloLook) {
+            lastHelloPhoto = System.currentTimeMillis()
+            val ears = when {
+                speaker != null && voiceSure > 0.6f -> "Your ears are fairly sure it's $speaker."
+                speaker != null -> "Your ears think it might be $speaker, but they're not sure."
+                else -> "Your ears don't recognise this voice."
+            }
+            text = "$text\n(Note: someone in front of you just said hello. $ears Use the photo to confirm who it is: the family are Mark (a grown-up man with facial hair), Laura (a grown-up woman), " +
+                "Brandon (a 20-year-old man with no facial hair), Sophie (a girl who wears earrings), Amelia (a smaller girl with glasses) and Chloe (5, the smallest). " +
+                "Say hello back using their name. If you can't tell, give a cheeky guess and ask. Talk about their name, never their body or looks.)"
+        }
+        val whoAsk = asksWhoIsTalking(rawText)
+        val whoLook = (whoAsk && camOk) || helloLook
         if (whoAsk && !whoLook) {
             // can't look right now: go on the ears alone
             val guess = if (speaker != null) "Your ears think it's $speaker." else "Your ears don't recognise this voice."
             text = "$text\n(Note: they're asking who is talking. $guess You can't see right now (no photo), so go on your ears only, " +
                 "and if you're not sure, ask them to say their name.)"
         }
-        if (whoLook) {
+        if (whoAsk && whoLook) {
             // "Who's talking?": the ears' guess plus a look through the camera
             val ears = when {
                 speaker != null && voiceSure > 0.6f -> "Your ears are fairly sure it's $speaker."
