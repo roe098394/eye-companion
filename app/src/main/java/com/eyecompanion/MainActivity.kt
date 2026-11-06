@@ -288,6 +288,19 @@ class MainActivity : Activity() {
         return true
     }
 
+    // ---- the portal: Pip's web page on the home Wi-Fi to tell her things
+    private val portal by lazy {
+        Portal(prefs,
+            status = { "Cuppas today: $cuppas · " + (if (shopping.isEmpty()) "shopping list empty" else "${shopping.size} on the shopping list") +
+                " · bins: " + (if (blackBinWeek()) "black bins this Thursday" else "green recycling this Thursday") },
+            getShopping = { shopping },
+            setShopping = { v -> main.post { shopping = v } },
+            onNewFact = { t -> main.post {
+                if (phase == Phase.LISTENING && !muted) speakLine(listOf("[curious] Ooh, new info. Noted.", "[happy] Got it. Filed in my brain.",
+                    "[wink] Interesting. I'll remember that.").fresh())
+            } })
+    }
+
     // ---- shopping list: "add milk to the shopping list", "what's on the list", "take milk off the list", "clear the list"
     private var shopping: List<String>
         get() = (prefs.getString("shopping", "") ?: "").split("|").filter { it.isNotBlank() }
@@ -1609,6 +1622,7 @@ class MainActivity : Activity() {
     }
 
     private fun moodLine(): String = buildString {
+        append(portal.factsForBrain())
         if (whisperTime()) append(" It's very early morning and everyone else in the house is asleep: you are WHISPERING," +
             " so keep it short and hushed, and remind them gently to be quiet. No shouting, no dramatic outbursts.")
         val off = unpluggedMins
@@ -2228,6 +2242,7 @@ class MainActivity : Activity() {
 
     private fun startCompanion() {
         keepBluetoothInMusicMode()
+        portal.start()
         Appliances.tap = { b, n, r -> appliances.feed(b, n, r) }
         appliances.onChange = { snd, on -> main.post { applianceChanged(snd, on) } }
         appliances.onMaybe = { _ -> main.post {                          // "was that the kettle?": a quick suspicious glance
@@ -3733,6 +3748,7 @@ class MainActivity : Activity() {
             "Learn the kettle sound" + (if (appliances.learned(appliances.kettle)) " ✓" else ""),
             "Mic sensitivity: " + listOf("Low", "Normal", "High")[micSensitivity.coerceIn(0, 2)],
             if (questionsOnly) "Only answer questions: ON" else "Only answer questions: OFF (joins in with chat)",
+            "Pip's web page (tell Pip things): " + (portal.address() ?: "not on Wi-Fi"),
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -3804,6 +3820,12 @@ class MainActivity : Activity() {
                         }
                         .setNegativeButton("Cancel", null)
                         .showOwn()
+                    32 -> AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("Pip's web page")
+                        .setMessage((portal.address()?.let { "On a phone or computer on the home Wi-Fi, open:\n\n$it\n\nTell Pip new things, " +
+                            "see what she knows, and edit the shopping list." } ?: "Pip isn't on the Wi-Fi right now.") +
+                            "\n\nThings she knows from the page: ${portal.facts().size}")
+                        .setPositiveButton("OK", null).showOwn()
                     31 -> { questionsOnly = !questionsOnly
                         speakLine(if (questionsOnly) "[happy] Okay. I'll only answer questions. Ask me anything."
                             else "[excited] Chatterbox mode! I'll join in with everything.") }
