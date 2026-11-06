@@ -1512,7 +1512,7 @@ class MainActivity : Activity() {
             if (chloeMode && System.currentTimeMillis() - chloeLastActive > 10 * 60_000) endChloeMode()
             messCheck()
             maybeRoastDiablo()
-            checkForUpdate()
+            // (no automatic update checks: updates only from "Check for update" in the menu)
             run {   // Honey: remind when Laura's been heard or seen in the last few minutes
                 val now = System.currentTimeMillis()
                 if (dogDue() && (now - lastLauraHeard < 3 * 60_000 || now - lastLauraSeen < 3 * 60_000) && now - lastSpokeEnd > 15_000) remindDog()
