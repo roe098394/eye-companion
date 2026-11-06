@@ -289,16 +289,90 @@ class MainActivity : Activity() {
     }
 
     // ---- the portal: Pip's web page on the home Wi-Fi to tell her things
-    private val portal by lazy {
-        Portal(prefs,
-            status = { "Cuppas today: $cuppas · " + (if (shopping.isEmpty()) "shopping list empty" else "${shopping.size} on the shopping list") +
-                " · bins: " + (if (blackBinWeek()) "black bins this Thursday" else "green recycling this Thursday") },
-            getShopping = { shopping },
-            setShopping = { v -> main.post { shopping = v } },
-            onNewFact = { t -> main.post {
-                if (phase == Phase.LISTENING && !muted) speakLine(listOf("[curious] Ooh, new info. Noted.", "[happy] Got it. Filed in my brain.",
-                    "[wink] Interesting. I'll remember that.").fresh())
-            } })
+    /** Run on the main thread and wait for the answer (for the web page's thread). */
+    private fun <T> onMain(timeoutMs: Long = 4000, f: () -> T): T? {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return f()
+        var r: T? = null; val latch = java.util.concurrent.CountDownLatch(1)
+        main.post { try { r = f() } finally { latch.countDown() } }
+        latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        return r
+    }
+    private val portal by lazy { Portal(prefs, portalHost) }
+    private val portalHost = object : Portal.Host {
+        override fun status(): List<Pair<String, String>> = onMain {
+            val now = System.currentTimeMillis()
+            val state = when {
+                phase == Phase.ASLEEP && napping -> "Napping 😴"
+                phase == Phase.ASLEEP -> "Asleep 😴"
+                muted -> "Awake, but zipped 🤐"
+                else -> "Awake 👀"
+            }
+            val out = mutableListOf("Pip" to state, "Battery" to "${batteryPercent()}%" + (if (isCharging()) " (charging)" else " (not plugged in)"),
+                "Cuppas today" to "$cuppas")
+            out += "Kettle" to (if (appliances.kettle.on) "boiling right now" else if (appliances.learned(appliances.kettle)) "off" else "not learned yet")
+            out += "Tumble dryer" to (if (appliances.dryer.on) "on for ${(now - appliances.dryer.onSince) / 60_000} min" else if (appliances.learned(appliances.dryer)) "off" else "not learned yet")
+            out += "Printer" to (if (::printerCard.isInitialized && printerCard.visibility == android.view.View.VISIBLE) printerCard.text.toString().replace("\n", " · ")
+                else lastPrinterState.ifEmpty { "not checked" })
+            out += "Shopping" to (if (shopping.isEmpty()) "list empty" else shopping.joinToString(", "))
+            out += "Bins" to (if (blackBinWeek()) "black bins this Thursday" else "green recycling this Thursday")
+            if (eyes.usageText.isNotEmpty()) out += "Online brain" to eyes.usageText
+            out.toList()
+        } ?: listOf("Pip" to "busy, try again")
+        override fun getShopping() = shopping
+        override fun setShopping(v: List<String>) { main.post { shopping = v } }
+        override fun onNewFact(text: String) { main.post {
+            if (phase == Phase.LISTENING && !muted) speakLine(listOf("[curious] Ooh, new info. Noted.", "[happy] Got it. Filed in my brain.",
+                "[wink] Interesting. I'll remember that.").fresh())
+        } }
+        override fun say(text: String): String = onMain {
+            when {
+                muted -> { eyes.caption = text; "Pip is zipped, so she showed it on her screen instead." }
+                else -> {
+                    if (phase == Phase.ASLEEP) { if (napping) noNapUntil = System.currentTimeMillis() + 5 * 60_000; wakeUp() }
+                    interrupt(); speakLine(text); "Pip said: \"$text\""
+                }
+            }
+        } ?: "Pip was busy, try again."
+        override fun action(name: String): String = onMain {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            when (name) {
+                "sleep" -> if (phase == Phase.ASLEEP) "She's already asleep." else { goToSleep(); "Pip's gone to sleep." }
+                "wake" -> if (phase != Phase.ASLEEP) "She's already awake." else { wakeUp(); updateSleepChip(); "Pip's awake." }
+                "mute" -> if (muted) "Already zipped." else if (zipsToday() >= 5) "No zips left today." else { toggleMute(); "Zipped. 🤐" }
+                "unmute" -> if (!muted) "She isn't zipped." else { Mmf.unzip(sfx(0.5f)); toggleMute(); "Unzipped. Expect complaints." }
+                "volup", "voldown" -> {
+                    val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val v = (am.getStreamVolume(AudioManager.STREAM_MUSIC) + if (name == "volup") 1 else -1).coerceIn(1, max)
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0)
+                    "Volume ${v * 100 / max}%."
+                }
+                else -> "?"
+            }
+        } ?: "Pip was busy, try again."
+        override fun settings() = listOf(
+            Triple("mic", "Mic sensitivity", listOf("0" to "Low: only close, clear voices", "1" to "Normal", "2" to "High: hears everything")),
+            Triple("questions", "Only answer questions", listOf("1" to "On", "0" to "Off: joins in with chat")),
+        )
+        override fun setting(key: String) = when (key) {
+            "mic" -> micSensitivity.toString(); "questions" -> if (questionsOnly) "1" else "0"; else -> ""
+        }
+        override fun setSetting(key: String, value: String) { main.post {
+            when (key) { "mic" -> micSensitivity = value.toIntOrNull()?.coerceIn(0, 2) ?: 1; "questions" -> questionsOnly = value == "1" }
+        } }
+        override fun snapshot(): ByteArray? {
+            var jpg: ByteArray? = null; val latch = java.util.concurrent.CountDownLatch(1)
+            main.post { lookThroughCamera { j -> jpg = j; latch.countDown() } }
+            latch.await(8, java.util.concurrent.TimeUnit.SECONDS)
+            return jpg
+        }
+    }
+    /** Every minute: say any reminders set on the web page that are due. */
+    private fun portalReminders() {
+        val due = portal.takeDue(); if (due.isEmpty()) return
+        val line = due.joinToString(" ") { it.text.trim().let { t -> if (t.endsWith(".") || t.endsWith("!") || t.endsWith("?")) t else "$t." } }
+        if (muted) { eyes.caption = "⏰ $line"; return }
+        if (phase == Phase.ASLEEP) { if (napping) noNapUntil = System.currentTimeMillis() + 5 * 60_000; wakeUp() }
+        interrupt(); speakLine("[excited] Reminder! $line")
     }
 
     // ---- shopping list: "add milk to the shopping list", "what's on the list", "take milk off the list", "clear the list"
@@ -1513,6 +1587,7 @@ class MainActivity : Activity() {
             voice?.whisper = whisperTime(); voice?.evening = eveningTime(); voice?.evening = eveningTime()
             dryerCheck()
             kettleCheck()
+            portalReminders()
             if (training) { main.postDelayed(this, 60_000); return }
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
@@ -3822,8 +3897,9 @@ class MainActivity : Activity() {
                         .showOwn()
                     32 -> AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                         .setTitle("Pip's web page")
-                        .setMessage((portal.address()?.let { "On a phone or computer on the home Wi-Fi, open:\n\n$it\n\nTell Pip new things, " +
-                            "see what she knows, and edit the shopping list." } ?: "Pip isn't on the Wi-Fi right now.") +
+                        .setMessage((portal.address()?.let { "On a phone or computer on the home Wi-Fi, open:\n\n$it\n\nMake Pip say things, " +
+                            "set reminders, tell her new things, the shopping list, settings and the remote." } ?: "Pip isn't on the Wi-Fi right now.") +
+                            "\n\nCamera code: ${portal.pin}" +
                             "\n\nThings she knows from the page: ${portal.facts().size}")
                         .setPositiveButton("OK", null).showOwn()
                     31 -> { questionsOnly = !questionsOnly
