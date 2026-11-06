@@ -2384,6 +2384,22 @@ class MainActivity : Activity() {
 
     private var lastQuietIgnored = ""
 
+    /** Only answer questions (or requests), not every bit of chat she overhears. On by default. */
+    private var questionsOnly: Boolean
+        get() = prefs.getBoolean("questionsOnly", true)
+        set(v) { prefs.edit().putBoolean("questionsOnly", v).apply() }
+    private val QUESTION_START = Regex("^(what|what's|whats|who|who's|whos|where|where's|when|why|how|how's|which|whose|" +
+        "is|are|am|was|were|can|could|do|does|did|will|would|should|shall|have|has|may|might|isn't|aren't|don't|" +
+        "doesn't|didn't|can't|won't|tell me|show me|give me|let's|lets|play|sing|set|start|stop|add|remind|put|turn|" +
+        "say|guess|help|any|got any)\\b")
+    private fun isQuestionOrAsk(t: String): Boolean {
+        val l = t.lowercase().trim()
+        if (l.contains('?')) return true
+        if (QUESTION_START.containsMatchIn(l)) return true
+        // "… isn't it", "… right", "… yeah?" tag questions
+        return Regex("\\b(isn't it|is it|right|innit|aren't you|are you|don't you|do you|can you|will you)[.!]*$").containsMatchIn(l)
+    }
+
     /** Only reply when someone says Pip's name (or carries on just after Pip spoke). */
     private var onlyWhenCalled: Boolean
         get() = prefs.getBoolean("onlyWhenCalled2", false)
@@ -2801,6 +2817,12 @@ class MainActivity : Activity() {
                 // people chatting to each other, a video, or the next room: ignore it
                 eyes.subCaption = ""; return
             }
+        }
+        // Only questions (and things asked of her): no joining in with random chat, unless she's called by
+        // name, it's a reply straight after she spoke, or someone tapped her
+        if (phase == Phase.LISTENING && questionsOnly && !tapped && !chloeMode && !calledByName(text) &&
+            System.currentTimeMillis() - lastSpokeEnd > (if (lastReplyAsked) 25_000 else 10_000) && !isQuestionOrAsk(text)) {
+            eyes.subCaption = ""; return
         }
         text = removeName(text).ifBlank { if (calledByName(rawText)) "Hello" else text }
         if (!tapped && !overheard) hideChoices()                // answered out loud instead (noise no longer hides the buttons)
@@ -3660,6 +3682,7 @@ class MainActivity : Activity() {
             "Learn the tumble dryer sound" + (if (appliances.learned(appliances.dryer)) " ✓" else ""),
             "Learn the kettle sound" + (if (appliances.learned(appliances.kettle)) " ✓" else ""),
             "Mic sensitivity: " + listOf("Low", "Normal", "High")[micSensitivity.coerceIn(0, 2)],
+            if (questionsOnly) "Only answer questions: ON" else "Only answer questions: OFF (joins in with chat)",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -3731,6 +3754,9 @@ class MainActivity : Activity() {
                         }
                         .setNegativeButton("Cancel", null)
                         .showOwn()
+                    31 -> { questionsOnly = !questionsOnly
+                        speakLine(if (questionsOnly) "[happy] Okay. I'll only answer questions. Ask me anything."
+                            else "[excited] Chatterbox mode! I'll join in with everything.") }
                     26 -> {
                         tabletReminderOn = !tabletReminderOn
                         speakLine(if (tabletReminderOn) "Okay. I remind $tabletPerson about tablets every day." else "Okay. No tablet reminders.")
