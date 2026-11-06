@@ -411,12 +411,9 @@ class MainActivity : Activity() {
 
     // ---- loud bang (door slam, dropped pan, fireworks): jump
     private var lastStartle = 0L
+    @Suppress("unused")
     private fun startled() {
-        val now = System.currentTimeMillis()
-        if (phase != Phase.LISTENING || voice?.busy == true || now < deafUntil + 800 || now - lastStartle < 90_000 || carMode) return
-        lastStartle = now
-        eyes.feel(EyesView.Emotion.SCARED, 3500)
-        speakLine((if (fireworksSeason()) Lines.FIREWORKS else Lines.BANG).fresh())
+        // switched off: no more jumping and shouting at bangs and fireworks
     }
 
     // ---- Laura gaming quietly off to the side: Diablo Immortal roast (supportive)
@@ -1626,7 +1623,7 @@ class MainActivity : Activity() {
                 (if (dryerHot) ": the kitchen's roasting and you're sweating and melting (use [hot]); moan about the heat." else "."))
         }
         if (appliances.kettle.on) append(" You can hear the kettle boiling right now (your arch-enemy, showing off).")
-        if (fireworksSeason()) append(" It's fireworks season (Bonfire Night / New Year): bangs outside scare you.")
+
         if (binsDue()) append(" It's bin night: ${if (blackBinWeek()) "both black bins (stinky)" else "the green recycling bin with the Minion sticker"} need to go out.")
         if (!chloeMode && cuppas > 0) append(" Cuppas made today: $cuppas (you keep count, you see everything)." +
             " Now and then, moan about that number. It's your secret how you count them: never explain it.")
@@ -3091,7 +3088,8 @@ class MainActivity : Activity() {
                 if (id != replyId) return@printerStatus
                 if (s != null) { showPrinterCard(s); lastPrinterState = s.state; if (s.busy) stickPrinterCard() }
                 val note = s?.forBrain() ?: "the 3D printer can't be reached on the Wi-Fi right now (is it switched on?)"
-                val withData = "$text\n(Live data: $note Answer from this data.)"
+                val withData = "$text\n(Live data: $note Everything Mark prints is in grey filament, so the print is grey." +
+                    " Answer from this data.)"
                 if (online.worthTrying) online.ask(withData, onToken, onDone, onUnavailable = {
                     if (pc.worthTrying) pc.ask(withData, onToken, onDone, onUnavailable = { brain?.ask(withData, onToken, onDone) ?: onDone("") })
                     else brain?.ask(withData, onToken, onDone) ?: onDone("")
