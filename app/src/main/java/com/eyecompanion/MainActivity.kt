@@ -466,7 +466,11 @@ class MainActivity : Activity() {
 
     // ---- insulted: one photo, one playful roast
     private var lastRoast = 0L
-    private fun roastWhoeverIsThere(insult: String) {
+    /** Personal roast material, by family member. */
+    private val ROAST_EXTRAS = mapOf(
+        "Sophie" to "her messy bedroom (a disaster zone) and her smelly hamster",
+    )
+    private fun roastWhoeverIsThere(insult: String, voiceGuess: String? = null) {
         lastRoast = System.currentTimeMillis()
         hideChoices()
         speakLine(listOf("[suspicious] Oh really? Let me get a look at you…", "[suspicious] Is that so. Hold still. Scanning…",
@@ -479,7 +483,10 @@ class MainActivity : Activity() {
                     "like [laughing], [wink] or [suspicious]. Family-friendly light teasing ONLY about things like their messy hair, " +
                     "their outfit, the mug they're holding, the mess or dishes behind them, or how they're standing. NEVER about " +
                     "their body, weight, face, skin, age, glasses, or anything they can't change. If they look like a child, be " +
-                    "extra gentle and silly. If nobody is in the photo, roast the empty kitchen or the kettle instead.",
+                    "extra gentle and silly. If nobody is in the photo, roast the empty kitchen or the kettle instead." +
+                    (if (voiceGuess != null) " Your ears think this is $voiceGuess." else "") +
+                    " If it's Sophie (a girl who wears earrings), roast her about her messy bedroom and her smelly hamster." +
+                    (ROAST_EXTRAS[voiceGuess]?.let { " Since it's $voiceGuess, tease them about $it." } ?: ""),
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Witty, never cruel, child-friendly.",
                     maxTokens = 80)
             }
@@ -2885,7 +2892,7 @@ class MainActivity : Activity() {
                 if (rude && !chloeMode && !carMode && online.enabled && online.seeingRestMs == 0L &&
                     System.currentTimeMillis() - lastRoast > 10 * 60_000) {
                     rememberTone(whoFromPrint(print), "rude")
-                    updateBaseMood(); roastWhoeverIsThere(text); return
+                    updateBaseMood(); roastWhoeverIsThere(text, whoFromPrint(print)); return
                 }
             } else if (nice) {
                 temper = if (Regex("\\bsorry\\b").containsMatchIn(lower)) maxOf(0.3f, temper + 0.6f) else minOf(1f, temper + 0.4f)
