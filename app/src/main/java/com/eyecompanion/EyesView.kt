@@ -284,8 +284,53 @@ class EyesView(context: Context) : View(context) {
                 rect.set(ex - ew / 2, cy - eh / 2, ex + ew / 2, cy + eh / 2)
                 canvas.drawRoundRect(rect, r, r, eyePaint)
             }
+            // SCORCHING (the dryer's been on for hours): lava cracks glowing in the eyes, flames on top, burning cheeks
+            if (scorching && feeling == Emotion.HOT && !carMode && openNow > 0.2f) {
+                val glow = 0.75f + 0.25f * sin(secs * 3.1f + side)
+                canvas.save()
+                rect.set(ex - ew / 2, cy - eh / 2, ex + ew / 2, cy + eh / 2)
+                clipPath.reset(); clipPath.addRoundRect(rect, r, r, android.graphics.Path.Direction.CW); canvas.clipPath(clipPath)
+                scorchPaint.style = Paint.Style.FILL; scorchPaint.color = Color.parseColor("#C2301A"); scorchPaint.alpha = 140
+                canvas.drawRect(rect, scorchPaint)
+                scorchPaint.style = Paint.Style.STROKE; scorchPaint.strokeCap = Paint.Cap.ROUND
+                for ((k, crack) in cracks.withIndex()) {
+                    scorchPaint.color = if (k % 3 == 0) Color.parseColor("#FFF07A") else Color.parseColor("#FFB020")
+                    scorchPaint.alpha = (255 * glow).toInt(); scorchPaint.strokeWidth = ew * (if (k % 3 == 0) 0.022f else 0.014f)
+                    canvas.save(); canvas.translate(ex, cy); canvas.scale(ew * (if (side < 0) -1f else 1f), eh)
+                    scorchPaint.strokeWidth /= ew
+                    canvas.drawPath(crack, scorchPaint); canvas.restore()
+                }
+                scorchPaint.style = Paint.Style.FILL
+                canvas.restore()
+                // flames licking up from the top of each eye
+                for (f in 0 until 5) {
+                    val fx = ex - ew * 0.38f + f * ew * 0.19f
+                    val flick = sin(secs * (7f + f) + f * 1.7f + side)
+                    val fh = eh * (0.55f + 0.25f * ((f * 37 % 5) / 4f)) * (0.85f + 0.15f * flick)
+                    val base = cy - eh / 2 + ew * 0.05f
+                    val pth = android.graphics.Path().apply {
+                        moveTo(fx - ew * 0.11f, base)
+                        quadTo(fx - ew * 0.12f, base - fh * 0.5f, fx + flick * ew * 0.05f, base - fh)
+                        quadTo(fx + ew * 0.12f, base - fh * 0.5f, fx + ew * 0.11f, base)
+                        close()
+                    }
+                    scorchPaint.color = Color.parseColor("#FF6A1A"); scorchPaint.alpha = 150; canvas.drawPath(pth, scorchPaint)
+                    canvas.save(); canvas.scale(0.55f, 0.6f, fx, base)
+                    scorchPaint.color = Color.parseColor("#FFD24A"); scorchPaint.alpha = 190; canvas.drawPath(pth, scorchPaint)
+                    canvas.restore()
+                }
+                // burning pink cheeks with a fiery rim
+                val chx = ex + side * ew * 0.05f; val chy = cy + eyeH * 0.42f + ew * 0.16f
+                for (k in 0 until 10) {
+                    val a = k * 0.628f + secs * 2f
+                    scorchPaint.color = Color.parseColor("#FF5A1A"); scorchPaint.alpha = (120 + 80 * sin(secs * 9f + k)).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(chx + kotlin.math.cos(a) * ew * 0.47f, chy + sin(a) * ew * 0.17f, ew * 0.06f, scorchPaint)
+                }
+                scorchPaint.color = Color.parseColor("#F0609A"); scorchPaint.alpha = 235
+                rect.set(chx - ew * 0.45f, chy - ew * 0.16f, chx + ew * 0.45f, chy + ew * 0.16f); canvas.drawOval(rect, scorchPaint)
+            }
             // blushing cheeks
-            if (blush > 0.03f && !carMode) {
+            if (blush > 0.03f && !carMode && !(scorching && feeling == Emotion.HOT)) {
                 blushPaint.alpha = (110 * blush).toInt()
                 rect.set(ex + side * ew * 0.05f - ew * 0.45f, cy + eyeH * 0.42f, ex + side * ew * 0.05f + ew * 0.45f, cy + eyeH * 0.42f + ew * 0.32f)
                 canvas.drawOval(rect, blushPaint)
@@ -959,6 +1004,33 @@ class EyesView(context: Context) : View(context) {
     /** Sleep screen extras: clock, cuppas made today, and when the online brain is back. */
     var sleepScreen = false
     var cuppas = 0
+    /** The dryer's been on for ages: the hot face goes up a level (lava eyes, flames, burning cheeks). */
+    @Volatile var scorching = false
+    private val scorchPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val clipPath = android.graphics.Path()
+    /** Lava cracks inside an eye, in eye-sized units (-0.5..0.5), made once. */
+    private val cracks: List<android.graphics.Path> by lazy {
+        val rnd = java.util.Random(7)
+        val out = ArrayList<android.graphics.Path>()
+        repeat(7) { b ->
+            val pth = android.graphics.Path()
+            var x = (rnd.nextFloat() - 0.5f) * 0.2f; var y = (rnd.nextFloat() - 0.5f) * 0.2f
+            val ang0 = b * 0.9f + rnd.nextFloat() * 0.5f
+            pth.moveTo(x, y)
+            var ang = ang0
+            repeat(6) {
+                ang += (rnd.nextFloat() - 0.5f) * 0.9f
+                x += kotlin.math.cos(ang) * 0.09f; y += sin(ang) * 0.09f
+                pth.lineTo(x, y)
+                if (rnd.nextFloat() < 0.35f) {                           // little side branches
+                    val bx = x + kotlin.math.cos(ang + 1.2f) * 0.07f; val by = y + sin(ang + 1.2f) * 0.07f
+                    pth.lineTo(bx, by); pth.moveTo(x, y)
+                }
+            }
+            out.add(pth)
+        }
+        out
+    }
     /** Which kettle show is on (0 = none), and since when. */
     @Volatile var kettleShow = 0
     @Volatile var kettleSince = 0L

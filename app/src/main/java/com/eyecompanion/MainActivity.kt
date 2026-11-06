@@ -1231,7 +1231,7 @@ class MainActivity : Activity() {
         if (!on) {
             val ran = ((now - snd.onSince) / 60_000).toInt()
             val wasHot = dryerHot
-            dryerHot = false; updateBaseMood()
+            dryerHot = false; eyes.scorching = false; updateBaseMood()
             if (ran >= 30 && phase == Phase.LISTENING && !chloeMode)
                 speakLine(if (wasHot) listOf("[happy] The dryer's stopped! I can feel my circuits again. Phew.",
                     "[happy] Ahh. Dryer's off. Cooling down. I was nearly a puddle.").fresh()
@@ -1321,10 +1321,11 @@ class MainActivity : Activity() {
     /** Every minute: how long has the dryer been on? Getting hot after 45 minutes. */
     private fun dryerCheck() {
         val d = appliances.dryer
-        if (!d.on) { if (dryerHot) { dryerHot = false; updateBaseMood() }; return }
+        if (!d.on) { eyes.scorching = false; if (dryerHot) { dryerHot = false; updateBaseMood() }; return }
         val now = System.currentTimeMillis()
         val mins = ((now - d.onSince) / 60_000).toInt()
         if (mins >= 45 && !dryerHot) { dryerHot = true; updateBaseMood() }
+        eyes.scorching = mins >= 120                                   // two hours: lava eyes, flames, burning cheeks
         if (!dryerHot || phase != Phase.LISTENING || chloeMode || now - lastDryerMoan < 30 * 60_000) return
         lastDryerMoan = now
         speakLine(if (mins >= 120) listOf(
