@@ -1947,7 +1947,7 @@ class MainActivity : Activity() {
             background = android.graphics.drawable.GradientDrawable().apply {
                 cornerRadius = 18 * dp; setStroke((2 * dp).toInt(), eyes.eyeColor); setColor(0xCC000000.toInt())
             }
-            setOnClickListener { visibility = android.view.View.GONE }
+            setOnClickListener { visibility = android.view.View.GONE; printerSticky = false; main.removeCallbacks(printerCardTick) }
         }
         rootView.addView(printerCard, android.widget.FrameLayout.LayoutParams(
             android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -2490,7 +2490,8 @@ class MainActivity : Activity() {
     private fun showPrinterCard(s: Printer.Status) {
         printerCard.text = s.card()
         printerCard.visibility = android.view.View.VISIBLE
-        main.removeCallbacks(hidePrinterCard); main.postDelayed(hidePrinterCard, 30_000)
+        main.removeCallbacks(hidePrinterCard)
+        if (!printerSticky) main.postDelayed(hidePrinterCard, 30_000)
     }
 
     /** Status in the background (finding the printer first if needed); callback on the main thread. */
@@ -2502,6 +2503,30 @@ class MainActivity : Activity() {
         }
         main.post { onDone(s) }
     }
+
+    /** Asked about the printer mid-print: keep its card on screen, updating, until the print's done. */
+    private var printerSticky = false
+    private fun stickPrinterCard() {
+        printerSticky = true
+        main.removeCallbacks(hidePrinterCard); main.removeCallbacks(printerCardTick)
+        main.postDelayed(printerCardTick, 30_000)
+    }
+    private val printerCardTick = object : Runnable { override fun run() {
+        if (!printerSticky) return
+        thread(name = "printer-card") {
+            val s = printer.status()
+            main.post {
+                if (!printerSticky) return@post
+                if (s == null) { main.postDelayed(this, 60_000); return@post }      // printer not answering: keep trying
+                printerCard.text = s.card(); printerCard.visibility = android.view.View.VISIBLE
+                if (s.busy) main.postDelayed(this, 30_000)
+                else {                                                              // finished: show the result a while, then go
+                    printerSticky = false
+                    main.removeCallbacks(hidePrinterCard); main.postDelayed(hidePrinterCard, 10 * 60_000)
+                }
+            }
+        }
+    } }
 
     private fun askedAboutPrinter(q: String) =
         Regex("\\b(printer|printing|3d print|ender|print job|the print|my print|nozzle|hotend|heat ?bed|fluidd|klipper)\\b")
@@ -3064,7 +3089,7 @@ class MainActivity : Activity() {
             eyes.subCaption = "$shown  · checking printer…"
             printerStatus { s ->
                 if (id != replyId) return@printerStatus
-                if (s != null) { showPrinterCard(s); lastPrinterState = s.state }
+                if (s != null) { showPrinterCard(s); lastPrinterState = s.state; if (s.busy) stickPrinterCard() }
                 val note = s?.forBrain() ?: "the 3D printer can't be reached on the Wi-Fi right now (is it switched on?)"
                 val withData = "$text\n(Live data: $note Answer from this data.)"
                 if (online.worthTrying) online.ask(withData, onToken, onDone, onUnavailable = {
