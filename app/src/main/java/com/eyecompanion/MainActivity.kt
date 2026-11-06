@@ -2391,7 +2391,7 @@ class MainActivity : Activity() {
     private val QUESTION_START = Regex("^(what|what's|whats|who|who's|whos|where|where's|when|why|how|how's|which|whose|" +
         "is|are|am|was|were|can|could|do|does|did|will|would|should|shall|have|has|may|might|isn't|aren't|don't|" +
         "doesn't|didn't|can't|won't|tell me|show me|give me|let's|lets|play|sing|set|start|stop|add|remind|put|turn|" +
-        "say|guess|help|any|got any)\\b")
+        "say|guess|help|any|got any|go|goodnight|night night|sleep|wake|take|takeover|timer|shopping|we need|we're out of|forget|remember)\\b")
     private fun isQuestionOrAsk(t: String): Boolean {
         val l = t.lowercase().trim()
         if (l.contains('?')) return true
