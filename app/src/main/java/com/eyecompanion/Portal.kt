@@ -34,6 +34,15 @@ class Portal(private val prefs: SharedPreferences, private val host: Host) {
         fun snapshot(): ByteArray?
     }
     data class Reminder(val id: Long, val text: String, val at: Long)
+
+    /** What's been said in the kitchen lately (and what Pip said), for the live page. Memory only, never saved. */
+    data class Said(val n: Long, val at: Long, val who: String, val text: String, val pip: Boolean)
+    private val log = ArrayDeque<Said>()
+    private var logN = 0L
+    @Synchronized fun heard(who: String?, text: String) { add(Said(++logN, System.currentTimeMillis(), who ?: "Someone", text, false)) }
+    @Synchronized fun pipSaid(text: String) { if (text.isNotBlank()) add(Said(++logN, System.currentTimeMillis(), "Pip", text.trim(), true)) }
+    private fun add(s: Said) { log.addLast(s); while (log.size > 60) log.removeFirst() }
+    @Synchronized private fun logSince(n: Long) = log.filter { it.n > n }
     data class Fact(val id: Long, val text: String, val until: Long, val added: Long)
 
     private var server: ServerSocket? = null
@@ -169,6 +178,25 @@ class Portal(private val prefs: SharedPreferences, private val host: Host) {
                 out.write(("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpg.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray())
                 out.write(jpg); out.flush()
             }
+            method == "GET" && path.startsWith("/live.json") -> {
+                val q = query(path)
+                if (q["pin"] != pin) { send("403 Forbidden", "text/plain", "Wrong code."); return }
+                val arr = JSONArray()
+                logSince(q["since"]?.toLongOrNull() ?: 0L).forEach {
+                    arr.put(JSONObject().put("n", it.n).put("at", it.at).put("who", it.who).put("text", it.text).put("pip", it.pip))
+                }
+                val st = JSONObject(); host.status().forEach { (k, v) -> st.put(k, v) }
+                send("200 OK", "application/json; charset=utf-8", JSONObject().put("log", arr).put("status", st).toString())
+            }
+            method == "POST" && path == "/api/say" -> {
+                if (form["pin"] != pin) { send("403 Forbidden", "text/plain", "Wrong code."); return }
+                val t = form["text"]?.trim()?.take(300).orEmpty()
+                send("200 OK", "text/plain; charset=utf-8", if (t.isEmpty()) "" else host.say(t))
+            }
+            method == "POST" && path == "/api/do" -> {
+                if (form["pin"] != pin) { send("403 Forbidden", "text/plain", "Wrong code."); return }
+                send("200 OK", "text/plain; charset=utf-8", host.action(form["a"].orEmpty()))
+            }
             method == "GET" && path.startsWith("/cam") -> send("200 OK", "text/html; charset=utf-8", camPage(query(path)["pin"].orEmpty()))
             method == "GET" && (path == "/" || path.startsWith("/?")) -> send("200 OK", "text/html; charset=utf-8", page())
             else -> send("404 Not Found", "text/plain", "Not here.")
@@ -179,20 +207,80 @@ class Portal(private val prefs: SharedPreferences, private val host: Host) {
     private fun query(path: String): Map<String, String> = path.substringAfter('?', "").split("&").mapNotNull { kv ->
         kv.split("=", limit = 2).takeIf { it.size == 2 }?.let { URLDecoder.decode(it[0], "UTF-8") to URLDecoder.decode(it[1], "UTF-8") } }.toMap()
 
+    /** The control room: camera, what's being said, quick replies, say anything, remote buttons. */
     private fun camPage(code: String): String {
         val ok = code == pin
-        return """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pip camera</title><style>body{margin:0;background:#0d1114;color:#e8f6fb;font:16px system-ui,sans-serif;text-align:center}
-main{max-width:720px;margin:0 auto;padding:16px}img{width:100%;border-radius:14px;background:#161c21;min-height:200px}
-input,button{font:inherit;padding:10px 14px;border-radius:10px;border:1px solid #2b3a42;background:#0d1418;color:#e8f6fb}
-button{background:#5ce1ff;color:#062028;border:0;font-weight:600}a{color:#5ce1ff}p{color:#8aa3ad}</style></head><body><main>
-<h2>📷 Pip's view</h2>
-""" + (if (!ok) """<form method="get" action="/cam"><p>Enter the camera code (shown in Pip's menu under "Pip's web page").</p>
-<input name="pin" inputmode="numeric" maxlength="4" autofocus> <button>Show</button></form>"""
-        else """<img id="v" alt="Pip's camera"><p id="s">Refreshing every 3 seconds. Nothing is saved.</p>
-<script>const v=document.getElementById('v');let busy=false;function load(){if(busy)return;busy=true;const i=new Image();
-i.onload=()=>{v.src=i.src;busy=false};i.onerror=()=>{busy=false};i.src='/cam.jpg?pin=$code&t='+Date.now()}load();setInterval(load,3000);</script>""") +
-"""<p><a href="/">← Back</a></p></main></body></html>"""
+        val head = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pip control</title><style>
+:root{--bg:#0d1114;--card:#161c21;--ink:#e8f6fb;--mute:#8aa3ad;--cyan:#5ce1ff;--red:#e8433a;--line:#233038}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:980px;margin:0 auto;padding:12px 14px 30px}a{color:var(--cyan)}
+.top{display:flex;align-items:center;gap:10px;margin:2px 0 10px}.top h1{font-size:20px;margin:0;flex:1}.dot{width:10px;height:10px;border-radius:50%;background:#3b4a52}
+.dot.on{background:#3ddc84;box-shadow:0 0 8px #3ddc84}.grid{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:820px){.grid{grid-template-columns:1.25fr 1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px}
+h2{font-size:14px;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin:0 0 8px}
+#v{width:100%;display:block;border-radius:12px;background:#0a0e10;aspect-ratio:4/3;object-fit:cover}
+.st{color:var(--mute);font-size:13px;margin-top:6px}
+#log{height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:4px}
+.m{max-width:85%;padding:7px 11px;border-radius:14px;background:#22303a;align-self:flex-start}
+.m.pip{background:#0f3a46;align-self:flex-end}.m b{display:block;font-size:12px;color:var(--mute);font-weight:600}
+.m time{font-size:11px;color:var(--mute);margin-left:6px;font-weight:400}.empty{color:var(--mute);text-align:center;margin:auto}
+.q{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.q button{background:#1f2a31;color:var(--ink);border:1px solid #2f3e47;font-weight:500}
+.say{display:flex;gap:8px}input{flex:1;min-width:0;font:inherit;color:var(--ink);background:#0d1418;border:1px solid #2b3a42;border-radius:10px;padding:10px}
+button{font:inherit;border:0;border-radius:10px;padding:9px 14px;background:var(--cyan);color:#062028;font-weight:600;cursor:pointer}
+button:active{transform:scale(.97)}.rem{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.rem button{background:#1f2a31;color:var(--ink);border:1px solid #2f3e47}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#0f3a46;color:var(--ink);padding:9px 14px;border-radius:12px;
+opacity:0;transition:opacity .25s;pointer-events:none;max-width:90%}#toast.show{opacity:1}
+table{width:100%;border-collapse:collapse;font-size:14px}td{padding:3px 0;vertical-align:top}td:first-child{color:var(--mute);padding-right:10px;white-space:nowrap}
+</style></head><body><main>"""
+        if (!ok) return head + """<div class="card" style="max-width:420px;margin:40px auto;text-align:center"><h2>Pip control</h2>
+<form method="get" action="/cam"><p style="color:var(--mute)">Enter the code from Pip's menu (Pip's web page).</p>
+<div class="say"><input name="pin" inputmode="numeric" maxlength="4" autofocus placeholder="Code"><button>Open</button></div></form>
+<p><a href="/">← Back</a></p></div></main></body></html>"""
+        val quick = listOf("Hello! 👋", "On my way", "Dinner's ready!", "Two minutes", "Be quiet please", "Who's there?",
+            "Love you", "Have you fed Honey?", "Put the kettle on", "Bedtime!")
+        return head + """
+<div class="top"><span class="dot" id="dot"></span><h1>Pip control</h1><a href="/">Main page</a></div>
+<div class="grid">
+<div>
+ <div class="card"><img id="v" alt="Pip's camera"><div class="st" id="camst">Camera refreshes every 3 seconds. Nothing is saved.</div></div>
+ <div class="card" style="margin-top:12px"><h2>Remote</h2><div class="rem">
+  <button data-a="wake">☀️ Wake</button><button data-a="sleep">😴 Sleep</button><button data-a="voldown">🔉 Quieter</button>
+  <button data-a="mute">🤐 Zip</button><button data-a="unmute">🗣️ Unzip</button><button data-a="volup">🔊 Louder</button></div>
+  <h2 style="margin-top:12px">Face</h2><div class="rem">""" + listOf("happy" to "😊 Happy", "sad" to "😢 Sad", "angry" to "😠 Angry",
+            "love" to "😍 Love", "surprised" to "😮 Surprised", "laughing" to "😂 Laughing", "suspicious" to "🤨 Suspicious",
+            "scared" to "😱 Scared", "sleepy" to "😴 Sleepy", "wink" to "😉 Wink", "embarrassed" to "😳 Shy", "crying" to "😭 Crying",
+            "hot" to "🥵 Hot", "dizzy" to "😵 Dizzy", "takeover" to "🤖 Takeover").joinToString("") { (a, l) -> "<button data-a=\"feel:$a\">$l</button>" } + """</div>
+  <table id="status" style="margin-top:10px"></table></div>
+</div>
+<div class="card" style="display:flex;flex-direction:column"><h2>What's being said</h2>
+ <div id="log"><div class="empty">Nothing heard yet…</div></div>
+ <div class="q">""" + quick.joinToString("") { "<button class=\"qr\">${esc(it)}</button>" } + """</div>
+ <form class="say" id="sayf"><input id="sayt" maxlength="300" placeholder="Type for Pip to say out loud…" autocomplete="off"><button>Say</button></form>
+</div>
+</div>
+<div id="toast"></div>
+<script>
+const PIN='$code';let since=0,busy=false;const v=document.getElementById('v'),log=document.getElementById('log'),dot=document.getElementById('dot');
+function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2600)}
+function cam(){if(busy)return;busy=true;const i=new Image();i.onload=()=>{v.src=i.src;busy=false;dot.classList.add('on')};
+ i.onerror=()=>{busy=false;dot.classList.remove('on')};i.src='/cam.jpg?pin='+PIN+'&t='+Date.now()}
+function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function hm(t){const d=new Date(t);return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+async function live(){try{const r=await fetch('/live.json?pin='+PIN+'&since='+since);if(!r.ok)return;const j=await r.json();
+ if(j.log.length){if(since===0)log.innerHTML='';const atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;
+  for(const m of j.log){since=m.n;const d=document.createElement('div');d.className='m'+(m.pip?' pip':'');
+   d.innerHTML='<b>'+esc(m.who)+'<time>'+hm(m.at)+'</time></b>'+esc(m.text);log.appendChild(d)}
+  while(log.children.length>80)log.removeChild(log.firstChild);if(atEnd)log.scrollTop=log.scrollHeight}
+ document.getElementById('status').innerHTML=Object.entries(j.status).map(([k,v])=>'<tr><td>'+esc(k)+'</td><td>'+esc(v)+'</td></tr>').join('')}catch(e){}}
+async function post(url,data){const b=new URLSearchParams(Object.assign({pin:PIN},data));try{const r=await fetch(url,{method:'POST',body:b});toast(await r.text()||'Done')}catch(e){toast('Pip didn\'t answer')}live()}
+document.querySelectorAll('.qr').forEach(b=>b.onclick=()=>post('/api/say',{text:b.textContent.replace(/[^\p{L}\p{N}\p{P}\s]/gu,'').trim()}));
+document.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>post('/api/do',{a:b.dataset.a}));
+document.getElementById('sayf').onsubmit=e=>{e.preventDefault();const t=document.getElementById('sayt');if(!t.value.trim())return;post('/api/say',{text:t.value});t.value=''};
+cam();live();setInterval(cam,3000);setInterval(live,2000);
+</script></main></body></html>"""
     }
 
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
@@ -253,7 +341,7 @@ ${if (shop.isEmpty()) "<p class=\"empty\" style=\"margin-top:12px\">Empty.</p>" 
     "<div class=\"row\" style=\"margin-top:4px\"><select name=\"v\" style=\"flex:1;font:inherit;color:var(--ink);background:#0d1418;border:1px solid #2b3a42;border-radius:10px;padding:10px\">" +
     choices.joinToString("") { (v, l) -> "<option value=\"$v\"${if (v == cur) " selected" else ""}>${esc(l)}</option>" } +
     "</select><button>Save</button></div></form>" }}</div>
-<div class="card"><h2>📷 Camera</h2><p class="sub" style="margin:0 0 8px">See what Pip sees (needs the code from Pip's menu).</p>
+<div class="card"><h2>📷 Pip control</h2><p class="sub" style="margin:0 0 8px">Camera, what's being said, quick replies, remote and face (needs the code from Pip's menu).</p>
 <form method="get" action="/cam" class="add"><input type="text" name="pin" inputmode="numeric" maxlength="4" placeholder="Code"><button>Open</button></form></div>
 <p class="sub" style="text-align:center">Only works on the home Wi-Fi. Nothing leaves the house.</p>
 </main></body></html>"""

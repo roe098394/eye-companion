@@ -346,7 +346,11 @@ class MainActivity : Activity() {
                     am.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0)
                     "Volume ${v * 100 / max}%."
                 }
-                else -> "?"
+                else -> if (name.startsWith("feel:")) {
+                    val f = name.removePrefix("feel:")
+                    if (f == "takeover") { takeoverMode(20_000); "Takeover mode for 20 seconds. 🤖" }
+                    else ReplyCleaner.EMOTIONS[f]?.let { eyes.feel(it, 20_000); "Face: $f for 20 seconds." } ?: "?"
+                } else "?"
             }
         } ?: "Pip was busy, try again."
         override fun settings() = listOf(
@@ -2343,6 +2347,7 @@ class MainActivity : Activity() {
                 lastSpokeEnd = System.currentTimeMillis() + tail
                 lastReplyAsked = currentReply.trim().endsWith("?")
                 rememberSaid(currentReply.toString())
+                portal.pipSaid(currentReply.toString())
                 lastReplyTail = words(currentReply.toString()).takeLast(10)
                 if (lastReplyAsked && FISHING.containsMatchIn(currentReply)) markFished(whoIsHere())
                 deafUntil = System.currentTimeMillis() + tail
@@ -2881,6 +2886,7 @@ class MainActivity : Activity() {
 
     private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null, tapped: Boolean = false) {
         var text = rawText
+        if (!training && !isOwnEcho(rawText)) portal.heard(whoFromPrint(print), rawText)       // for the control page
         if (muted && !training && phase != Phase.ASLEEP) {
             if (!isOwnEcho(text)) muffled()
             return
