@@ -1972,6 +1972,7 @@ class MainActivity : Activity() {
         handling = h
         val awake = { phase != Phase.ASLEEP && phase != Phase.SETUP && reactToHandling }
         h.onTilt = { v -> eyes.tilt = if (reactToHandling && phase != Phase.ASLEEP) v else 0f }
+        h.onDown = { deg -> eyes.gravityAngle = deg }                  // screen turned on the neck: keep the face upright
         h.onPickedUp = {
             if (awake()) {
                 eyes.feel(EyesView.Emotion.SURPRISED, 3000)
@@ -3678,11 +3679,11 @@ class MainActivity : Activity() {
         eyes.setOnTouchListener { _, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> if (muted && phase != Phase.ASLEEP && eyes.zipHit(ev.x, ev.y)) {
-                    zipDrag = true; zipStartX = ev.x; main.removeCallbacks(zipSnap); main.removeCallbacks(zipWiggle)
+                    zipDrag = true; zipStartX = eyes.toV(ev.x, ev.y)[0]; main.removeCallbacks(zipSnap); main.removeCallbacks(zipWiggle)
                 }
                 MotionEvent.ACTION_MOVE -> if (zipDrag) {
                     val span = (eyes.zipRight - eyes.zipLeft).coerceAtLeast(1f)
-                    eyes.zipOpen = ((zipStartX - ev.x) / span).coerceIn(0f, 1f)
+                    eyes.zipOpen = ((zipStartX - eyes.toV(ev.x, ev.y)[0]) / span).coerceIn(0f, 1f)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (zipDrag) {
                     zipDrag = false

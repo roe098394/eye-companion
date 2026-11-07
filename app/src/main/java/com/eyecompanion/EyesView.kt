@@ -241,8 +241,21 @@ class EyesView(context: Context) : View(context) {
         blush += (tBlush - blush) * min(1f, dt * 3f)
         if (emoCol != 0) lastEmoCol = emoCol
 
-        // --- draw ---
-        val w = width.toFloat(); val h = height.toFloat()
+        // --- which way is down? turn the whole face to stay upright, swinging into place like it's falling round
+        var diff = ((gravityAngle - frameAng + 540f) % 360f) - 180f
+        if (abs(diff) > 0.05f || abs(frameVel) > 0.05f) {
+            frameVel += (diff * 38f - frameVel * 3.2f) * dt
+            frameAng += frameVel * dt
+            frameAng = ((frameAng % 360f) + 360f) % 360f
+            diff = ((gravityAngle - frameAng + 540f) % 360f) - 180f
+        }
+        val sw = width.toFloat(); val sh = height.toFloat()
+        val portrait = abs(sin(Math.toRadians(frameAng.toDouble()))) > 0.5
+        val w = if (portrait) sh else sw; val h = if (portrait) sw else sh
+        canvas.save()
+        canvas.translate(sw / 2, sh / 2); canvas.rotate(-frameAng); canvas.translate(-w / 2, -h / 2)
+        frameMatrix.reset(); frameMatrix.postTranslate(-w / 2, -h / 2); frameMatrix.postRotate(-frameAng); frameMatrix.postTranslate(sw / 2, sh / 2)
+        frameMatrix.invert(frameInverse)
         // during a game the eyes shrink and move up to make room for the sum and the answer buttons
         val gameShrink = if (puzzle.isNotEmpty()) 0.68f else 1f
         val eyeW = min(w * 0.17f, h * 0.30f) * scale * gameShrink * (if (carMode) 1.25f else 1f)
@@ -764,8 +777,19 @@ class EyesView(context: Context) : View(context) {
             canvas.drawText(label, muteRect.left + pad, muteRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         } else muteRect.setEmpty()
 
+        canvas.restore()                                  // (the upright frame)
         postInvalidateOnAnimation()
     }
+
+    /** Down, from the screen's point of view (degrees, 0 = the normal way up): set from the motion sensor. */
+    @Volatile var gravityAngle = 0f
+    private var frameAng = 0f
+    private var frameVel = 0f
+    private val frameMatrix = android.graphics.Matrix()
+    private val frameInverse = android.graphics.Matrix()
+    private val tp = FloatArray(2)
+    /** A touch on the real screen, in the turned frame's coordinates (what the buttons are drawn in). */
+    fun toV(x: Float, y: Float): FloatArray { tp[0] = x; tp[1] = y; frameInverse.mapPoints(tp); return floatArrayOf(tp[0], tp[1]) }
 
     /** A little alarm clock (bells, legs, a ticking hand) with the time left written on its face. */
     private val clockLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
@@ -1056,14 +1080,16 @@ class EyesView(context: Context) : View(context) {
     private val chipBox = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     /** VoiceID Live button, top-right of the sleep screen. */
     private val trainRect = RectF()
-    fun trainHit(x: Float, y: Float): Boolean {
+    fun trainHit(x0: Float, y0: Float): Boolean {
+        val pt = toV(x0, y0); val x = pt[0]; val y = pt[1]
         if (!sleepScreen || trainRect.isEmpty) return false
         val m = height * 0.04f
         return x >= trainRect.left - m && x <= trainRect.right + m && y >= trainRect.top - m && y <= trainRect.bottom + m
     }
     /** Volume button, just above the wake button (sleep screen only). */
     private val volRect = RectF()
-    fun volHit(x: Float, y: Float): Boolean {
+    fun volHit(x0: Float, y0: Float): Boolean {
+        val pt = toV(x0, y0); val x = pt[0]; val y = pt[1]
         if (mood != Mood.SLEEP || !sleepScreen || volRect.isEmpty) return false
         val m = height * 0.03f
         val hit = x >= volRect.left - m && x <= volRect.right + m && y >= volRect.top - m && y <= volRect.bottom + m
@@ -1078,14 +1104,16 @@ class EyesView(context: Context) : View(context) {
     @Volatile var zipOpen = 0f
     @Volatile var zipLeft = 0f; @Volatile var zipRight = 0f; @Volatile var zipY = 0f; @Volatile var zipTabX = 0f
     /** A finger landing on the zip (generous: anywhere along it, or the tab hanging below). */
-    fun zipHit(x: Float, y: Float): Boolean {
+    fun zipHit(x0: Float, y0: Float): Boolean {
+        val pt = toV(x0, y0); val x = pt[0]; val y = pt[1]
         if (!muted || zipRight <= zipLeft) return false
         val m = height * 0.06f
         return x >= zipLeft - m && x <= zipRight + m && y >= zipY - m && y <= zipY + m * 2.2f
     }
     private val muteRect = RectF()
     private val r0 = RectF()
-    fun muteHit(x: Float, y: Float): Boolean {
+    fun muteHit(x0: Float, y0: Float): Boolean {
+        val pt = toV(x0, y0); val x = pt[0]; val y = pt[1]
         if (muteRect.isEmpty) return false
         val m = height * 0.02f
         val hit = x >= muteRect.left - m && x <= muteRect.right + m && y >= muteRect.top - m && y <= muteRect.bottom + m
@@ -1095,7 +1123,8 @@ class EyesView(context: Context) : View(context) {
     /** The sleep / wake button, bottom-right ("" hides it). */
     var sleepChip = ""
     private val sleepRect = RectF()
-    fun sleepHit(x: Float, y: Float): Boolean {
+    fun sleepHit(x0: Float, y0: Float): Boolean {
+        val pt = toV(x0, y0); val x = pt[0]; val y = pt[1]
         if (sleepChip.isEmpty() || sleepRect.isEmpty) return false
         val m = height * 0.04f
         val hit = x >= sleepRect.left - m && x <= sleepRect.right + m && y >= sleepRect.top - m && y <= sleepRect.bottom + m
@@ -1103,7 +1132,8 @@ class EyesView(context: Context) : View(context) {
         return hit
     }
     /** Was the button tapped? (generous target, easy to hit) */
-    fun chipHit(x: Float, y: Float): Boolean {
+    fun chipHit(x0: Float, y0: Float): Boolean {
+        val pt = toV(x0, y0); val x = pt[0]; val y = pt[1]
         if (listenChip.isEmpty() || chipRect.isEmpty) return false
         val m = height * 0.04f
         val hit = x >= chipRect.left - m && x <= chipRect.right + m && y >= chipRect.top - m && y <= chipRect.bottom + m
@@ -1193,7 +1223,12 @@ class EyesView(context: Context) : View(context) {
     /** Pip sits low on the bench, so it looks up a little at people. */
     private val UP = -0.28f
     private fun followFace() { tLookX = faceX * 1.25f; tLookY = faceY * 0.9f }
-    private fun followMotion() { tLookX = motionX * 1.2f; tLookY = (motionY * 0.45f + UP).coerceIn(-1f, 0.6f) }
+    private fun followMotion() {
+        // the camera turns with the screen: turn where the movement is into the upright frame
+        val th = Math.toRadians(frameAng.toDouble()); val c = Math.cos(th).toFloat(); val sn = Math.sin(th).toFloat()
+        val mx = motionX * c - motionY * sn; val my = motionX * sn + motionY * c
+        tLookX = mx * 1.2f; tLookY = (my * 0.45f + UP).coerceIn(-1f, 0.6f)
+    }
 
     // smoothed extras
     private var openL = 1f; private var openR = 1f; private var rot = 0f; private var blush = 0f

@@ -5,6 +5,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
@@ -20,6 +21,9 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
     var onPutDown: (backInPlace: Boolean) -> Unit = {}
     private val restG = FloatArray(3)
     private var haveRest = false
+    /** Which way is down across the screen, in degrees (0 = normal way up, 90 = turned so its right edge is down). */
+    var onDown: (Float) -> Unit = {}
+    private var downDeg = 0f
     /** -1..1, how far the screen leans: + = right side lower */
     var onTilt: (Float) -> Unit = {}
     /** lying flat on its back (or face) for a while; called again every few minutes while it stays flat */
@@ -97,6 +101,24 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
             else -> g[0]
         }
         onTilt((-sx / 9.81f).coerceIn(-1f, 1f))
+
+        // which way is down across the screen (only when it's standing up, not lying flat)
+        val ux: Float; val uy: Float                                 // gravity reading in display axes (x right, y up)
+        when (displayDegrees()) {
+            90 -> { ux = g[1]; uy = -g[0] }
+            180 -> { ux = -g[0]; uy = -g[1] }
+            270 -> { ux = -g[1]; uy = g[0] }
+            else -> { ux = g[0]; uy = g[1] }
+        }
+        val inPlane = sqrt(ux * ux + uy * uy)
+        if (inPlane > 4f) {
+            val deg = Math.toDegrees(Math.atan2((-ux).toDouble(), uy.toDouble())).toFloat()   // down on screen = (-ux, +uy)
+            // snap to the nearest quarter turn once it's clearly there, with some stickiness so it doesn't flap
+            val snapped = (Math.round(deg / 90f) * 90f + 360f) % 360f
+            val off = abs(((deg - downDeg + 540f) % 360f) - 180f)
+            if (off > 55f) downDeg = snapped
+            onDown(downDeg)
+        }
 
         // flat = gravity straight through the screen
         val gl = sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2])
