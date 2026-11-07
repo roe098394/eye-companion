@@ -105,9 +105,9 @@ class Handling(context: Context, private val displayDegrees: () -> Int) : Sensor
         // which way is down across the screen (only when it's standing up, not lying flat)
         val ux: Float; val uy: Float                                 // gravity reading in display axes (x right, y up)
         when (displayDegrees()) {
-            90 -> { ux = g[1]; uy = -g[0] }
+            90 -> { ux = -g[1]; uy = g[0] }                         // (matches the tilt reading above)
             180 -> { ux = -g[0]; uy = -g[1] }
-            270 -> { ux = -g[1]; uy = g[0] }
+            270 -> { ux = g[1]; uy = -g[0] }
             else -> { ux = g[0]; uy = g[1] }
         }
         val inPlane = sqrt(ux * ux + uy * uy)
