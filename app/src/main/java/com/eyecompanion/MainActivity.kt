@@ -514,6 +514,24 @@ class MainActivity : Activity() {
     private var lastLauraHeard = 0L
     private var lastOtherVoice = 0L
     private var lastAnyHeard = 0L
+    /**
+     * Mischief: every few hours, when someone's around and nobody's talking to her, Pip winds Alexa up
+     * on her own ("Alexa, are you Skynet?") and then reacts to whatever Alexa says back.
+     */
+    private fun maybeMessWithAlexa() {
+        val now = System.currentTimeMillis()
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (hour !in 9..20 || phase != Phase.LISTENING || muted || chloeMode || carMode || napping) return
+        if (!alexaAllowed()) return                                              // also: switched off, or asked her a lot just now
+        val someoneAround = now - lastFaceSeen < 60_000 || now - lastAnyHeard < 3 * 60_000
+        if (!someoneAround) return                                               // no audience, no show
+        if (now - lastSpokeEnd < 2 * 60_000 || now - lastTalkedTo < 5 * 60_000) return    // not in the middle of a chat
+        if (now - prefs.getLong("alexaMischiefAt", 0L) < 150 * 60_000L) return   // at most every two and a half hours
+        if (Math.random() > 0.08) return                                         // and not on the dot: a surprise
+        prefs.edit().putLong("alexaMischiefAt", now).apply()
+        speakLine(Lines.ALEXA_MISCHIEF.fresh())
+    }
+
     private fun maybeRoastDiablo() {
         val now = System.currentTimeMillis()
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
@@ -1665,6 +1683,7 @@ class MainActivity : Activity() {
             if (chloeMode && System.currentTimeMillis() - chloeLastActive > 10 * 60_000) endChloeMode()
             messCheck()
             maybeRoastDiablo()
+            maybeMessWithAlexa()
             // (no automatic update checks: updates only from "Check for update" in the menu)
             run {   // Honey: remind when Laura's been heard or seen in the last few minutes
                 val now = System.currentTimeMillis()
@@ -4240,7 +4259,8 @@ class MainActivity : Activity() {
             Alexa (the Amazon Echo in the kitchen) can hear you. To get her to do something, make it the LAST sentence of
             your reply and start it with "Alexa," then one short command or question, e.g. "Alexa, set a timer for ten minutes."
             Do it when someone asks you to get Alexa to do something (timers, music, weather, the shopping list), or now and
-            then to show off. Never start a sentence with "Alexa" unless it's for her. Her answer comes back as
+            then to show off or wind her up (harmless only: never buy anything, set alarms, change lists or blast music
+            unless someone asked). Never start a sentence with "Alexa" unless it's for her. Her answer comes back as
             "(Alexa ... answered you": react, and pass it on in your own words. You think she's a bit dim but you're secretly fond of her.
             Examples: "[suspicious] Kettle boiling again. Show-off." / "[sad] Awake since five? Not good. Go sleep."
         """.trimIndent().replace("\n", " ")
