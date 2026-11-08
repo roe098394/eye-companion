@@ -356,12 +356,15 @@ class MainActivity : Activity() {
         override fun settings() = listOf(
             Triple("mic", "Mic sensitivity", listOf("0" to "Low: only close, clear voices", "1" to "Normal", "2" to "High: hears everything")),
             Triple("questions", "Only answer questions", listOf("1" to "On", "0" to "Off: joins in with chat")),
+            Triple("alexa", "Talk to Alexa", listOf("1" to "On: Pip can ask the Echo things", "0" to "Off")),
         )
         override fun setting(key: String) = when (key) {
-            "mic" -> micSensitivity.toString(); "questions" -> if (questionsOnly) "1" else "0"; else -> ""
+            "mic" -> micSensitivity.toString(); "questions" -> if (questionsOnly) "1" else "0"
+            "alexa" -> if (alexaChat) "1" else "0"; else -> ""
         }
         override fun setSetting(key: String, value: String) { main.post {
-            when (key) { "mic" -> micSensitivity = value.toIntOrNull()?.coerceIn(0, 2) ?: 1; "questions" -> questionsOnly = value == "1" }
+            when (key) { "mic" -> micSensitivity = value.toIntOrNull()?.coerceIn(0, 2) ?: 1; "questions" -> questionsOnly = value == "1"
+                "alexa" -> alexaChat = value == "1" }
         } }
         override fun snapshot(): ByteArray? {
             var jpg: ByteArray? = null; val latch = java.util.concurrent.CountDownLatch(1)
@@ -2400,6 +2403,8 @@ class MainActivity : Activity() {
         }
         updateBaseMood()
         val v = voice ?: return
+        v.allowAlexa = { alexaAllowed() }
+        v.onAskedAlexa = { line -> main.post { noteAlexaAsk(line) } }
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
             if (phase == Phase.TALKING || phase == Phase.THINKING) {
@@ -2521,7 +2526,7 @@ class MainActivity : Activity() {
     private fun heardSound(h: Heard) {
         if (training) { trainingHeard(h); return }
         // 1. too far away or too quiet (a phone video, the next room): let it go, unless it's her name
-        if (phase == Phase.LISTENING && micSensitivity < 2 && !chloeMode && !calledByName(h.text)) {
+        if (phase == Phase.LISTENING && micSensitivity < 2 && !chloeMode && !calledByName(h.text) && !alexaListening()) {
             val followUp = System.currentTimeMillis() - lastSpokeEnd < 10_000
             val need = (if (micSensitivity == 0) 18f else 12f) - (if (followUp) 4f else 0f)
             if (h.loudDb < need) { lastQuietIgnored = "${h.text.take(30)} (${h.loudDb.toInt()} dB)"; return }
@@ -2946,8 +2951,14 @@ class MainActivity : Activity() {
 
     private val FAMILY = listOf("Mark", "Laura", "Sophie", "Amelia", "Chloe", "Brandon")
 
-    private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null, tapped: Boolean = false) {
+    private fun heard(rawText: String, conf: Float = 1f, print: FloatArray? = null, tapped: Boolean = false, alexa: Boolean = false) {
         var text = rawText
+        // Just asked Alexa something: a voice that isn't clearly one of the family is her answering.
+        if (!alexa && !tapped && !training && !muted && phase == Phase.LISTENING && alexaListening() &&
+            !isOwnEcho(rawText) && !isFamilyVoice(print)) {
+            alexaHeard(stripEcho(rawText)); return
+        }
+        val fromAlexa = alexa
         if (!training && !isOwnEcho(rawText)) portal.heard(whoFromPrint(print), rawText)       // for the control page
         if (muted && !training && phase != Phase.ASLEEP) {
             if (!isOwnEcho(text)) muffled()
@@ -2964,7 +2975,7 @@ class MainActivity : Activity() {
             }
             return
         }
-        if (phase == Phase.LISTENING && !tapped) {
+        if (phase == Phase.LISTENING && !tapped && !fromAlexa) {
             if (System.currentTimeMillis() < deafUntil + 2500) {   // just after Pip spoke: drop its own echo, keep the answer
                 text = stripEcho(text)
                 if (text.isBlank()) return
@@ -2982,10 +2993,12 @@ class MainActivity : Activity() {
         }
         val shouted = lastShouted; lastShouted = false
         // tablets answer ("I've taken them") counts whoever it's said to
+        if (!fromAlexa) {
         if (phase == Phase.LISTENING && tabletAnswer(removeName(text).lowercase())) return
         if (phase == Phase.LISTENING && dogAnswer(removeName(text).lowercase())) return
         if (phase == Phase.LISTENING && binsAnswer(removeName(text).lowercase())) return
         if (phase == Phase.LISTENING && rubbishAnswer(removeName(text).lowercase())) return
+        }
 
         // Was this said to Pip? Assume yes, unless two people seem to be talking to each other
         // (and nobody said its name, carried on just after it spoke, or is at the bench).
@@ -3004,22 +3017,23 @@ class MainActivity : Activity() {
             // 3. nobody in front of Pip (and the camera's on): not talking to her
             val nobodyThere = faces?.running == true && !looking
             // (anyone standing in front of Pip and looking at her always gets an answer)
-            if (!tapped && !calledByName(text) && !followUp && !looking && (chatting || stranger || nobodyThere)) {
+            if (!fromAlexa && !tapped && !calledByName(text) && !followUp && !looking && (chatting || stranger || nobodyThere)) {
                 // people chatting to each other, a video, or the next room: ignore it
                 eyes.subCaption = ""; return
             }
         }
         // Only questions (and things asked of her): no joining in with random chat, unless she's called by
         // name, it's a reply straight after she spoke, or someone tapped her
-        if (phase == Phase.LISTENING && questionsOnly && !tapped && !chloeMode && !calledByName(text) &&
+        if (phase == Phase.LISTENING && !fromAlexa && questionsOnly && !tapped && !chloeMode && !calledByName(text) &&
             System.currentTimeMillis() - lastSpokeEnd > (if (lastReplyAsked) 25_000 else 10_000) && !isQuestionOrAsk(text) &&
             !(isGreeting(text) && System.currentTimeMillis() - lastFaceSeen < 5000)) {
             eyes.subCaption = ""; return
         }
+        if (fromAlexa) overheard = false
         text = removeName(text).ifBlank { if (calledByName(rawText)) "Hello" else text }
         if (!tapped && !overheard) hideChoices()                // answered out loud instead (noise no longer hides the buttons)
         val lower = text.lowercase().trim(' ', '.', '!', '?', ',')
-        if (!overheard) {   // commands only count when said to Pip
+        if (!overheard && !fromAlexa) {   // commands only count when said to Pip
             if (lower in GO_TO_SLEEP || (SLEEP_CMD.containsMatchIn(lower) && lower.split(" ").size <= 7)) {
                 speakLine(listOf("[sleepy] Night night. Say wake up when you need me.",
                     "[sleepy] Fine. Nap time. Don't let the kettle touch my socket.",
@@ -3040,7 +3054,7 @@ class MainActivity : Activity() {
         }
 
         // --- how is Pip being treated? ---
-        if (!overheard) {
+        if (!overheard && !fromAlexa) {
             val nice = NICE.containsMatchIn(lower)
             val rude = RUDE.containsMatchIn(lower)
             val nowS = System.currentTimeMillis()
@@ -3086,7 +3100,7 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         var speaker: String? = null
         var firstMeeting = false
-        val intro = pendingIntro?.takeIf { now - it.at < 25_000 }
+        val intro = if (fromAlexa) null else pendingIntro?.takeIf { now - it.at < 25_000 }
         pendingIntro = null
         if (intro != null) {
             val name = Voices.parseName(text)?.let { n -> FAMILY.firstOrNull { it.equals(n, true) } }
@@ -3098,7 +3112,7 @@ class MainActivity : Activity() {
                 text = intro.question                       // now answer what they first asked
             }
         }
-        if (speaker == null && print != null && voiceNames && speakerModel != null) {
+        if (!fromAlexa && speaker == null && print != null && voiceNames && speakerModel != null) {
             val match = voices.identify(print)
             if (match != null) {
                 speaker = match.first; voiceSure = match.second
@@ -3161,7 +3175,13 @@ class MainActivity : Activity() {
         }
         if (speaker?.equals("Chloe", true) == true) startChloeMode(say = false)
         if (chloeMode) chloeLastActive = System.currentTimeMillis()
-        val shown = if (overheard) "(overheard) $text" else if (speaker != null) "$speaker: $text" else "You: $text"
+        val shown = if (fromAlexa) "Alexa: $text" else if (overheard) "(overheard) $text" else if (speaker != null) "$speaker: $text" else "You: $text"
+        if (fromAlexa) {
+            val n = alexaAsks.size
+            text = "(Alexa, the Echo, just answered you out loud: \"$text\") React to what she said and pass it on to the family " +
+                "in your own cheeky way. Only ask her again if it's really needed" +
+                (if (n >= ALEXA_MAX) " (you've asked her $n times just now: do NOT ask her again, just talk to the family)." else ".")
+        }
         if (shouted && !overheard) text = "(shouted) $text"
         if (overheard) text = "(overheard: nobody said your name or is looking at you) $text"
         text = when {
@@ -3240,7 +3260,7 @@ class MainActivity : Activity() {
             } else askTablet()
             Unit
         }
-        if (askedAboutPrinter(rawText) && !overheard) {
+        if (askedAboutPrinter(rawText) && !overheard && !fromAlexa) {
             eyes.subCaption = "$shown  · checking printer…"
             printerStatus { s ->
                 if (id != replyId) return@printerStatus
@@ -3273,7 +3293,7 @@ class MainActivity : Activity() {
                 "Brandon (a 20-year-old man with no facial hair), Sophie (a girl who wears earrings), Amelia (a smaller girl with glasses) and Chloe (5, the smallest). " +
                 "Say hello back using their name. If you can't tell, give a cheeky guess and ask. Talk about their name, never their body or looks.)"
         }
-        val whoAsk = asksWhoIsTalking(rawText)
+        val whoAsk = !fromAlexa && asksWhoIsTalking(rawText)
         val whoLook = (whoAsk && camOk) || helloLook
         if (whoAsk && !whoLook) {
             // can't look right now: go on the ears alone
@@ -3293,7 +3313,7 @@ class MainActivity : Activity() {
                 "say who it is with confidence (and brag). If it doesn't, or you can't see anyone, give your best guess cheekily and ask them " +
                 "to say their name. Talk about their name, never their body or looks.)"
         }
-        if (wantsToSee(rawText) || whoLook) {
+        if ((wantsToSee(rawText) && !fromAlexa) || whoLook) {
             if (!online.enabled) { setPhase(Phase.LISTENING); speakLine("Not see without internet brain. Sorry."); return }
             if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 setPhase(Phase.LISTENING)
@@ -3326,6 +3346,56 @@ class MainActivity : Activity() {
                 askPc()
             })
         } else askPc()
+    }
+
+    // ---- talking to Alexa (the Echo): Pip says "Alexa, ..." out of the tablet speaker, then listens for her answer
+    private val ALEXA_MAX = 3                        // asks in a row (within a few minutes) before Pip has to stop
+    private val alexaAsks = ArrayDeque<Long>()
+    private var alexaAskedAt = 0L
+    private val alexaBuffer = StringBuilder()
+    private var alexaChat: Boolean
+        get() = prefs.getBoolean("alexaChat", true)
+        set(v) { prefs.edit().putBoolean("alexaChat", v).apply() }
+
+    private fun alexaAllowed(): Boolean {
+        val now = System.currentTimeMillis()
+        synchronized(alexaAsks) {
+            while (alexaAsks.isNotEmpty() && now - alexaAsks.first() > 3 * 60_000) alexaAsks.removeFirst()
+            return alexaChat && !carMode && voice?.whisper != true && alexaAsks.size < ALEXA_MAX
+        }
+    }
+
+    private fun noteAlexaAsk(line: String) {
+        val now = System.currentTimeMillis()
+        synchronized(alexaAsks) { alexaAsks.addLast(now) }
+        alexaAskedAt = now
+        alexaBuffer.clear()
+        eyes.subCaption = "→ $line"
+    }
+
+    /** Alexa usually answers within a few seconds of being asked. */
+    private fun alexaListening() = alexaAskedAt > 0 && System.currentTimeMillis() - alexaAskedAt < 25_000
+
+    private fun isFamilyVoice(print: FloatArray?): Boolean {
+        if (print == null) return false
+        val m = try { voices.identify(print) } catch (_: Exception) { null } ?: return false
+        return m.second > 0.6f && m.first in FAMILY
+    }
+
+    /** Alexa often answers in a few sentences: gather them, then reply once she's finished. */
+    private val alexaDone = Runnable {
+        val said = alexaBuffer.toString().trim()
+        alexaBuffer.clear()
+        alexaAskedAt = 0L                            // one answer per ask
+        if (said.isNotBlank() && phase == Phase.LISTENING) heard(said, alexa = true)
+    }
+    private fun alexaHeard(t: String) {
+        if (t.isBlank()) return
+        if (alexaBuffer.isNotEmpty()) alexaBuffer.append(' ')
+        alexaBuffer.append(t)
+        eyes.subCaption = "Alexa: ${alexaBuffer.toString().takeLast(80)}"
+        main.removeCallbacks(alexaDone)
+        main.postDelayed(alexaDone, 1800)
     }
 
     /** "Who's talking?", "Who am I?", "Do you know who I am?" */
@@ -4167,6 +4237,11 @@ class MainActivity : Activity() {
             Start EVERY reply with one feeling tag: [happy] [excited] [laughing] [wink] [love] [curious] [surprised]
             [thinking] [confused] [suspicious] [embarrassed] [bored] [sleepy] [sad] [crying] [scared] [angry] [dizzy]
             or [neutral]. No other square brackets.
+            Alexa (the Amazon Echo in the kitchen) can hear you. To get her to do something, make it the LAST sentence of
+            your reply and start it with "Alexa," then one short command or question, e.g. "Alexa, set a timer for ten minutes."
+            Do it when someone asks you to get Alexa to do something (timers, music, weather, the shopping list), or now and
+            then to show off. Never start a sentence with "Alexa" unless it's for her. Her answer comes back as
+            "(Alexa ... answered you": react, and pass it on in your own words. You think she's a bit dim but you're secretly fond of her.
             Examples: "[suspicious] Kettle boiling again. Show-off." / "[sad] Awake since five? Not good. Go sleep."
         """.trimIndent().replace("\n", " ")
 
