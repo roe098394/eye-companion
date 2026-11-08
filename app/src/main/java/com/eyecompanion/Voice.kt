@@ -277,17 +277,21 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun sayOutLoud(text: String) {
         val gen = generation
         pending.incrementAndGet()
+        // Make the sound file straight away (while "Alexa." and the pause are still playing),
+        // so the question follows the pause immediately and she's still listening.
+        val file = java.io.File(appContext.cacheDir, "outloud${counter}.wav")
+        file.delete()
+        val done = java.util.concurrent.CountDownLatch(1)
+        val id = "o${counter++}"
+        fallbackLatches[id] = done
+        pending.incrementAndGet()                      // balanced by the tts onDone
+        val made = tts.synthesizeToFile(text, null, file, id) == TextToSpeech.SUCCESS
+        if (!made) { fallbackLatches.remove(id); finishedOne() }
         player.execute {
             if (gen != generation) { finishedOne(); return@execute }
-            val file = java.io.File(appContext.cacheDir, "outloud.wav")
-            file.delete()
-            val done = java.util.concurrent.CountDownLatch(1)
-            val id = "o${counter++}"
-            fallbackLatches[id] = done
-            pending.incrementAndGet()                  // balanced by the tts onDone
-            if (tts.synthesizeToFile(text, null, file, id) == TextToSpeech.SUCCESS) done.await(20, java.util.concurrent.TimeUnit.SECONDS)
-            else { fallbackLatches.remove(id); finishedOne() }
+            if (made) done.await(20, java.util.concurrent.TimeUnit.SECONDS)
             val wav = try { if (file.length() > 44) loudest(file.readBytes()) else null } catch (_: Exception) { null }
+            file.delete()
             if (gen == generation && (wav == null || !playWav(wav, gen, toSpeaker = true))) {
                 // no luck with the built-in speaker: say it the normal way
                 val d2 = java.util.concurrent.CountDownLatch(1)
