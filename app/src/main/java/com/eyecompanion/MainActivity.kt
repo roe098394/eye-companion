@@ -624,7 +624,15 @@ class MainActivity : Activity() {
         "Say I love you Pip in your poshest voice", "Tell me what you had for breakfast",
         "Say the alphabet up to G", "Whisper: the kettle can't hear us", "Say happy birthday like an opera singer",
         "Describe the weather today", "Say: I promise to never unplug Pip", "Order a pizza with your favourite toppings",
-        "Say: beep boop, I am a robot too", "What's your favourite animal and why")
+        "Say: beep boop, I am a robot too", "What's your favourite animal and why",
+        "Read the time on my clock", "Say: the dryer is my sworn enemy", "Do your best cat impression",
+        "Tell me a joke, a really bad one", "Say: Honey, get off the sofa", "Name a film you could watch a hundred times",
+        "Say your favourite food like a TV chef", "Spell your name out slowly", "Say: Pip is the best robot in the world",
+        "Count to five in a funny voice", "Say: I'll make the next cuppa", "Tell me what you'd do with a million pounds",
+        "Say good morning like a newsreader", "Say: the Tassimo is fancier than the kettle", "What would you name a pet dragon",
+        "Say: one hundred and twenty three", "Describe your dream holiday", "Say: Brandon, put a top on",
+        "Name three colours of the rainbow", "Say: this is VoiceID Live, testing, testing", "Pretend you're a robot running out of battery",
+        "Say: the bins go out on Wednesday night", "What's the best biscuit for dunking", "Say a tongue twister of your choice")
     private val SPOT_LINES = mapOf(
         KitchenMapView.Spot.CLOSE to "Come right up close to me. Closer. Not that close, I can see up your nose.",
         KitchenMapView.Spot.FRIDGE to "Now go and stand at the end of the fridge. Mind the paperwork avalanche.",
@@ -681,6 +689,7 @@ class MainActivity : Activity() {
         trainButtons.removeAllViews()
         (FAMILY + voices.names).distinct().forEach { n -> trainButton(n, 0xFF7B5CFF.toInt()) { startPlayer(n) } }
         trainButton("🕵️ Guess who?", 0xFFFF9A3C.toInt()) { startGuess() }
+        trainButton("🏆 Leaderboard", 0xFFFFC21A.toInt()) { showLeaderboard() }
         trainButton("✓ Finish", 0xFF3CC47C.toInt()) { endTraining() }
     }
     private fun startPlayer(name: String) {
@@ -700,9 +709,23 @@ class MainActivity : Activity() {
         if (trainIndex >= trainSteps.size) {
             trainExpect = false; trainMap.target = null
             val n = voices.sampleCount(trainPlayer)
-            trainPrompt.text = "🎉 $trainPlayer done!"; trainStatus.text = "Score: $trainScore · I've got $n samples of your voice."
-            speakLine("[love] Brilliant, $trainPlayer! VoiceID Live has learned your voice from three places. Score: $trainScore. Who's next?")
-            main.postDelayed({ if (training) showPlayers() }, 3000)
+            val oldTop = leaderboard().firstOrNull()
+            val best = prefs.getInt("lbBest_$trainPlayer", 0)
+            val newBest = trainScore > best
+            prefs.edit().putInt("lbBest_$trainPlayer", maxOf(best, trainScore))
+                .putInt("lbRounds_$trainPlayer", prefs.getInt("lbRounds_$trainPlayer", 0) + 1)
+                .putInt("lbTotal_$trainPlayer", prefs.getInt("lbTotal_$trainPlayer", 0) + trainScore).apply()
+            val board = leaderboard(); val rank = board.indexOfFirst { it.first == trainPlayer } + 1
+            trainPrompt.text = "🎉 $trainPlayer done!  Score: $trainScore" + (if (newBest) "  ⭐ new best!" else "")
+            trainStatus.text = boardText(board, highlight = trainPlayer) + "\nI've got $n samples of your voice."
+            val brag = when {
+                rank == 1 && oldTop != null && oldTop.first != trainPlayer -> "[excited] NEW LEADER! $trainPlayer has knocked ${oldTop.first} off the top of the leaderboard!"
+                rank == 1 -> "[excited] $trainPlayer is top of the leaderboard!"
+                newBest -> "[happy] A new personal best for $trainPlayer! Number $rank on the leaderboard."
+                else -> "[wink] $trainPlayer is number $rank on the leaderboard."
+            }
+            speakLine("[love] Brilliant, $trainPlayer! Score: $trainScore. $brag Who's next?")
+            main.postDelayed({ if (training) showPlayers() }, 7000)
             return
         }
         val (spot, phrase) = trainSteps[trainIndex]
@@ -725,6 +748,34 @@ class MainActivity : Activity() {
         } }
         main.postDelayed(waitDone, 800)
     }
+    /** VoiceID Live leaderboard: each player's best round score (then total). */
+    private fun leaderboard(): List<Triple<String, Int, Int>> = (FAMILY + voices.names).distinct()
+        .map { Triple(it, prefs.getInt("lbBest_$it", 0), prefs.getInt("lbRounds_$it", 0)) }
+        .filter { it.third > 0 }.sortedWith(compareByDescending<Triple<String, Int, Int>> { it.second }.thenByDescending { prefs.getInt("lbTotal_${it.first}", 0) })
+    private fun boardText(board: List<Triple<String, Int, Int>>, highlight: String? = null): String {
+        if (board.isEmpty()) return "Nobody's played yet!"
+        val medals = listOf("🥇", "🥈", "🥉")
+        return board.take(6).mapIndexed { i, (n, best, rounds) ->
+            val fooled = prefs.getInt("lbFooled_$n", 0)
+            (medals.getOrNull(i) ?: "  ${i + 1}.") + " $n  $best" + (if (n == highlight) "  ←" else "") +
+                "   ($rounds round${if (rounds == 1) "" else "s"}" + (if (fooled > 0) ", fooled Pip $fooled×" else "") + ")"
+        }.joinToString("\n")
+    }
+    private fun showLeaderboard() {
+        trainExpect = false; trainMap.target = null
+        val board = leaderboard()
+        trainPrompt.text = "🏆 VoiceID Live leaderboard"
+        val pip = prefs.getInt("lbPipWins", 0); val fooledAll = board.sumOf { prefs.getInt("lbFooled_${it.first}", 0) }
+        trainStatus.text = boardText(board) + (if (pip + fooledAll > 0) "\n\n🕵️ Guess who: Pip $pip · Humans $fooledAll" else "")
+        trainButtons.removeAllViews(); trainButton("↩ Back", 0xFF555F6A.toInt()) { showPlayers() }
+        speakLine(when {
+            board.isEmpty() -> "[curious] Nobody's played yet. Somebody be first!"
+            else -> "[excited] Leaderboard! " + board.first().let { "${it.first} is top with ${it.second}." } +
+                (if (board.size > 1) " " + listOf("Can anyone beat that?", "${board.last().first}, you need to practise.", "The rest of you, step it up.").random() else "") +
+                (if (pip > fooledAll) " And in Guess who, I'm winning. Obviously." else if (fooledAll > pip) " And in Guess who, you lot are winning. Unacceptable." else "")
+        })
+    }
+
     private fun trainNext(skipped: Boolean = false) { trainExpect = false; trainIndex++; trainStep() }
 
     private fun startGuess() {
@@ -755,9 +806,15 @@ class MainActivity : Activity() {
             trainStatus.text = "Am I right? Tap who it really was."
             speakLine(if (guess != null) "[wink] I think that's… $guess! Am I right?" else "[confused] Hmm. No idea. Who was that?")
             if (guess != null) trainButton("✓ Yes!", 0xFF3CC47C.toInt()) {
-                voices.remember(guess, print); speakLine("[love] Nailed it! Again!"); startGuess() }
+                voices.remember(guess, print); prefs.edit().putInt("lbPipWins", prefs.getInt("lbPipWins", 0) + 1).apply()
+                speakLine(listOf("[love] Nailed it! Again!", "[excited] Robot one, humans nil! Again!", "[wink] Too easy. Next!",
+                    "[laughing] I know that voice anywhere. Again!").fresh()); startGuess() }
             (FAMILY + voices.names).distinct().filter { it != guess }.forEach { n -> trainButton(n, 0xFF7B5CFF.toInt()) {
-                voices.remember(n, print); speakLine("[sad] Oops. $n. Noted, I'll remember that voice. Again!"); startGuess() } }
+                voices.remember(n, print)
+                prefs.edit().putInt("lbFooled_$n", prefs.getInt("lbFooled_$n", 0) + 1).apply()
+                speakLine(listOf("[sad] Oops. $n. Noted, I'll remember that voice. Again!", "[angry] $n! You sneaky so-and-so. A point to you. Again!",
+                    "[embarrassed] $n?! I knew that. I was testing you. Again!", "[suspicious] $n fooled me. It won't happen twice. Again!").fresh())
+                startGuess() } }
             trainButton("↩ Back", 0xFF555F6A.toInt()) { showPlayers() }
             return
         }
@@ -772,8 +829,12 @@ class MainActivity : Activity() {
         val tooClose = spot != KitchenMapView.Spot.CLOSE && now - lastFaceSizeAt < 3000 && lastFaceSize > 0.22f
         val line = when {
             tooClose && !trainNagged -> { trainNagged = true; "[suspicious] Hmm. That's not ${spot.label.lowercase().removePrefix("by ")}. I can still see your nostrils. Off you go! But I'll count it." }
-            hit >= 0.8f -> listOf("[happy] Perfect! +$pts.", "[love] Lovely. +$pts.", "[excited] Ten out of ten! Even the Tassimo clapped.", "[happy] Crystal clear. +$pts.").fresh()
-            else -> listOf("[happy] Got it. +$pts.", "[wink] Close enough. +$pts.", "[happy] Nice! +$pts.").fresh()
+            hit >= 0.8f -> listOf("[happy] Perfect! +$pts.", "[love] Lovely. +$pts.", "[excited] Ten out of ten! Even the Tassimo clapped.",
+                "[happy] Crystal clear. +$pts.", "[excited] Studio quality! +$pts.", "[love] Ooh, I could listen to that all day. +$pts.",
+                "[happy] Voice logged. Beautifully. +$pts.", "[excited] Nailed it! The kettle's jealous. +$pts.", "[wink] Smooth as a fresh cuppa. +$pts.",
+                "[happy] Every word! You're a natural. +$pts.").fresh()
+            else -> listOf("[happy] Got it. +$pts.", "[wink] Close enough. +$pts.", "[happy] Nice! +$pts.", "[laughing] Mostly words. I'll take it. +$pts.",
+                "[wink] Creative reading. +$pts.", "[happy] Good enough for robot work. +$pts.", "[curious] Interesting version. +$pts.").fresh()
         }
         speakLine(line)
         main.postDelayed({ if (training) trainNext() }, 1800)
