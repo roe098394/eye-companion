@@ -3,7 +3,7 @@ name: Build app
 on:
   push:
     branches: [main]
-    paths-ignore: ["ios/**", "kitty/**", "mapper/**", ".github/workflows/mapper.yml", "screenfit/**", ".github/workflows/screenfit.yml", ".github/workflows/ios.yml", ".github/workflows/kitty.yml", ".github/workflows/groq-test.yml", "*.md"]
+    paths-ignore: ["ios/**", "kitty/**", "mapper/**", ".github/workflows/mapper.yml", "screenfit/**", ".github/workflows/screenfit.yml", "sharpfocus/**", ".github/workflows/sharpfocus.yml", ".github/workflows/ios.yml", ".github/workflows/kitty.yml", ".github/workflows/groq-test.yml", "*.md"]
   workflow_dispatch:
 
 permissions:
