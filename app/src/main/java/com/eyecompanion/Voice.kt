@@ -190,9 +190,9 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             sentencesThisReply++
             sayNow("Alexa.", loud = true)                  // full volume and boosted, even in the evening
             playSilence(ALEXA_PAUSE_MS)
-            // Once she's awake the Echo turns its own sound down and filters it out, so the question has
-            // to come from the tablet's own speaker, at full volume, like a person across the room.
-            if (rest.isNotBlank()) sayOutLoud(rest)
+            // The question: through the Echo at full, boosted volume (or, with ALEXA_QUESTION_ON_TABLET,
+            // out of the tablet's own speaker like a person across the room).
+            if (rest.isNotBlank()) { if (ALEXA_QUESTION_ON_TABLET) sayOutLoud(rest) else sayNow(rest, loud = true) }
             return
         }
         if (alexaSpeaking) { flushCloudBatch(); sayTablet(text); return }
@@ -266,6 +266,8 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private val WAKE_WORD = Regex("(?i)\\balexa\\b")
     /** Gap between "Alexa." and the question, so the real Echo has woken up and is listening. */
     private val ALEXA_PAUSE_MS = 1100
+    /** Where the question to the real Alexa comes from: false = through the Echo (boosted), true = tablet speaker. */
+    private val ALEXA_QUESTION_ON_TABLET = false
     private val SPEAKER_LABEL = Regex("^(alexa|pip)\\s*:\\s*", RegexOption.IGNORE_CASE)
     /** In the middle of Alexa's (pretend) answer. */
     @Volatile private var alexaSpeaking = false
