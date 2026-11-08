@@ -3219,9 +3219,8 @@ class MainActivity : Activity() {
         if (chloeMode) chloeLastActive = System.currentTimeMillis()
         val shown = if (fromAlexa) "Alexa: $text" else if (overheard) "(overheard) $text" else if (speaker != null) "$speaker: $text" else "You: $text"
         if (fromAlexa) {
-            val n = alexaAsks.size
             text = "(Alexa, the Echo, just answered you out loud: \"$text\") React to what she said and pass it on to the family " +
-                "in your own cheeky way. Don't ask her anything else.
+                "in your own cheeky way. Don't ask her anything else."
         }
         if (shouted && !overheard) text = "(shouted) $text"
         if (overheard) text = "(overheard: nobody said your name or is looking at you) $text"
