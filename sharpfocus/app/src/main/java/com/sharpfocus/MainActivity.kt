@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private var pos = 0                         // lens position relative to where we started
     private var curve: List<Sample> = emptyList()
     private var camReady = false
+    private var autoMode = false              // opened by the motion watcher / power-up: focus, then close
 
     private val logFile by lazy { File(getExternalFilesDir(null), "sharpfocus-log.txt") }
     private fun log(s: String) {
@@ -63,7 +64,19 @@ class MainActivity : Activity() {
         setContentView(view)
         view.requestFocus()
         link = RootLink(this)
+        autoMode = intent?.getBooleanExtra("auto", false) == true
+        if (autoMode) { status = "Refocusing…"; detail = when (val w = intent?.getStringExtra("why")) {
+            null -> "Sharpening the picture"
+            "power-up" -> "Just switched on — sharpening the picture"
+            else -> "Projector was $w — sharpening the picture"
+        } }
+        else thread { Watcher.start(this, boot = false) }   // make sure the motion watcher is running with current settings
         thread(name = "start") { startUp() }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("auto", false)) { autoMode = true; if (camReady) autoFocus() }
     }
 
     override fun onResume() { super.onResume(); hideBars() }
@@ -85,6 +98,7 @@ class MainActivity : Activity() {
         if (!link.start()) {
             ui("No root access", (link.lastError ?: "") + "  —  Sharp Focus needs root (Magisk) to move the lens and read the camera.")
             log("root failed: ${link.lastError}")
+            if (autoMode) runOnUiThread { view.postDelayed({ finish() }, 6000) }
             return
         }
         val info = link.ask("INFO").removePrefix("I ").replace("|", "\n")
@@ -102,11 +116,16 @@ class MainActivity : Activity() {
                 opened = ""
             }
         }
-        if (opened.isEmpty()) { ui("Couldn't read the camera", "The log has the details. Press Back for the menu."); return }
+        if (opened.isEmpty()) {
+            ui("Couldn't read the camera", "The log has the details. Press Back for the menu.")
+            if (autoMode) runOnUiThread { view.postDelayed({ finish() }, 6000) }
+            return
+        }
         camReady = true
         log("camera: $opened")
         ui("Ready", "OK = auto focus   ◄ ► = focus by hand   ▲ ▼ = what to keep sharp   Back = menu")
         refreshLive()
+        if (autoMode) runOnUiThread { autoFocus() }
     }
 
     private fun sample(skip: Int): Sample? {
@@ -171,80 +190,99 @@ class MainActivity : Activity() {
                 runAuto()
             } catch (e: Exception) {
                 log("auto failed: $e"); ui("Something went wrong", e.message ?: "")
-            } finally { busy = false; runOnUiThread { view.invalidate() } }
+            } finally {
+                busy = false
+                runOnUiThread {
+                    view.invalidate()
+                    if (autoMode) view.postDelayed({ if (!busy) finish() }, 2500)   // back to whatever was on before
+                }
+            }
         }
     }
 
     private fun runAuto() {
         log("=== auto focus, aim=$aim")
-        ui("Focusing…", "Looking for the sharpest point")
-        val start = sample(4) ?: run { ui("Camera stopped", ""); return }
-        val valid = validCells(start)
-        log("contrast ${start.c.joinToString()}  valid=$valid")
-        if (valid.isEmpty()) { ui("The camera can't see the picture", "Is the projector pointing at a wall? Try 'Show camera' in the menu."); return }
+        ui("Focusing…", "Looking at the picture")
+        val first = sample(4) ?: run { ui("Camera stopped", ""); return }
+        val valid = validCells(first)
+        log("contrast ${first.c.joinToString()}  valid=$valid")
+        if (valid.isEmpty()) { ui("The camera can't see the picture", "Is the projector pointing at a wall? Try 'Show camera view' in the menu."); return }
 
-        // 1) coarse: find which way gets sharper, then follow it past the peak
-        val coarse = 10
-        val seen = ArrayList<Sample>(); seen += start
-        move(coarse); val plus = sample(4)!!; seen += plus
-        var dir = 1
-        if (total(plus, valid) < total(start, valid) * 0.97) {
-            move(-2 * coarse); val minus = sample(4)!!; seen += minus
-            if (total(minus, valid) > total(plus, valid)) dir = -1 else { move(2 * coarse) }
-        }
-        var best = seen.maxBy { total(it, valid) }
-        var fall = 0; var flat = 0; var prev = total(seen.last(), valid)
-        for (i in 0 until 40) {
-            if (cancel) return
-            move(dir * coarse)
-            val s = sample(4) ?: return
-            seen += s
-            val t = total(s, valid)
-            if (t > total(best, valid)) best = s
-            fall = if (t < prev) fall + 1 else 0
-            flat = if (abs(t - prev) <= max(3, prev / 100)) flat + 1 else 0
-            prev = t
-            ui("Focusing…", "Searching: step ${i + 1}, best so far at ${best.pos}")
-            log("coarse pos=$pos total=$t cells=${s.s.joinToString()}")
-            if (fall >= 3 && t < total(best, valid) * 0.75) break
-            if (flat >= 5) { log("lens stopped moving (end of travel)"); break }
-        }
-        if (cancel) return
+        // 1) run the lens to its end stop: an exact starting point every time
+        ui("Focusing…", "Resetting the lens")
+        home()
 
-        // 2) fine sweep around the peak, always moving the same way so gear slack doesn't fool us
-        val span = 4 * coarse
-        val fine = 4
-        val from = best.pos - span
-        move(from - pos - 12); move(12)            // approach the start of the sweep from below
+        // 2) sweep across the whole range, measuring every part of the picture
+        val step = 5
         val sweep = ArrayList<Sample>()
-        while (pos <= best.pos + span && !cancel) {
+        var flat = 0
+        var bestT = 0
+        while (pos < 400 && !cancel) {
             val s = sample(4) ?: return
             sweep += s
-            log("fine pos=$pos cells=${s.s.joinToString()}")
-            ui("Fine tuning…", "Checking every part of the picture")
-            move(fine)
+            val t = total(s, valid)
+            bestT = max(bestT, t)
+            log("sweep pos=$pos total=$t cells=${s.s.joinToString()}")
+            ui("Focusing…", "Sweeping the lens: ${sweep.size} readings, sharpest so far ${bestT}")
+            if (sweep.size >= 2) {
+                val prevT = total(sweep[sweep.size - 2], valid)
+                flat = if (abs(t - prevT) <= max(3, prevT / 150)) flat + 1 else 0
+            }
+            // reached the other end stop
+            if (flat >= 4 && pos > 40) { log("other end of travel at about ${pos - 4 * step}"); break }
+            // well past the sharpest point for every part we care about -> no need to go further
+            val peakIdx = sweep.indices.maxBy { total(sweep[it], valid) }
+            if (sweep.size - peakIdx >= 5 && t < bestT * 0.55 &&
+                valid.all { c -> s.s[c] < sweep.maxOf { it.s[c] } * 0.8 }) break
+            move(step)
         }
-        if (cancel || sweep.isEmpty()) return
+        if (cancel || sweep.size < 3) return
         curve = sweep
 
         // 3) choose the lens position
-        val cells = aimCells(validCells(sweep.maxBy { it.c.sum() }))
+        val cells = aimCells(valid)
         val peak = IntArray(9) { c -> sweep.maxOf { it.s[c] } }
         fun quality(s: Sample) = when (aim) {
             Aim.WHOLE -> cells.minOf { c -> s.s[c].toDouble() / max(1, peak[c]) }   // the worst part, as sharp as possible
             else -> cells.sumOf { c -> s.s[c].toDouble() / max(1, peak[c]) } / cells.size
         }
-        val target = sweep.maxBy { quality(it) }
-        log("cells=$cells target=${target.pos} quality=${"%.2f".format(quality(target))}")
+        // smooth a little so one noisy reading can't win
+        val q = sweep.map { quality(it) }
+        val qs = q.indices.map { i -> (q[max(0, i - 1)] + 2 * q[i] + q[min(q.size - 1, i + 1)]) / 4 }
+        val bi = qs.indices.maxBy { qs[it] }
+        // refine between the neighbours with a parabola
+        var target = sweep[bi].pos
+        if (bi in 1 until sweep.size - 1) {
+            val a = qs[bi - 1]; val b = qs[bi]; val c = qs[bi + 1]
+            val den = a - 2 * b + c
+            if (den < 0) target += (step * 0.5 * (a - c) / den).toInt()
+        }
+        for (c in 0 until 9) {
+            val pk = sweep.maxBy { it.s[c] }.pos
+            log("cell $c sharpest at pos=$pk")
+        }
+        log("cells=$cells target=$target")
 
-        // 4) go there, approaching from the same side as the sweep
-        move(target.pos - pos - 12); move(12)
+        // 4) back to the end stop, then straight to the target: always from the same side, so gear slack doesn't matter
+        ui("Focusing…", "Setting the lens")
+        home()
+        move(target)
         val fin = sample(4)
-        val q = fin?.let { quality(it) } ?: 0.0
-        val pct = (q * 100).toInt().coerceIn(0, 100)
+        val finalQ = fin?.let { quality(it) } ?: 0.0
+        val pct = (finalQ * 100).toInt().coerceIn(0, 100)
         prefs.edit().putInt("lastPos", pos).apply()
-        log("done at pos=$pos quality=$pct%")
-        ui("Focused", "${aim.title}: worst part is $pct% of its best possible sharpness.  OK = again   ◄ ► = fine tune")
+        // how differently the left and right of the picture want to be focused (the wall's angle)
+        val left = listOf(0, 3, 6).filter { it in valid }.map { c -> sweep.maxBy { it.s[c] }.pos }.average()
+        val right = listOf(2, 5, 8).filter { it in valid }.map { c -> sweep.maxBy { it.s[c] }.pos }.average()
+        val spread = if (left.isNaN() || right.isNaN()) "" else "  (left/right differ by ${abs(right - left).toInt()} lens steps)"
+        log("done at pos=$pos quality=$pct%$spread")
+        ui("Focused", "${aim.title}: ${if (aim == Aim.WHOLE) "the blurriest part is" else "it's"} $pct% of its sharpest$spread")
+    }
+
+    /** Drive the lens to its end stop and call that position 0. */
+    private fun home() {
+        move(-450)
+        pos = 0
     }
 
     // ---------------------------------------------------------------- remote
@@ -290,12 +328,34 @@ class MainActivity : Activity() {
             aim = a; prefs.edit().putInt("aim", a.ordinal).apply(); ui("Keep sharp: ${a.title}", a.hint + "   —   OK to focus")
         }
         items += (if (showCam) "Hide camera view" else "Show camera view") to { showCam = !showCam; refreshLive() }
+        val onBoot = prefs.getBoolean("focusOnBoot", true)
+        val onMove = prefs.getBoolean("focusOnMove", true)
+        items += (if (onBoot) "✓ " else "✗ ") + "Refocus when switched on" to {
+            prefs.edit().putBoolean("focusOnBoot", !onBoot).apply(); thread { Watcher.start(this, boot = false) }
+            ui("Refocus when switched on: " + (if (!onBoot) "ON" else "OFF"), "")
+        }
+        items += (if (onMove) "✓ " else "✗ ") + "Refocus after the projector is moved" to {
+            prefs.edit().putBoolean("focusOnMove", !onMove).apply(); thread { Watcher.start(this, boot = false) }
+            ui("Refocus after moving: " + (if (!onMove) "ON" else "OFF"), "")
+        }
+        items += "Turn off the built-in autofocus (so they don't both run)" to { builtInAutofocus(false) }
+        items += "Turn the built-in autofocus back on" to { builtInAutofocus(true) }
         items += "Help" to { help() }
         items += "Exit" to { finish() }
         dialog().setTitle("Sharp Focus")
             .setItems(items.map { it.first }.toTypedArray()) { _, w -> items[w].second() }
             .setOnDismissListener { hideBars(); view.requestFocus() }
             .show()
+    }
+
+    private fun builtInAutofocus(on: Boolean) {
+        thread {
+            val v = if (on) "1" else "0"
+            val a = link.ask("PROP persist.sys.vafocus $v")
+            val b = link.ask("PROP persist.sys.upvafocus $v")
+            log("built-in autofocus -> $v: $a / $b")
+            ui("Built-in autofocus " + (if (on) "ON" else "OFF"), if (a.startsWith("OK") && b.startsWith("OK")) "Done." else "Couldn't change it: $a")
+        }
     }
 
     private fun help() {
@@ -307,7 +367,10 @@ class MainActivity : Activity() {
                 "is closer than the other, so no single setting is perfect everywhere — \"Whole picture\" picks the point " +
                 "where the blurriest part is as sharp as it can be, so it's evenly sharp across.\n\n" +
                 "OK: auto focus (press again to stop)\n◄ ►: focus by hand\n▲ ▼: what to keep sharp (whole picture, centre, left, right)\n" +
-                "Back: menu — you can show what the camera sees, which helps if it can't find the picture."
+                "Back: menu — you can show what the camera sees, which helps if it can't find the picture.\n\n" +
+                "It also refocuses by itself when the projector is switched on, and after it's been moved or knocked " +
+                "(once it's been still for a few seconds), then goes back to what you were watching. Both can be turned " +
+                "off in the menu. Turn off the built-in autofocus in the menu so the two don't fight."
             )
             .setPositiveButton("OK", null)
             .setOnDismissListener { hideBars(); view.requestFocus() }

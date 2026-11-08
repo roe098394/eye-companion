@@ -20,6 +20,7 @@ import kotlin.math.min
  *   SNAP                 -> "IMG w h <hex grey pixels>" (small preview, 80x60)
  *   MOVE n               -> moves the lens n steps (+ one way, - the other), waits, "OK"
  *   STOP                 -> "OK"
+ *   PROP key value       -> sets a system property, "OK <new value>"
  *   Q                    -> quit
  */
 object FocusHelper {
@@ -53,6 +54,7 @@ object FocusHelper {
                     "SNAP" -> snap()
                     "MOVE" -> { move(p[1].toInt()); "OK" }
                     "STOP" -> { writeMotor(768); "OK" }
+                    "PROP" -> { setProp(p[1], p[2]); "OK " + getProp(p[1]) }
                     "Q" -> { if (cam != 0L) Cam.close(cam); println("BYE"); System.out.flush(); return }
                     else -> "ERR unknown"
                 }
@@ -154,6 +156,15 @@ object FocusHelper {
         return sb.toString()
     }
 
+    private fun getProp(k: String): String = try {
+        Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, k) as String
+    } catch (e: Exception) { "?" }
+
+    private fun setProp(k: String, v: String) {
+        try { Class.forName("android.os.SystemProperties").getMethod("set", String::class.java, String::class.java).invoke(null, k, v) }
+        catch (e: Exception) { Runtime.getRuntime().exec(arrayOf("setprop", k, v)).waitFor() }
+    }
+
     private fun writeMotor(v: Int) {
         FileOutputStream(MOTOR).use { it.write(v.toString().toByteArray()) }
     }
@@ -163,7 +174,7 @@ object FocusHelper {
         val steps = min(255, kotlin.math.abs(n))
         writeMotor((if (n > 0) 256 else 512) + steps)
         // wait for the lens to get there and stop wobbling
-        val perStep = readFile("$MOTOR_DIR/motor_step_delay").toIntOrNull()?.let { if (it in 1..50) it else 4 } ?: 4
+        val perStep = readFile("$MOTOR_DIR/motor_step_delay").toIntOrNull()?.let { if (it in 4..50) it else 4 } ?: 4
         Thread.sleep(120L + steps * perStep.toLong())
     }
 }
