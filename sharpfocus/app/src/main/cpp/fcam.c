@@ -157,6 +157,13 @@ static int dq(Cam *cam, struct v4l2_buffer *b) {
 JNIEXPORT jbyteArray JNICALL Java_com_sharpfocus_Cam_grab(JNIEnv *env, jclass c, jlong hnd, jint skip) {
     Cam *cam = (Cam *) (intptr_t) hnd;
     struct v4l2_buffer b;
+    // throw away every frame already waiting (they were taken before the lens finished moving)
+    for (int k = 0; k < 16; k++) {
+        memset(&b, 0, sizeof b);
+        b.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; b.memory = V4L2_MEMORY_MMAP;
+        if (xioctl(cam->fd, VIDIOC_DQBUF, &b) < 0) break;   // EAGAIN: nothing left waiting
+        xioctl(cam->fd, VIDIOC_QBUF, &b);
+    }
     for (int i = 0; i < skip; i++) {
         if (dq(cam, &b) < 0) { seterr("DQBUF"); return NULL; }
         xioctl(cam->fd, VIDIOC_QBUF, &b);

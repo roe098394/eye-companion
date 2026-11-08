@@ -171,10 +171,12 @@ object FocusHelper {
 
     private fun move(n: Int) {
         if (n == 0) return
+        // tell the motion watcher this shake is ours, not someone moving the projector
+        try { File("/data/local/tmp/sharpfocus-busy").writeText(System.currentTimeMillis().toString()) } catch (_: Exception) {}
         val steps = min(255, kotlin.math.abs(n))
         writeMotor((if (n > 0) 256 else 512) + steps)
         // wait for the lens to get there and stop wobbling
         val perStep = readFile("$MOTOR_DIR/motor_step_delay").toIntOrNull()?.let { if (it in 4..50) it else 4 } ?: 4
-        Thread.sleep(120L + steps * perStep.toLong())
+        Thread.sleep(300L + steps * perStep.toLong())     // + time for the camera to catch up
     }
 }

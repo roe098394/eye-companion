@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private var pos = 0                         // lens position relative to where we started
     private var curve: List<Sample> = emptyList()
     private var camReady = false
+    private var manualSinceAuto = 0           // ◄ ► steps the user added after the last auto focus
     private var autoMode = false              // opened by the motion watcher / power-up: focus, then close
 
     private val logFile by lazy { File(getExternalFilesDir(null), "sharpfocus-log.txt") }
@@ -239,44 +240,71 @@ class MainActivity : Activity() {
         if (cancel || sweep.size < 3) return
         curve = sweep
 
-        // 3) choose the lens position
+        // 3) choose the lens position.
+        // For each part of the picture, fit a curve through the readings near its sharpest point:
+        // much more precise than taking the single best reading, because the camera's view is low-detail.
         val cells = aimCells(valid)
-        val peak = IntArray(9) { c -> sweep.maxOf { it.s[c] } }
-        fun quality(s: Sample) = when (aim) {
-            Aim.WHOLE -> cells.minOf { c -> s.s[c].toDouble() / max(1, peak[c]) }   // the worst part, as sharp as possible
-            else -> cells.sumOf { c -> s.s[c].toDouble() / max(1, peak[c]) } / cells.size
+        val peakAt = DoubleArray(9) { c -> fitPeak(sweep, c) }
+        for (c in 0 until 9) log("cell $c sharpest at pos=${"%.1f".format(peakAt[c])}")
+        val target0 = when (aim) {
+            // blur grows with distance from each part's own sharpest point, so the fairest spot is
+            // halfway between the two most different parts (the near and far sides of an angled wall)
+            Aim.WHOLE -> (cells.minOf { peakAt[it] } + cells.maxOf { peakAt[it] }) / 2
+            else -> cells.map { peakAt[it] }.average()
         }
-        // smooth a little so one noisy reading can't win
-        val q = sweep.map { quality(it) }
-        val qs = q.indices.map { i -> (q[max(0, i - 1)] + 2 * q[i] + q[min(q.size - 1, i + 1)]) / 4 }
-        val bi = qs.indices.maxBy { qs[it] }
-        // refine between the neighbours with a parabola
-        var target = sweep[bi].pos
-        if (bi in 1 until sweep.size - 1) {
-            val a = qs[bi - 1]; val b = qs[bi]; val c = qs[bi + 1]
-            val den = a - 2 * b + c
-            if (den < 0) target += (step * 0.5 * (a - c) / den).toInt()
-        }
-        for (c in 0 until 9) {
-            val pk = sweep.maxBy { it.s[c] }.pos
-            log("cell $c sharpest at pos=$pk")
-        }
-        log("cells=$cells target=$target")
+        val offset = prefs.getInt("offset", 0)        // the user's own fine-tune, learned from earlier
+        val target = (target0 + offset).toInt()
+        log("cells=$cells target=$target0 + your fine-tune $offset = $target")
+        val q = sweep.map { s -> cells.minOf { c -> s.s[c].toDouble() / max(1, sweep.maxOf { it.s[c] }) } }
 
         // 4) back to the end stop, then straight to the target: always from the same side, so gear slack doesn't matter
         ui("Focusing…", "Setting the lens")
         home()
         move(target)
+        manualSinceAuto = 0
         val fin = sample(4)
-        val finalQ = fin?.let { quality(it) } ?: 0.0
+        val finalQ = fin?.let { f -> cells.minOf { c -> f.s[c].toDouble() / max(1, sweep.maxOf { it.s[c] }) } } ?: 0.0
         val pct = (finalQ * 100).toInt().coerceIn(0, 100)
         prefs.edit().putInt("lastPos", pos).apply()
         // how differently the left and right of the picture want to be focused (the wall's angle)
-        val left = listOf(0, 3, 6).filter { it in valid }.map { c -> sweep.maxBy { it.s[c] }.pos }.average()
-        val right = listOf(2, 5, 8).filter { it in valid }.map { c -> sweep.maxBy { it.s[c] }.pos }.average()
+        val left = listOf(0, 3, 6).filter { it in valid }.map { peakAt[it] }.average()
+        val right = listOf(2, 5, 8).filter { it in valid }.map { peakAt[it] }.average()
         val spread = if (left.isNaN() || right.isNaN()) "" else "  (left/right differ by ${abs(right - left).toInt()} lens steps)"
         log("done at pos=$pos quality=$pct%$spread")
         ui("Focused", "${aim.title}: ${if (aim == Aim.WHOLE) "the blurriest part is" else "it's"} $pct% of its sharpest$spread")
+    }
+
+    /**
+     * Where one part of the picture is sharpest: a parabola fitted (least squares) through the
+     * readings within 25% of its best, falling back to the best reading.
+     */
+    private fun fitPeak(sweep: List<Sample>, c: Int): Double {
+        val best = sweep.maxBy { it.s[c] }
+        val top = sweep.filter { it.s[c] >= best.s[c] * 0.75 }
+        if (top.size < 3) return best.pos.toDouble()
+        // fit y = a x^2 + b x + k around the best reading (x centred for accuracy)
+        val x0 = best.pos.toDouble()
+        var s0 = 0.0; var s1 = 0.0; var s2 = 0.0; var s3 = 0.0; var s4 = 0.0; var t0 = 0.0; var t1 = 0.0; var t2 = 0.0
+        for (p in top) {
+            val x = p.pos - x0; val y = p.s[c].toDouble()
+            s0 += 1; s1 += x; s2 += x * x; s3 += x * x * x; s4 += x * x * x * x
+            t0 += y; t1 += x * y; t2 += x * x * y
+        }
+        // solve the 3x3 normal equations
+        val m = arrayOf(doubleArrayOf(s4, s3, s2, t2), doubleArrayOf(s3, s2, s1, t1), doubleArrayOf(s2, s1, s0, t0))
+        for (i in 0 until 3) {
+            val piv = (i until 3).maxBy { abs(m[it][i]) }
+            val tmp = m[i]; m[i] = m[piv]; m[piv] = tmp
+            if (abs(m[i][i]) < 1e-9) return x0
+            for (j in 0 until 3) if (j != i) {
+                val f = m[j][i] / m[i][i]
+                for (k in i until 4) m[j][k] -= f * m[i][k]
+            }
+        }
+        val a = m[0][3] / m[0][0]; val b = m[1][3] / m[1][1]
+        if (a >= 0) return x0                                  // not a peak shape
+        val peak = x0 - b / (2 * a)
+        return peak.coerceIn(top.minOf { it.pos }.toDouble(), top.maxOf { it.pos }.toDouble())
     }
 
     /** Drive the lens to its end stop and call that position 0. */
@@ -298,8 +326,8 @@ class MainActivity : Activity() {
                 if (busy || !camReady) return true
                 val n = (if (event.repeatCount > 3) 8 else 2) * (if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1)
                 busy = true
-                thread { try { move(n); sample(2); if (showCam) grabPreview() } finally { busy = false; runOnUiThread { view.invalidate() } } }
-                ui("Manual focus", "◄ ► move the lens (hold for bigger steps)   OK = auto focus")
+                thread { try { move(n); manualSinceAuto += n; sample(2); if (showCam) grabPreview() } finally { busy = false; runOnUiThread { view.invalidate() } } }
+                ui("Manual focus", "◄ ► move the lens (hold for bigger steps)   OK = auto focus   Back → 'Remember my fine-tune' to teach auto focus")
                 return true
             }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -324,6 +352,15 @@ class MainActivity : Activity() {
     private fun showMenu() {
         val items = ArrayList<Pair<String, () -> Unit>>()
         items += "Auto focus now" to { autoFocus() }
+        if (manualSinceAuto != 0) items += "Remember my fine-tune (${if (manualSinceAuto > 0) "+" else ""}$manualSinceAuto) for every auto focus" to {
+            val o = prefs.getInt("offset", 0) + manualSinceAuto
+            prefs.edit().putInt("offset", o).apply(); manualSinceAuto = 0
+            log("fine-tune remembered: offset now $o")
+            ui("Fine-tune remembered", "Auto focus will now aim ${if (o >= 0) "+" else ""}$o steps from what the camera thinks is sharpest.")
+        }
+        if (prefs.getInt("offset", 0) != 0) items += "Forget my fine-tune (now ${prefs.getInt("offset", 0)})" to {
+            prefs.edit().putInt("offset", 0).apply(); ui("Fine-tune forgotten", "")
+        }
         for (a in Aim.values()) items += ((if (a == aim) "● " else "    ") + "Keep sharp: " + a.title) to {
             aim = a; prefs.edit().putInt("aim", a.ordinal).apply(); ui("Keep sharp: ${a.title}", a.hint + "   —   OK to focus")
         }
@@ -340,6 +377,8 @@ class MainActivity : Activity() {
         }
         items += "Turn off the built-in autofocus (so they don't both run)" to { builtInAutofocus(false) }
         items += "Turn the built-in autofocus back on" to { builtInAutofocus(true) }
+        items += "Turn off the built-in auto keystone (keeps your Screen Fit shape)" to { builtInKeystone(false) }
+        items += "Turn the built-in auto keystone back on" to { builtInKeystone(true) }
         items += "Help" to { help() }
         items += "Exit" to { finish() }
         dialog().setTitle("Sharp Focus")
@@ -355,6 +394,15 @@ class MainActivity : Activity() {
             val b = link.ask("PROP persist.sys.upvafocus $v")
             log("built-in autofocus -> $v: $a / $b")
             ui("Built-in autofocus " + (if (on) "ON" else "OFF"), if (a.startsWith("OK") && b.startsWith("OK")) "Done." else "Couldn't change it: $a")
+        }
+    }
+
+    private fun builtInKeystone(on: Boolean) {
+        thread {
+            val v = if (on) "1" else "0"
+            val a = link.ask("PROP persist.sys.keystone_vaf $v")
+            log("built-in auto keystone -> $v: $a")
+            ui("Built-in auto keystone " + (if (on) "ON" else "OFF"), if (a.startsWith("OK")) "Done." else "Couldn't change it: $a")
         }
     }
 
