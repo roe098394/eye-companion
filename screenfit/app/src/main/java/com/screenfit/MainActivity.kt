@@ -130,6 +130,10 @@ class MainActivity : Activity() {
         val items = ArrayList<Pair<String, () -> Unit>>()
         if (shape != null) {
             for (m in Mode.values()) items += ((if (m == mode) "● " else "    ") + m.title) to { mode = m; view.invalidate() }
+            val presets = loadPresets()
+            if (presets.isNotEmpty()) items += "Load a preset (${presets.size} saved)" to { choosePreset() }
+            items += "Save as a preset" to { savePreset() }
+            if (presets.isNotEmpty()) items += "Delete a preset" to { deletePreset() }
             items += "Undo changes (back to how it was when opened)" to {
                 opened?.let { o -> shape?.copyFrom(o); push() }
             }
@@ -153,6 +157,96 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---------------------------------------------------------------- presets
+
+    /** Saved presets, in the order they were made: name -> ltx,lty,rtx,rty,lbx,lby,rbx,rby */
+    private fun loadPresets(): LinkedHashMap<String, IntArray> {
+        val out = LinkedHashMap<String, IntArray>()
+        try {
+            val o = org.json.JSONObject(prefs.getString("presets", "{}") ?: "{}")
+            val names = prefs.getString("preset_order", "")!!.split("\n").filter { it.isNotEmpty() && o.has(it) } +
+                o.keys().asSequence().toList()
+            for (n in names.distinct()) {
+                val a = o.getJSONArray(n)
+                out[n] = IntArray(8) { a.getInt(it) }
+            }
+        } catch (_: Exception) {}
+        return out
+    }
+
+    private fun storePresets(p: LinkedHashMap<String, IntArray>) {
+        val o = org.json.JSONObject()
+        for ((n, v) in p) o.put(n, org.json.JSONArray(v.toList()))
+        prefs.edit().putString("presets", o.toString()).putString("preset_order", p.keys.joinToString("\n")).apply()
+    }
+
+    private fun choosePreset() {
+        val p = loadPresets()
+        val names = p.keys.toTypedArray()
+        dialog().setTitle("Load a preset")
+            .setItems(names) { _, which ->
+                shape?.fromInsets(p[names[which]]!!)
+                push()
+                toast("Loaded “${names[which]}”")
+            }
+            .setNegativeButton("Cancel", null)
+            .setOnDismissListener { hideBars(); view.requestFocus() }
+            .show()
+    }
+
+    private fun savePreset() {
+        val s = shape ?: return
+        val p = loadPresets()
+        val options = ArrayList<String>()
+        options += "New preset…"
+        options += p.keys.map { "Replace “$it”" }
+        dialog().setTitle("Save the current picture as…")
+            .setItems(options.toTypedArray()) { _, which ->
+                if (which == 0) askName("Preset ${p.size + 1}") { name ->
+                    val q = loadPresets(); q[name] = s.toInsets(); storePresets(q); toast("Saved “$name”")
+                } else {
+                    val name = p.keys.elementAt(which - 1)
+                    p[name] = s.toInsets(); storePresets(p); toast("Updated “$name”")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .setOnDismissListener { hideBars(); view.requestFocus() }
+            .show()
+    }
+
+    private fun askName(suggested: String, done: (String) -> Unit) {
+        val box = android.widget.EditText(this).apply {
+            setText(suggested); setSelectAllOnFocus(true); isSingleLine = true
+            hint = "e.g. Living room wall, Ceiling, Bedroom"
+        }
+        val pad = (20 * resources.displayMetrics.density).toInt()
+        val wrap = android.widget.FrameLayout(this).apply { setPadding(pad, pad / 2, pad, 0); addView(box) }
+        dialog().setTitle("Name this preset")
+            .setView(wrap)
+            .setPositiveButton("Save") { _, _ ->
+                val name = box.text.toString().trim().ifEmpty { suggested }
+                done(name)
+            }
+            .setNegativeButton("Cancel", null)
+            .setOnDismissListener { hideBars(); view.requestFocus() }
+            .show()
+        box.requestFocus()
+    }
+
+    private fun deletePreset() {
+        val p = loadPresets()
+        val names = p.keys.toTypedArray()
+        dialog().setTitle("Delete which preset?")
+            .setItems(names) { _, which ->
+                confirm("Delete “${names[which]}”?") { p.remove(names[which]); storePresets(p); toast("Deleted") }
+            }
+            .setNegativeButton("Cancel", null)
+            .setOnDismissListener { hideBars(); view.requestFocus() }
+            .show()
+    }
+
+    private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+
     private fun confirm(q: String, action: () -> Unit) {
         dialog().setMessage(q)
             .setPositiveButton("Yes") { _, _ -> action() }
@@ -172,7 +266,7 @@ class MainActivity : Activity() {
                 "• Straighten: ◄► turns the picture a tiny bit if it's on a slant.\n" +
                 "• Corners: move each corner on its own for awkward walls.\n\n" +
                 "Hold an arrow to go faster. Changes happen straight away and are saved, so they stay after a restart and work in every app.\n\n" +
-                "Back opens the menu: undo, straight picture, or exit."
+                "Back opens the menu: save the current shape as a preset (e.g. \"Living room wall\" or \"Ceiling\"), load or delete presets, undo, straight picture, or exit."
             )
             .setPositiveButton("OK", null)
             .setOnDismissListener { hideBars(); view.requestFocus() }
