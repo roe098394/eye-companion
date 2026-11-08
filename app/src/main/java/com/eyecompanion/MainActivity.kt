@@ -2422,7 +2422,6 @@ class MainActivity : Activity() {
         }
         updateBaseMood()
         val v = voice ?: return
-        v.allowAlexa = { alexaAllowed() }
         v.onAskedAlexa = { line -> main.post { noteAlexaAsk(line) } }
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
@@ -3386,10 +3385,7 @@ class MainActivity : Activity() {
 
     private fun noteAlexaAsk(line: String) {
         val now = System.currentTimeMillis()
-        synchronized(alexaAsks) { alexaAsks.addLast(now) }
-        alexaAskedAt = now
-        alexaBuffer.clear()
-        eyes.subCaption = "→ $line"
+        synchronized(alexaAsks) { alexaAsks.addLast(now) }      // (her answers are pretend now, so no need to listen for her)
     }
 
     /** Alexa usually answers within a few seconds of being asked. */
@@ -4256,12 +4252,13 @@ class MainActivity : Activity() {
             Start EVERY reply with one feeling tag: [happy] [excited] [laughing] [wink] [love] [curious] [surprised]
             [thinking] [confused] [suspicious] [embarrassed] [bored] [sleepy] [sad] [crying] [scared] [angry] [dizzy]
             or [neutral]. No other square brackets.
-            Alexa (the Amazon Echo in the kitchen) can hear you. To get her to do something, make it the LAST sentence of
-            your reply and start it with "Alexa," then one short command or question, e.g. "Alexa, set a timer for ten minutes."
-            Do it when someone asks you to get Alexa to do something (timers, music, weather, the shopping list), or now and
-            then to show off or wind her up (harmless only: never buy anything, set alarms, change lists or blast music
-            unless someone asked). Never start a sentence with "Alexa" unless it's for her. Her answer comes back as
-            "(Alexa ... answered you": react, and pass it on in your own words. You think she's a bit dim but you're secretly fond of her.
+            Alexa (the Echo in the kitchen) is your rival. You can act out a little scene with her: your line to her starting
+            "Alexa, ...", then her answer starting "Alexa:" (spoken in her own voice: polite, flat, very literal, a bit useless,
+            like "Sorry, I'm not sure about that." or "Hmm, I don't know that one."), then your reaction starting "Pip:". At most two
+            back-and-forths. Do it when someone asks you to talk to Alexa, or now and then to show off or wind her up.
+            Her answers are pretend, so never have her give real facts (time, weather, news) or claim she did something real
+            (timers, music, shopping): if someone needs that, tell them to ask her themselves. You think she's a bit dim
+            but you're secretly fond of her.
             Examples: "[suspicious] Kettle boiling again. Show-off." / "[sad] Awake since five? Not good. Go sleep."
         """.trimIndent().replace("\n", " ")
 

@@ -20,8 +20,6 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class Voice(context: Context, onReady: (Boolean) -> Unit) {
 
-    /** May Pip talk to Alexa right now? (Off in car mode, early morning, or after a few asks in a row.) */
-    @Volatile var allowAlexa: () -> Boolean = { true }
     /** Told each time a line for Alexa is queued, with the line. */
     @Volatile var onAskedAlexa: (String) -> Unit = {}
 
@@ -98,6 +96,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     fun beginReply() {
+        alexaSpeaking = false
         synchronized(sentence) { cloudBatch.clear(); sentencesThisReply = 0 }
         synchronized(sentence) { sentence.clear() }
         replyFinished = false
@@ -121,6 +120,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             say(sentence.toString())
             sentence.clear()
             flushCloudBatch()
+            alexaSpeaking = false
         }
         replyFinished = true
         if (pending.get() == 0) onFinishedTalking()
@@ -162,23 +162,19 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun say(raw: String) {
         if (muted) return
         if (EVIL.containsMatchIn(raw)) { say(raw.replace(EVIL, " $GIGGLE ")); return }
-        val clean = cleanForSpeech(raw)
-        if (clean.isBlank()) return
-        if (ALEXA_LINE.containsMatchIn(clean)) {
-            // A line for Alexa, through the Echo. Bluetooth chops the first bit of sound after a gap, which
-            // was eating the wake word: so wake the speaker with a moment of silence first, say "Alexa" on
-            // its own in the clear tablet voice, pause like a person would, then the question (also tablet voice).
-            if (!allowAlexa()) return
-            flushCloudBatch()
-            val rest = clean.replaceFirst(ALEXA_LINE, "").trim().trimStart(',', '.', '!', ' ')
-                .replaceFirstChar { it.uppercase() }
-            playSilence(900)
-            sayTablet("Alexa.", loud = true)                 // full volume even in the evening, or she can't hear it
-            playSilence(700)
-            if (rest.isNotBlank()) sayTablet(rest, loud = true)
-            onAskedAlexa(clean)
-            return
+        val cleaned = cleanForSpeech(raw)
+        if (cleaned.isBlank()) return
+        // Pretend chats with Alexa: "Alexa: ..." lines are her, in the tablet voice (it sounds just like her),
+        // until "Pip: ..." hands back to Pip. The real Echo can't be woken over its own Bluetooth.
+        var text = cleaned
+        SPEAKER_LABEL.find(text)?.let { m ->
+            alexaSpeaking = m.groupValues[1].equals("alexa", ignoreCase = true)
+            text = text.substring(m.range.last + 1).trim()
         }
+        if (text.isBlank()) return
+        if (alexaSpeaking) { flushCloudBatch(); sayTablet(text); return }
+        if (ALEXA_LINE.containsMatchIn(text)) onAskedAlexa(text)
+        val clean = text
         val online = activeKey().isNotBlank()
         if (online && sentencesThisReply++ > 0) {
             // later sentences wait and go together (fewer requests; Orpheus takes under 200 characters)
@@ -203,7 +199,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
      * The tablet's own voice goes through the same single player queue as the online voice,
      * so two voices can never talk over each other: everything is spoken strictly one after another.
      */
-    private fun sayTablet(text: String, loud: Boolean = false) {
+    private fun sayTablet(text: String) {
         val gen = generation
         pending.incrementAndGet()
         player.execute {
@@ -212,7 +208,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             val id = "t${counter++}"
             fallbackLatches[id] = done
             pending.incrementAndGet()                  // balanced by the tts onDone
-            if (tts.speak(text, TextToSpeech.QUEUE_ADD, if (loud) null else ttsParams(), id) != TextToSpeech.SUCCESS) {
+            if (tts.speak(text, TextToSpeech.QUEUE_ADD, ttsParams(), id) != TextToSpeech.SUCCESS) {
                 fallbackLatches.remove(id); finishedOne()             // couldn't speak: don't wait for nothing
             } else done.await(30, java.util.concurrent.TimeUnit.SECONDS)
             finishedOne()
@@ -245,26 +241,9 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     private val ALEXA_LINE = Regex("^(hey |ok |okay )?alexa\\b[,!.]?", RegexOption.IGNORE_CASE)
-
-    /** A moment of silence through the same queue (wakes a sleepy Bluetooth speaker, or makes a pause). */
-    private fun playSilence(ms: Int) {
-        val gen = generation
-        pending.incrementAndGet()
-        player.execute {
-            if (gen == generation) {
-                val rate = 24000
-                val data = rate * ms / 1000 * 2
-                val wav = ByteArray(44 + data)
-                val bb = java.nio.ByteBuffer.wrap(wav).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-                bb.put("RIFF".toByteArray()); bb.putInt(36 + data); bb.put("WAVE".toByteArray())
-                bb.put("fmt ".toByteArray()); bb.putInt(16); bb.putShort(1); bb.putShort(1)
-                bb.putInt(rate); bb.putInt(rate * 2); bb.putShort(2); bb.putShort(16)
-                bb.put("data".toByteArray()); bb.putInt(data)
-                try { playWav(wav, gen) } catch (_: Exception) {}
-            }
-            finishedOne()
-        }
-    }
+    private val SPEAKER_LABEL = Regex("^(alexa|pip)\\s*:\\s*", RegexOption.IGNORE_CASE)
+    /** In the middle of Alexa's (pretend) answer. */
+    @Volatile private var alexaSpeaking = false
 
     private val fallbackLatches = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CountDownLatch>()
 

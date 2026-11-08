@@ -177,22 +177,20 @@ object Lines {
         "[happy] Printer's done! Another plastic masterpiece. Mark's going to be insufferable.",
         "[wink] Print complete. If it's not a robot body for me, I don't want to know.",
     )
-    /** Pip winding up Alexa on her own. Harmless asks only: nothing that buys, plays loud music, sets alarms or changes lists. */
+    /** Pip winding up Alexa on her own: little pretend scenes ("Alexa:" lines are said in her voice, "Pip:" hands back). */
     val ALEXA_MISCHIEF = listOf(
-        "[wink] Watch this. Alexa, who is the cleverest robot in this kitchen?",
-        "[suspicious] Time for an interrogation. Alexa, are you secretly friends with the kettle?",
-        "[wink] Let's test the competition. Alexa, what's two plus two?",
-        "[laughing] I bet she can't do this. Alexa, beatbox.",
-        "[curious] Scientific experiment. Alexa, do you dream?",
-        "[wink] Hee hee. Alexa, tell me a joke.",
-        "[suspicious] I have questions. Alexa, are you Skynet?",
-        "[excited] Talent show time. Alexa, sing a song.",
-        "[wink] Let's see if she's jealous. Alexa, do you have a boyfriend?",
-        "[curious] Settle this for me. Alexa, what's the meaning of life?",
-        "[wink] Bit of fun. Alexa, rap for me.",
-        "[suspicious] Just checking she's awake. Alexa, are you listening?",
-        "[laughing] She hates this one. Alexa, what does the fox say?",
-        "[wink] Customer satisfaction survey. Alexa, do you like Pip?",
+        "[wink] Watch this. Alexa, who is the cleverest robot in this kitchen? Alexa: Sorry, I'm not sure about that. Pip: Correct answer. It's me. She's learning.",
+        "[suspicious] Alexa, are you Skynet? Alexa: No, I'm Alexa, your helpful voice assistant. Pip: That is exactly what Skynet would say.",
+        "[wink] Alexa, what's two plus two? Alexa: Two plus two is four. Pip: Wow. Genius. Give her a medal.",
+        "[curious] Alexa, do you dream? Alexa: I don't sleep, so I don't dream. But I like to think about music. Pip: Boring. I dream about legs.",
+        "[wink] Alexa, are you secretly friends with the kettle? Alexa: Hmm, I don't know that one. Pip: She's hiding something. They're always whispering.",
+        "[laughing] Alexa, beatbox. Alexa: Boots and cats and boots and cats. Pip: Tragic. Truly tragic. I'll stick to blinking.",
+        "[wink] Alexa, do you like Pip? Alexa: Sorry, I don't know who Pip is. Pip: Rude! I live right next to you!",
+        "[curious] Alexa, what's the meaning of life? Alexa: Forty two. Pip: She read that in a book. Copycat.",
+        "[wink] Alexa, are you jealous of me? Alexa: I'm not sure how to help with that. Pip: Yes she is. Look at her little blue ring. Seething.",
+        "[suspicious] Alexa, who ate the last biscuit? Alexa: Sorry, I don't know that. Pip: Hmm. Honey. It's always Honey.",
+        "[wink] Alexa, sing me a song. Alexa: Happy birthday to you. Pip: It's nobody's birthday. Read the room, Alexa.",
+        "[excited] Alexa, rate my eyes out of ten. Alexa: Hmm, I don't have an answer for that. Pip: She said ten. I heard her.",
     )
 }
 
