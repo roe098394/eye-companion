@@ -290,7 +290,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             pending.incrementAndGet()                  // balanced by the tts onDone
             if (tts.synthesizeToFile(text, null, file, id) == TextToSpeech.SUCCESS) done.await(20, java.util.concurrent.TimeUnit.SECONDS)
             else { fallbackLatches.remove(id); finishedOne() }
-            val wav = try { if (file.length() > 44) file.readBytes() else null } catch (_: Exception) { null }
+            val wav = try { if (file.length() > 44) loudest(file.readBytes()) else null } catch (_: Exception) { null }
             if (gen == generation && (wav == null || !playWav(wav, gen, toSpeaker = true))) {
                 // no luck with the built-in speaker: say it the normal way
                 val d2 = java.util.concurrent.CountDownLatch(1)
@@ -302,6 +302,36 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             }
             finishedOne()
         }
+    }
+
+    /**
+     * Make speech as loud as the speaker allows: bring the peak up to full scale, then push it about 3x
+     * harder with soft clipping (rounds the loudest bits off instead of crackling). Tablet voices are quiet.
+     */
+    private fun loudest(wav: ByteArray): ByteArray {
+        val bb = java.nio.ByteBuffer.wrap(wav).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        var pos = 12; var start = -1; var len = 0; var bits = 16
+        while (pos + 8 <= wav.size) {
+            val id = String(wav, pos, 4, Charsets.US_ASCII)
+            var l = bb.getInt(pos + 4)
+            if (id == "fmt ") bits = bb.getShort(pos + 22).toInt()
+            if (id == "data") { start = pos + 8; if (l <= 0 || start + l > wav.size) l = wav.size - start; len = l; break }
+            pos += 8 + l + (l and 1)
+        }
+        if (start < 0 || bits != 16 || len < 2) return wav
+        var peak = 1
+        var i = start
+        while (i + 1 < start + len) { val v = Math.abs(bb.getShort(i).toInt()); if (v > peak) peak = v; i += 2 }
+        val drive = 32767f / peak * 3f
+        val norm = Math.tanh(3.0).toFloat()
+        i = start
+        while (i + 1 < start + len) {
+            val x = bb.getShort(i) / 32768f * drive / 3f            // full scale = 1
+            val y = (Math.tanh((x * 3f).toDouble()).toFloat() / norm).coerceIn(-1f, 1f)
+            bb.putShort(i, (y * 32000f).toInt().toShort())
+            i += 2
+        }
+        return wav
     }
 
     private fun builtInSpeaker(): android.media.AudioDeviceInfo? = try {
