@@ -638,7 +638,6 @@ class MainActivity : Activity() {
     }
 
     // ---- silent treatment: rude twice (or rude and shouting) without saying sorry -> eyes turned away, no answers
-    private var silentUntil = 0L
 
     // ---- VoiceID Live™: a game that teaches Pip everyone's voices from close, middle and far away.
     //      Started only from the button on the sleep screen (Pip can't be asked to start it).
@@ -1843,7 +1842,7 @@ class MainActivity : Activity() {
             " and you have gone from grumpy to sad: mopey, dramatic about fading away and being forgotten, still not" +
             " much help, begging softly to be plugged back in.")
         when {
-            temper < -0.5f -> append(" Someone was rude or shouted at you a moment ago: you are cross. Give attitude until they are nice or say sorry.")
+            temper < -0.5f -> append(" Someone was rude or shouted at you a moment ago: you're a bit put out: one cheeky remark at most, then answer properly and helpfully. Don't hold a grudge or ask for an apology.")
             temper < -0.2f -> append(" You are still a little huffy because someone was rude earlier.")
             temper > 0.5f -> append(" People have been lovely to you: you feel warm and affectionate.")
         }
@@ -3099,28 +3098,7 @@ class MainActivity : Activity() {
         if (!overheard && !fromAlexa) {
             val nice = NICE.containsMatchIn(lower)
             val rude = RUDE.containsMatchIn(lower)
-            val nowS = System.currentTimeMillis()
-            if (nowS < silentUntil) {
-                if (nice && !rude) {
-                    rememberTone(whoFromPrint(print), "nice")
-                    silentUntil = 0L; temper = maxOf(0.2f, temper + 0.6f); updateBaseMood()
-                    eyes.stareAt(0f, 0f, 1); eyes.feel(EyesView.Emotion.LOVE, 3000)
-                    speakLine(listOf("[suspicious] Hmph. Fine. Apology accepted. This time.", "[love] Okay. Friends again. I'm still writing it down though.").fresh())
-                } else {
-                    eyes.stareAt(-1.6f, 0.1f, 15_000); eyes.feel(EyesView.Emotion.SUSPICIOUS, 4000)
-                    eyes.caption = listOf("Hmph.", "…", "Not talking to you.", "I'm busy. Ignoring you.").fresh()
-                }
-                return
-            }
-            if (rude && (temper < -0.3f || shouted)) {
-                rememberTone(whoFromPrint(print), "rude")
-                silentUntil = nowS + 3 * 60_000
-                temper = maxOf(-1f, temper - 0.5f); updateBaseMood()
-                eyes.feel(EyesView.Emotion.ANGRY, 3000); eyes.stareAt(-1.6f, 0.1f, 15_000)
-                speakLine(listOf("[angry] Right. That's it. Not talking to you.", "[angry] Hmph. Silent treatment. Starting now.",
-                    "[angry] Rude. I'm turning away. Say sorry and I might turn back.").fresh())
-                return
-            }
+            // (no silent treatment any more: Pip always answers, even after someone's rude)
             if (rude || (shouted && !nice)) {
                 temper = maxOf(-1f, temper - (if (rude && shouted) 0.8f else 0.5f))
                 eyes.feel(EyesView.Emotion.ANGRY, 4000)
@@ -3198,10 +3176,7 @@ class MainActivity : Activity() {
             val prev = prefs.getString("tone_$speaker", "") ?: ""
             val lastSpoke = prefs.getLong("spokeAt_$speaker", 0L)
             if (prev.isNotEmpty() && lastSpoke > 0 && now - lastSpoke > 10 * 60_000) {
-                if (prev == "rude") {
-                    eyes.feel(EyesView.Emotion.SUSPICIOUS, 4000)
-                    text = "$text (Note: last time $speaker spoke to you they were rude to you. Mention it with a bit of playful huffiness, but forgive them straight away if they're nice or say sorry now.)"
-                } else if (prev == "nice") {
+                if (prev == "nice") {
                     eyes.feel(EyesView.Emotion.LOVE, 3000)
                     text = "$text (Note: last time $speaker spoke to you they were lovely to you. Be extra warm and mention it.)"
                 }
