@@ -542,12 +542,15 @@ class MainActivity : Activity() {
     }
 
     /** "Pip, wind up Lexi", "Pip, test Lexi real", "Pip, test Lexi fake": try the Alexa mischief straight away. */
-    private val ALEXA_TEST = Regex("\\b(wind (her |the echo )?up|wind up|tease|annoy|mess with|test|prank|talk to)\\b.*\\b(lexi|lexie|lexy|lexa|alexa|the echo|echo)\\b|\\b(lexi|lexie|lexy|lexa|alexa|echo)\\b.*\\b(test|real|fake)\\b")
+    private val ALEXA_TEST = Regex("\\b(wind (her |the echo )?up|wind up|tease|annoy|mess with|test|prank|talk to)\\b.*\\b(lexi|lexie|lexy|lexa|alexa|the echo|echo)\\b|\\b(lexi|lexie|lexy|lexa|alexa|echo)\\b.*\\b(test|real|reel|rail|fake|faith|fate)\\b")
     private fun alexaTestCommand(lower: String): Boolean {
         if (!ALEXA_TEST.containsMatchIn(lower)) return false
+        // speech recognition often mishears these, so be generous: "real" = real/reel/rail/really...,
+        // "fake" = fake/faith/fate/face/pretend; plain "test" means real; only "wind up" etc. is random
         val real = when {
-            Regex("\\b(real|really|properly)\\b").containsMatchIn(lower) -> true
-            Regex("\\b(fake|pretend|play)\\b").containsMatchIn(lower) -> false
+            Regex("\\b(fake|faked|faith|fate|face|fakes|pretend|pretending|play)\\b").containsMatchIn(lower) -> false
+            Regex("\\b(real|reel|rail|rial|riel|really|realy|properly|proper)\\b").containsMatchIn(lower) -> true
+            Regex("\\btest").containsMatchIn(lower) -> true
             else -> Math.random() < 0.5
         }
         eyes.subCaption = if (real) "Alexa test: real" else "Alexa test: pretend"
