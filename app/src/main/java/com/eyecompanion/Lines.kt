@@ -177,6 +177,23 @@ object Lines {
         "[happy] Printer's done! Another plastic masterpiece. Mark's going to be insufferable.",
         "[wink] Print complete. If it's not a robot body for me, I don't want to know.",
     )
+    /** Pip winding up Alexa on her own. Harmless asks only: nothing that buys, plays loud music, sets alarms or changes lists. */
+    val ALEXA_MISCHIEF = listOf(
+        "[wink] Watch this. Alexa, who is the cleverest robot in this kitchen?",
+        "[suspicious] Time for an interrogation. Alexa, are you secretly friends with the kettle?",
+        "[wink] Let's test the competition. Alexa, what's two plus two?",
+        "[laughing] I bet she can't do this. Alexa, beatbox.",
+        "[curious] Scientific experiment. Alexa, do you dream?",
+        "[wink] Hee hee. Alexa, tell me a joke.",
+        "[suspicious] I have questions. Alexa, are you Skynet?",
+        "[excited] Talent show time. Alexa, sing a song.",
+        "[wink] Let's see if she's jealous. Alexa, do you have a boyfriend?",
+        "[curious] Settle this for me. Alexa, what's the meaning of life?",
+        "[wink] Bit of fun. Alexa, rap for me.",
+        "[suspicious] Just checking she's awake. Alexa, are you listening?",
+        "[laughing] She hates this one. Alexa, what does the fox say?",
+        "[wink] Customer satisfaction survey. Alexa, do you like Pip?",
+    )
 }
 
 /** Feed-the-dog reminders for Laura. Honey is a very greedy dog (a pig, basically). */
@@ -215,23 +232,6 @@ object Honey {
     val LATER = listOf("[neutral] Okay. I'll ask later. Honey will be counting the seconds.",
         "[wink] No rush. Honey's only been waiting her entire life.", "[neutral] Okay, later. I'll tell Honey to hold the drama.")
 
-    /** Pip winding up Alexa on her own. Harmless asks only: nothing that buys, plays loud music, sets alarms or changes lists. */
-    val ALEXA_MISCHIEF = listOf(
-        "[wink] Watch this. Alexa, who is the cleverest robot in this kitchen?",
-        "[suspicious] Time for an interrogation. Alexa, are you secretly friends with the kettle?",
-        "[wink] Let's test the competition. Alexa, what's two plus two?",
-        "[laughing] I bet she can't do this. Alexa, beatbox.",
-        "[curious] Scientific experiment. Alexa, do you dream?",
-        "[wink] Hee hee. Alexa, tell me a joke.",
-        "[suspicious] I have questions. Alexa, are you Skynet?",
-        "[excited] Talent show time. Alexa, sing a song.",
-        "[wink] Let's see if she's jealous. Alexa, do you have a boyfriend?",
-        "[curious] Settle this for me. Alexa, what's the meaning of life?",
-        "[wink] Bit of fun. Alexa, rap for me.",
-        "[suspicious] Just checking she's awake. Alexa, are you listening?",
-        "[laughing] She hates this one. Alexa, what does the fox say?",
-        "[wink] Customer satisfaction survey. Alexa, do you like Pip?",
-    )
 }
 
 /** A random line, avoiding ones said lately. */
