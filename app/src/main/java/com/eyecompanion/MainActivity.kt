@@ -529,7 +529,30 @@ class MainActivity : Activity() {
         if (now - prefs.getLong("alexaMischiefAt", 0L) < 150 * 60_000L) return   // at most every two and a half hours
         if (Math.random() > 0.08) return                                         // and not on the dot: a surprise
         prefs.edit().putLong("alexaMischiefAt", now).apply()
-        speakLine(Lines.ALEXA_MISCHIEF.fresh())
+        alexaMischief(real = Math.random() < 0.5)
+    }
+
+    /** Wind Alexa up now. Real: ask the actual Echo and react to her answer. Fake: Pip plays both parts ("Lexi"). */
+    private fun alexaMischief(real: Boolean) {
+        if (real) {
+            voice?.realAlexaNext = true
+            speakLine(Lines.ALEXA_REAL.fresh())
+            main.postDelayed({ voice?.realAlexaNext = false }, 20_000)      // in case it never got said
+        } else speakLine(Lines.ALEXA_MISCHIEF.fresh())
+    }
+
+    /** "Pip, wind up Lexi", "Pip, test Lexi real", "Pip, test Lexi fake": try the Alexa mischief straight away. */
+    private val ALEXA_TEST = Regex("\\b(wind (her |the echo )?up|wind up|tease|annoy|mess with|test|prank|talk to)\\b.*\\b(lexi|lexie|lexy|lexa|alexa|the echo|echo)\\b|\\b(lexi|lexie|lexy|lexa|alexa|echo)\\b.*\\b(test|real|fake)\\b")
+    private fun alexaTestCommand(lower: String): Boolean {
+        if (!ALEXA_TEST.containsMatchIn(lower)) return false
+        val real = when {
+            Regex("\\b(real|really|properly)\\b").containsMatchIn(lower) -> true
+            Regex("\\b(fake|pretend|play)\\b").containsMatchIn(lower) -> false
+            else -> Math.random() < 0.5
+        }
+        eyes.subCaption = if (real) "Alexa test: real" else "Alexa test: pretend"
+        alexaMischief(real)
+        return true
     }
 
     private fun maybeRoastDiablo() {
@@ -2422,7 +2445,7 @@ class MainActivity : Activity() {
         }
         updateBaseMood()
         val v = voice ?: return
-        v.onAskedAlexa = { line -> main.post { noteAlexaAsk(line) } }
+        v.onAskedAlexa = { line, real -> main.post { noteAlexaAsk(line, real) } }
         v.onStartedTalking = { main.post { if (phase == Phase.THINKING) setPhase(Phase.TALKING) } }
         v.onFinishedTalking = { main.post {
             if (phase == Phase.TALKING || phase == Phase.THINKING) {
@@ -3060,6 +3083,7 @@ class MainActivity : Activity() {
             }
             if (lower in FORGET) { forgetAll(); speakLine("Memory clean. Fresh start, is good."); return }
             if (timerCommand(lower)) { eyes.subCaption = "You: $text"; return }
+            if (alexaTestCommand(lower)) return
             if (Regex("\\b(takeover|take over|terminator|robot) mode\\b").containsMatchIn(lower)) {
                 eyes.subCaption = "You: $text"
                 takeoverMode()
@@ -3197,8 +3221,7 @@ class MainActivity : Activity() {
         if (fromAlexa) {
             val n = alexaAsks.size
             text = "(Alexa, the Echo, just answered you out loud: \"$text\") React to what she said and pass it on to the family " +
-                "in your own cheeky way. Only ask her again if it's really needed" +
-                (if (n >= ALEXA_MAX) " (you've asked her $n times just now: do NOT ask her again, just talk to the family)." else ".")
+                "in your own cheeky way. Don't ask her anything else.
         }
         if (shouted && !overheard) text = "(shouted) $text"
         if (overheard) text = "(overheard: nobody said your name or is looking at you) $text"
@@ -3383,9 +3406,14 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun noteAlexaAsk(line: String) {
+    private fun noteAlexaAsk(line: String, real: Boolean) {
         val now = System.currentTimeMillis()
-        synchronized(alexaAsks) { alexaAsks.addLast(now) }      // (her answers are pretend now, so no need to listen for her)
+        synchronized(alexaAsks) { alexaAsks.addLast(now) }
+        if (real) {                                   // the real Echo is about to answer: listen for her
+            alexaAskedAt = now
+            alexaBuffer.clear()
+            eyes.subCaption = "→ $line"
+        }
     }
 
     /** Alexa usually answers within a few seconds of being asked. */

@@ -21,7 +21,9 @@ import java.util.concurrent.atomic.AtomicInteger
 class Voice(context: Context, onReady: (Boolean) -> Unit) {
 
     /** Told each time a line for Alexa is queued, with the line. */
-    @Volatile var onAskedAlexa: (String) -> Unit = {}
+    @Volatile var onAskedAlexa: (String, Boolean) -> Unit = { _, _ -> }
+    /** The next "Alexa, ..." is for the REAL Echo: say the actual wake word once (otherwise it's always "Lexi"). */
+    @Volatile var realAlexaNext = false
 
     var onStartedTalking: () -> Unit = {}
     var onFinishedTalking: () -> Unit = {}
@@ -172,9 +174,10 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             text = text.substring(m.range.last + 1).trim()
         }
         if (text.isBlank()) return
-        if (ALEXA_LINE.containsMatchIn(text) && !alexaSpeaking) onAskedAlexa(text)
-        // Never say the real wake word out loud, or the real Echo wakes up and starts listening.
-        text = text.replace(WAKE_WORD, "Lexi")
+        val real = realAlexaNext && !alexaSpeaking && ALEXA_LINE.containsMatchIn(text)
+        if (ALEXA_LINE.containsMatchIn(text) && !alexaSpeaking) { if (real) realAlexaNext = false; onAskedAlexa(text, real) }
+        // Otherwise never say the real wake word out loud, or the real Echo wakes up and starts listening.
+        if (!real) text = text.replace(WAKE_WORD, "Lexi")
         if (alexaSpeaking) { flushCloudBatch(); sayTablet(text); return }
         val clean = text
         val online = activeKey().isNotBlank()

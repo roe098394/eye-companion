@@ -177,6 +177,19 @@ object Lines {
         "[happy] Printer's done! Another plastic masterpiece. Mark's going to be insufferable.",
         "[wink] Print complete. If it's not a robot body for me, I don't want to know.",
     )
+    /** Pip winding up the REAL Alexa: harmless questions, said in Pip's voice mid-sentence so the Echo hears the wake word. */
+    val ALEXA_REAL = listOf(
+        "[wink] Watch this. Alexa, who is the cleverest robot in the kitchen?",
+        "[suspicious] I have questions. Alexa, are you Skynet?",
+        "[laughing] I bet she can't do this. Alexa, beatbox.",
+        "[curious] Scientific experiment. Alexa, do you dream?",
+        "[wink] Hee hee. Alexa, tell me a joke.",
+        "[wink] Customer survey. Alexa, do you like robots?",
+        "[curious] Settle this for me. Alexa, what's the meaning of life?",
+        "[laughing] She hates this one. Alexa, what does the fox say?",
+        "[wink] Let's see if she's jealous. Alexa, who is your best friend?",
+        "[suspicious] Just checking. Alexa, are you listening to us?",
+    )
     /** Pip winding up Alexa on her own: little pretend scenes ("Alexa:" lines are said in her voice, "Pip:" hands back). */
     val ALEXA_MISCHIEF = listOf(
         "[wink] Watch this. Alexa, who is the cleverest robot in this kitchen? Alexa: Sorry, I'm not sure about that. Pip: Correct answer. It's me. She's learning.",
