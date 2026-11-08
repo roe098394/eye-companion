@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#0E1A2E" android:pathData="M0,0h108v108h-108z" />
+    <!-- lens rings -->
+    <path android:strokeColor="#2EC4B6" android:strokeWidth="5" android:fillColor="#00000000"
+        android:pathData="M54,54m-30,0a30,30 0,1 1,60 0a30,30 0,1 1,-60 0" />
+    <path android:strokeColor="#9BE7DF" android:strokeWidth="3" android:fillColor="#00000000"
+        android:pathData="M54,54m-18,0a18,18 0,1 1,36 0a18,18 0,1 1,-36 0" />
+    <path android:fillColor="#FFFFFF" android:pathData="M54,54m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
+    <!-- focus brackets -->
+    <path android:fillColor="#FFD166" android:pathData="M14,14h16v5h-11v11h-5z M94,14h-16v5h11v11h5z M14,94h16v-5h-11v-11h-5z M94,94h-16v-5h11v-11h5z" />
+</vector>
