@@ -20,8 +20,6 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class Voice(context: Context, onReady: (Boolean) -> Unit) {
 
-    private val appContext = context.applicationContext
-
     /** May Pip talk to Alexa right now? (Off in car mode, early morning, or after a few asks in a row.) */
     @Volatile var allowAlexa: () -> Boolean = { true }
     /** Told each time a line for Alexa is queued, with the line. */
@@ -167,11 +165,10 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         val clean = cleanForSpeech(raw)
         if (clean.isBlank()) return
         if (ALEXA_LINE.containsMatchIn(clean)) {
-            // A line for Alexa: it has to come out of the tablet's own speaker, because the Echo
-            // ignores its own wake word when it's the one playing it.
+            // A line for Alexa: said on its own (not batched), through the Echo like everything else.
             if (!allowAlexa()) return
             flushCloudBatch()
-            sayToAlexa(clean)
+            sayNow(clean)
             onAskedAlexa(clean)
             return
         }
@@ -241,48 +238,6 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     private val ALEXA_LINE = Regex("^(hey |ok |okay )?alexa\\b[,!.]?", RegexOption.IGNORE_CASE)
-
-    /**
-     * Say a line to Alexa out of the tablet's built-in speaker (not the Echo), loud enough for her to hear.
-     * Uses the tablet voice: made into a sound file first, then played on the built-in speaker.
-     */
-    private fun sayToAlexa(text: String) {
-        val gen = generation
-        pending.incrementAndGet()
-        player.execute {
-            if (gen != generation) { finishedOne(); return@execute }
-            // let the Echo finish the sentence before (Bluetooth plays a moment behind)
-            Thread.sleep(800)
-            val file = java.io.File(appContext.cacheDir, "alexa.wav")
-            file.delete()
-            val done = java.util.concurrent.CountDownLatch(1)
-            val id = "a${counter++}"
-            fallbackLatches[id] = done
-            pending.incrementAndGet()                  // balanced by the tts onDone
-            val ok = tts.synthesizeToFile(text, null, file, id) == TextToSpeech.SUCCESS
-            if (!ok) { fallbackLatches.remove(id); finishedOne() } else done.await(20, java.util.concurrent.TimeUnit.SECONDS)
-            if (gen == generation) {
-                val wav = try { if (file.length() > 44) file.readBytes() else null } catch (_: Exception) { null }
-                if (wav == null || !playWav(wav, gen, toSpeaker = true)) {
-                    // couldn't use the tablet speaker: just say it the normal way
-                    val d2 = java.util.concurrent.CountDownLatch(1)
-                    val id2 = "a${counter++}"
-                    fallbackLatches[id2] = d2
-                    pending.incrementAndGet()
-                    tts.speak(text, TextToSpeech.QUEUE_ADD, null, id2)
-                    d2.await(20, java.util.concurrent.TimeUnit.SECONDS)
-                }
-            }
-            finishedOne()
-        }
-    }
-
-    /** The tablet's own loudspeaker, even when a Bluetooth speaker is connected. */
-    private fun builtInSpeaker(): android.media.AudioDeviceInfo? = try {
-        val am = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-        am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
-            .firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-    } catch (_: Exception) { null }
 
     private val fallbackLatches = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CountDownLatch>()
 
@@ -380,7 +335,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun cloudFailed(msg: String) { lastCloudError = msg; onCloudError(msg) }
 
     /** Play a WAV file through the media stream (so Bluetooth stays high quality). Blocks until done. */
-    private fun playWav(wav: ByteArray, gen: Int, toSpeaker: Boolean = false): Boolean {
+    private fun playWav(wav: ByteArray, gen: Int): Boolean {
         val bb = java.nio.ByteBuffer.wrap(wav).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         var rate = 24000; var channels = 1; var bits = 16
         var dataStart = -1; var dataLen = 0
@@ -408,9 +363,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track = t
-        if (toSpeaker) {
-            builtInSpeaker()?.let { try { t.setPreferredDevice(it) } catch (_: Exception) {} }   // full volume, so Alexa hears it
-        } else if (vol < 1f) try { t.setVolume(vol) } catch (_: Exception) {}
+        if (vol < 1f) try { t.setVolume(vol) } catch (_: Exception) {}
         try {
             t.play()
             onStartedTalking()
