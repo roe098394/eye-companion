@@ -172,8 +172,10 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             text = text.substring(m.range.last + 1).trim()
         }
         if (text.isBlank()) return
+        if (ALEXA_LINE.containsMatchIn(text) && !alexaSpeaking) onAskedAlexa(text)
+        // Never say the real wake word out loud, or the real Echo wakes up and starts listening.
+        text = text.replace(WAKE_WORD, "Lexi")
         if (alexaSpeaking) { flushCloudBatch(); sayTablet(text); return }
-        if (ALEXA_LINE.containsMatchIn(text)) onAskedAlexa(text)
         val clean = text
         val online = activeKey().isNotBlank()
         if (online && sentencesThisReply++ > 0) {
@@ -241,6 +243,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     private val ALEXA_LINE = Regex("^(hey |ok |okay )?alexa\\b[,!.]?", RegexOption.IGNORE_CASE)
+    private val WAKE_WORD = Regex("(?i)\\balexa\\b")
     private val SPEAKER_LABEL = Regex("^(alexa|pip)\\s*:\\s*", RegexOption.IGNORE_CASE)
     /** In the middle of Alexa's (pretend) answer. */
     @Volatile private var alexaSpeaking = false
