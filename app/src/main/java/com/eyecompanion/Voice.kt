@@ -178,6 +178,22 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         if (ALEXA_LINE.containsMatchIn(text) && !alexaSpeaking) { if (real) realAlexaNext = false; onAskedAlexa(text, real) }
         // Otherwise never say the real wake word out loud, or the real Echo wakes up and starts listening.
         if (!real) text = text.replace(WAKE_WORD, "Lexi")
+        if (real) {
+            // The real Echo needs a moment after her name before she's listening: say "Alexa." straight after
+            // the lead-in (same voice, no gap, so Bluetooth doesn't clip it), wait a second, then ask.
+            val m = ALEXA_LINE.find(text)
+            val rest = (if (m != null) text.substring(m.range.last + 1) else text).trim().trimStart(',', '.', '!', ' ')
+                .replaceFirstChar { it.uppercase() }
+            if (activeKey().isNotBlank()) {
+                if (cloudBatch.isNotEmpty()) cloudBatch.append(' ')
+                cloudBatch.append("Alexa.")
+                sentencesThisReply++
+                flushCloudBatch()
+            } else sayTablet("Alexa.")
+            playSilence(ALEXA_PAUSE_MS)
+            if (rest.isNotBlank()) sayNow(rest)
+            return
+        }
         if (alexaSpeaking) { flushCloudBatch(); sayTablet(text); return }
         val clean = text
         val online = activeKey().isNotBlank()
@@ -247,9 +263,31 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
 
     private val ALEXA_LINE = Regex("^(hey |ok |okay )?alexa\\b[,!.]?", RegexOption.IGNORE_CASE)
     private val WAKE_WORD = Regex("(?i)\\balexa\\b")
+    /** Gap between "Alexa." and the question, so the real Echo has woken up and is listening. */
+    private val ALEXA_PAUSE_MS = 1100
     private val SPEAKER_LABEL = Regex("^(alexa|pip)\\s*:\\s*", RegexOption.IGNORE_CASE)
     /** In the middle of Alexa's (pretend) answer. */
     @Volatile private var alexaSpeaking = false
+
+    /** A moment of silence through the same queue (a pause that keeps the Bluetooth speaker awake). */
+    private fun playSilence(ms: Int) {
+        val gen = generation
+        pending.incrementAndGet()
+        player.execute {
+            if (gen == generation) {
+                val rate = 24000
+                val data = rate * ms / 1000 * 2
+                val wav = ByteArray(44 + data)
+                val bb = java.nio.ByteBuffer.wrap(wav).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                bb.put("RIFF".toByteArray()); bb.putInt(36 + data); bb.put("WAVE".toByteArray())
+                bb.put("fmt ".toByteArray()); bb.putInt(16); bb.putShort(1); bb.putShort(1)
+                bb.putInt(rate); bb.putInt(rate * 2); bb.putShort(2); bb.putShort(16)
+                bb.put("data".toByteArray()); bb.putInt(data)
+                try { playWav(wav, gen) } catch (_: Exception) {}
+            }
+            finishedOne()
+        }
+    }
 
     private val fallbackLatches = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CountDownLatch>()
 
