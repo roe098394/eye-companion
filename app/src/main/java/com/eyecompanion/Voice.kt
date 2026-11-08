@@ -186,12 +186,9 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             val m = ALEXA_LINE.find(text)
             val rest = (if (m != null) text.substring(m.range.last + 1) else text).trim().trimStart(',', '.', '!', ' ')
                 .replaceFirstChar { it.uppercase() }
-            if (activeKey().isNotBlank()) {
-                if (cloudBatch.isNotEmpty()) cloudBatch.append(' ')
-                cloudBatch.append("Alexa.")
-                sentencesThisReply++
-                flushCloudBatch()
-            } else sayTablet("Alexa.")
+            flushCloudBatch()
+            sentencesThisReply++
+            sayNow("Alexa.", loud = true)                  // full volume and boosted, even in the evening
             playSilence(ALEXA_PAUSE_MS)
             // Once she's awake the Echo turns its own sound down and filters it out, so the question has
             // to come from the tablet's own speaker, at full volume, like a person across the room.
@@ -213,18 +210,18 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         sayNow(clean)
     }
 
-    private fun sayNow(clean: String) {
+    private fun sayNow(clean: String, loud: Boolean = false) {
         if (muted) return
         val key = activeKey()
-        if (key.isNotBlank()) { sayCloud(clean, key, cloudVoice); return }
-        sayTablet(clean)
+        if (key.isNotBlank()) { sayCloud(clean, key, cloudVoice, loud); return }
+        sayTablet(clean, loud)
     }
 
     /**
      * The tablet's own voice goes through the same single player queue as the online voice,
      * so two voices can never talk over each other: everything is spoken strictly one after another.
      */
-    private fun sayTablet(text: String) {
+    private fun sayTablet(text: String, loud: Boolean = false) {
         val gen = generation
         pending.incrementAndGet()
         player.execute {
@@ -233,7 +230,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             val id = "t${counter++}"
             fallbackLatches[id] = done
             pending.incrementAndGet()                  // balanced by the tts onDone
-            if (tts.speak(text, TextToSpeech.QUEUE_ADD, ttsParams(), id) != TextToSpeech.SUCCESS) {
+            if (tts.speak(text, TextToSpeech.QUEUE_ADD, if (loud) null else ttsParams(), id) != TextToSpeech.SUCCESS) {
                 fallbackLatches.remove(id); finishedOne()             // couldn't speak: don't wait for nothing
             } else done.await(30, java.util.concurrent.TimeUnit.SECONDS)
             finishedOne()
@@ -241,7 +238,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     }
 
     /** Speak with Groq's Orpheus voice; any piece that fails is spoken by the tablet voice instead. */
-    private fun sayCloud(text: String, key: String, voiceName: String) {
+    private fun sayCloud(text: String, key: String, voiceName: String, loud: Boolean = false) {
         val gen = generation
         // Orpheus takes at most 200 characters per request
         for (piece in chunks(text, if (voiceName.startsWith("azure:")) 900 else 190)) {
@@ -251,13 +248,13 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
                 if (gen != generation) { finishedOne(); return@execute }
                 val wav = try { audio.get() } catch (_: Exception) { null }
                 if (gen != generation) { finishedOne(); return@execute }
-                if (wav == null || !playWav(wav, gen)) {
+                if (wav == null || !playWav(if (loud) loudest(wav) else wav, gen, full = loud)) {
                     // fall back to the tablet voice for this bit, and wait for it to finish
                     val done = java.util.concurrent.CountDownLatch(1)
                     val id = "f${counter++}"
                     fallbackLatches[id] = done
                     pending.incrementAndGet()          // balanced by the tts onDone
-                    tts.speak(piece, TextToSpeech.QUEUE_ADD, ttsParams(), id)
+                    tts.speak(piece, TextToSpeech.QUEUE_ADD, if (loud) null else ttsParams(), id)
                     done.await(30, java.util.concurrent.TimeUnit.SECONDS)
                 }
                 finishedOne()
@@ -456,7 +453,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun cloudFailed(msg: String) { lastCloudError = msg; onCloudError(msg) }
 
     /** Play a WAV file through the media stream (so Bluetooth stays high quality). Blocks until done. */
-    private fun playWav(wav: ByteArray, gen: Int, toSpeaker: Boolean = false): Boolean {
+    private fun playWav(wav: ByteArray, gen: Int, toSpeaker: Boolean = false, full: Boolean = false): Boolean {
         val bb = java.nio.ByteBuffer.wrap(wav).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         var rate = 24000; var channels = 1; var bits = 16
         var dataStart = -1; var dataLen = 0
@@ -485,7 +482,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             .build()
         track = t
         if (toSpeaker) builtInSpeaker()?.let { try { t.setPreferredDevice(it) } catch (_: Exception) {} }   // full volume
-        else if (vol < 1f) try { t.setVolume(vol) } catch (_: Exception) {}
+        else if (vol < 1f && !full) try { t.setVolume(vol) } catch (_: Exception) {}
         try {
             t.play()
             onStartedTalking()
