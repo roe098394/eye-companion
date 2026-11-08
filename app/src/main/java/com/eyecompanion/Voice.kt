@@ -20,6 +20,8 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class Voice(context: Context, onReady: (Boolean) -> Unit) {
 
+    private val appContext = context.applicationContext
+
     /** Told each time a line for Alexa is queued, with the line. */
     @Volatile var onAskedAlexa: (String, Boolean) -> Unit = { _, _ -> }
     /** The next "Alexa, ..." is for the REAL Echo: say the actual wake word once (otherwise it's always "Lexi"). */
@@ -191,7 +193,9 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
                 flushCloudBatch()
             } else sayTablet("Alexa.")
             playSilence(ALEXA_PAUSE_MS)
-            if (rest.isNotBlank()) sayNow(rest)
+            // Once she's awake the Echo turns its own sound down and filters it out, so the question has
+            // to come from the tablet's own speaker, at full volume, like a person across the room.
+            if (rest.isNotBlank()) sayOutLoud(rest)
             return
         }
         if (alexaSpeaking) { flushCloudBatch(); sayTablet(text); return }
@@ -268,6 +272,43 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private val SPEAKER_LABEL = Regex("^(alexa|pip)\\s*:\\s*", RegexOption.IGNORE_CASE)
     /** In the middle of Alexa's (pretend) answer. */
     @Volatile private var alexaSpeaking = false
+
+    /**
+     * Say something out of the tablet's built-in speaker (not the Bluetooth one), at full volume.
+     * Tablet voice, made into a sound file first so it can be sent to the built-in speaker.
+     */
+    private fun sayOutLoud(text: String) {
+        val gen = generation
+        pending.incrementAndGet()
+        player.execute {
+            if (gen != generation) { finishedOne(); return@execute }
+            val file = java.io.File(appContext.cacheDir, "outloud.wav")
+            file.delete()
+            val done = java.util.concurrent.CountDownLatch(1)
+            val id = "o${counter++}"
+            fallbackLatches[id] = done
+            pending.incrementAndGet()                  // balanced by the tts onDone
+            if (tts.synthesizeToFile(text, null, file, id) == TextToSpeech.SUCCESS) done.await(20, java.util.concurrent.TimeUnit.SECONDS)
+            else { fallbackLatches.remove(id); finishedOne() }
+            val wav = try { if (file.length() > 44) file.readBytes() else null } catch (_: Exception) { null }
+            if (gen == generation && (wav == null || !playWav(wav, gen, toSpeaker = true))) {
+                // no luck with the built-in speaker: say it the normal way
+                val d2 = java.util.concurrent.CountDownLatch(1)
+                val id2 = "o${counter++}"
+                fallbackLatches[id2] = d2
+                pending.incrementAndGet()
+                if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id2) == TextToSpeech.SUCCESS) d2.await(20, java.util.concurrent.TimeUnit.SECONDS)
+                else { fallbackLatches.remove(id2); finishedOne() }
+            }
+            finishedOne()
+        }
+    }
+
+    private fun builtInSpeaker(): android.media.AudioDeviceInfo? = try {
+        val am = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+            .firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+    } catch (_: Exception) { null }
 
     /** A moment of silence through the same queue (a pause that keeps the Bluetooth speaker awake). */
     private fun playSilence(ms: Int) {
@@ -385,7 +426,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private fun cloudFailed(msg: String) { lastCloudError = msg; onCloudError(msg) }
 
     /** Play a WAV file through the media stream (so Bluetooth stays high quality). Blocks until done. */
-    private fun playWav(wav: ByteArray, gen: Int): Boolean {
+    private fun playWav(wav: ByteArray, gen: Int, toSpeaker: Boolean = false): Boolean {
         val bb = java.nio.ByteBuffer.wrap(wav).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         var rate = 24000; var channels = 1; var bits = 16
         var dataStart = -1; var dataLen = 0
@@ -413,7 +454,8 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track = t
-        if (vol < 1f) try { t.setVolume(vol) } catch (_: Exception) {}
+        if (toSpeaker) builtInSpeaker()?.let { try { t.setPreferredDevice(it) } catch (_: Exception) {} }   // full volume
+        else if (vol < 1f) try { t.setVolume(vol) } catch (_: Exception) {}
         try {
             t.play()
             onStartedTalking()
