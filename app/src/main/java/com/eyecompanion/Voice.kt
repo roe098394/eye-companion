@@ -267,7 +267,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     /** Gap between "Alexa." and the question, so the real Echo has woken up and is listening. */
     private val ALEXA_PAUSE_MS = 1100
     /** Where the question to the real Alexa comes from: false = through the Echo (boosted), true = tablet speaker. */
-    private val ALEXA_QUESTION_ON_TABLET = false
+    private val ALEXA_QUESTION_ON_TABLET = true
     private val SPEAKER_LABEL = Regex("^(alexa|pip)\\s*:\\s*", RegexOption.IGNORE_CASE)
     /** In the middle of Alexa's (pretend) answer. */
     @Volatile private var alexaSpeaking = false
@@ -479,7 +479,9 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         val chMask = if (channels == 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
         val minBuf = AudioTrack.getMinBufferSize(rate, chMask, AudioFormat.ENCODING_PCM_16BIT)
         val t = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+            .setAudioAttributes(AudioAttributes.Builder()
+                // out loud for Alexa: play as an alarm (its own volume, which we can turn right up)
+                .setUsage(if (toSpeaker) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setSampleRate(rate).setChannelMask(chMask).build())
@@ -487,7 +489,15 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track = t
-        if (toSpeaker) builtInSpeaker()?.let { try { t.setPreferredDevice(it) } catch (_: Exception) {} }   // full volume
+        var alarmWas = -1
+        if (toSpeaker) {
+            builtInSpeaker()?.let { try { t.setPreferredDevice(it) } catch (_: Exception) {} }
+            try {
+                val am = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+                alarmWas = am.getStreamVolume(android.media.AudioManager.STREAM_ALARM)
+                am.setStreamVolume(android.media.AudioManager.STREAM_ALARM, am.getStreamMaxVolume(android.media.AudioManager.STREAM_ALARM), 0)
+            } catch (_: Exception) { alarmWas = -1 }
+        }
         else if (vol < 1f && !full) try { t.setVolume(vol) } catch (_: Exception) {}
         try {
             t.play()
@@ -512,6 +522,10 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             try { t.stop() } catch (_: Exception) {}
             t.release()
             if (track === t) track = null
+            if (alarmWas >= 0) try {                    // put the alarm volume back how it was
+                (appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager)
+                    .setStreamVolume(android.media.AudioManager.STREAM_ALARM, alarmWas, 0)
+            } catch (_: Exception) {}
         }
         return true
     }
