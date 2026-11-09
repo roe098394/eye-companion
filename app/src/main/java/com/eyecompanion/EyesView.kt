@@ -278,6 +278,11 @@ class EyesView(context: Context) : View(context) {
         val col = if (takeover) Color.parseColor("#FF2A1E") else blend(eyeColor, emoColor, tint)
         eyePaint.color = col
         glowPaint.color = col; glowPaint.alpha = 40
+        // Christmas elves (the peeking ones hide behind the eyes, so they're drawn first)
+        elves.tick(t, mood == Mood.SLEEP && sleepScreen, carMode || puzzle.isNotEmpty() || mood == Mood.LOADING || mood == Mood.THINK || mood == Mood.TALK)
+        val crackV = toV(sw * Elves.CRACK_X, sh * Elves.CRACK_Y)
+        val zzX = cx + gap / 2 + eyeW * 0.9f + w * 0.06f; val zzY = cy - h * 0.13f
+        if (!carMode) elves.draw(canvas, t, w, h, true, cx, cy, gap, eyeW, eyeH, lastClockW, zzX, zzY, crackV[0], crackV[1])
         canvas.save()
         if (abs(rot) > 0.3f) canvas.rotate(rot, cx, cy)
         for (side in arrayOf(-1f, 1f)) {
@@ -675,6 +680,7 @@ class EyesView(context: Context) : View(context) {
             val clock = String.format("%d:%02d", cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
             sleepPaint.color = eyeColor
             sleepPaint.textSize = h * 0.16f; sleepPaint.alpha = 150
+            lastClockW = sleepPaint.measureText(clock)
             canvas.drawText(clock, w / 2, h * 0.24f, sleepPaint)
             christmasLine()?.let { line ->                          // 🎄 sleeps till Christmas
                 sleepPaint.textSize = h * 0.04f; sleepPaint.alpha = 255
@@ -683,7 +689,7 @@ class EyesView(context: Context) : View(context) {
                 canvas.drawText(line, w / 2, h * 0.315f, sleepPaint); sleepPaint.color = c0
             }
             sleepPaint.textSize = h * 0.045f; sleepPaint.alpha = 130
-            canvas.drawText("☕  Cuppas today: $cuppas", w / 2, h * 0.70f, sleepPaint)
+            canvas.drawText("☕  Cuppas today: " + (if (elves.cuppaNicked) "?" else "$cuppas"), w / 2, h * 0.70f, sleepPaint)
             if (plugNote.isNotEmpty()) {
                 sleepPaint.textSize = h * 0.035f; sleepPaint.alpha = (110 + 90 * sin(secs * 2.5f)).toInt().coerceIn(20, 230)
                 canvas.drawText(plugNote, w / 2, h * 0.78f, sleepPaint)
@@ -771,6 +777,8 @@ class EyesView(context: Context) : View(context) {
             canvas.drawRoundRect(volRect, volRect.height() / 2, volRect.height() / 2, chipBox)
             canvas.drawText(label, volRect.left + pad, volRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         } else volRect.setEmpty()
+        if (!carMode) elves.draw(canvas, t, w, h, false, cx, cy, gap, eyeW, eyeH, lastClockW, zzX, zzY, crackV[0], crackV[1])
+
         // mute button: awake only, just above the sleep button
         if (mood != Mood.SLEEP && mood != Mood.LOADING && sleepChip.isNotEmpty() && !carMode && muteAllowed) {
             val label = if (muted) "🤐 Pull my zip ←" else "🔇 Mute"
@@ -806,6 +814,12 @@ class EyesView(context: Context) : View(context) {
         }
         return xmasText
     }
+
+    /** Naughty Christmas elves (6 Nov to Christmas Day). */
+    val elves = Elves()
+    private var lastClockW = 0f
+    /** A tap on a hiding elf? */
+    fun elfHit(x0: Float, y0: Float): Boolean { val pt = toV(x0, y0); return elves.hit(pt[0], pt[1]) }
 
     /** Down, from the screen's point of view (degrees, 0 = the normal way up): set from the motion sensor. */
     @Volatile var gravityAngle = 0f

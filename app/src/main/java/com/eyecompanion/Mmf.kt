@@ -43,6 +43,18 @@ object Mmf {
         }
     }
 
+    /** A tiny elf squeak: two quick rising chirps. */
+    fun squeak(volume: Float = 0.4f) = play(volume) { rate ->
+        val out = ArrayList<Double>(); var ph = 0.0
+        for (k in 0 until 2) {
+            val n = (0.09 * rate).toInt()
+            for (i in 0 until n) { val q = i.toDouble() / n; ph += 2 * PI * (1300 + 1400 * q) / rate
+                out.add(sin(ph) * minOf(1.0, q * 15) * minOf(1.0, (1 - q) * 8) * 0.8) }
+            repeat((0.04 * rate).toInt()) { out.add(0.0) }
+        }
+        out.toDoubleArray()
+    }
+
     private fun hum(rate: Int, cross: Boolean): DoubleArray {
         val out = ArrayList<Double>()
         val base = 150.0 + Random.nextDouble() * 40                 // Pip's "voice" pitch

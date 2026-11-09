@@ -1394,6 +1394,52 @@ class MainActivity : Activity() {
     /** Volume for Pip's own sound effects at this time of day. */
     private fun sfx(normal: Float): Float = normal * (if (whisperTime()) 0.35f else if (eveningTime()) 0.6f else 1f)
 
+    // ---- the Christmas elves (6 Nov to Christmas): Pip reacts to their mischief
+    private fun elfEvent(e: String) {
+        val awake = phase == Phase.LISTENING && !muted && !chloeMode
+        when (e) {
+            "tickle" -> { eyes.feel(EyesView.Emotion.LAUGHING, 3500)
+                if (awake && Math.random() < 0.5) speakLine(listOf("[laughing] Hee hee! Stop it! Get off!", "[laughing] No! Not the tickles! Elves!",
+                    "[laughing] Ha ha, stop! I'm ticklish in my pixels!").fresh()) }
+            "found" -> { Mmf.squeak(sfx(0.4f))
+                val n = (if (prefs.getString("elfDay", "") == todayKey) prefs.getInt("elfFound", 0) else 0) + 1
+                prefs.edit().putString("elfDay", todayKey).putInt("elfFound", n).apply()
+                eyes.feel(EyesView.Emotion.EXCITED, 2500)
+                if (awake) speakLine(listOf("[excited] You caught one! That's $n today.", "[laughing] Got him! Elves caught today: $n.",
+                    "[excited] Ha! Busted. Number $n.").fresh()) else eyes.caption = "🧝 Caught one! ($n today)" }
+            "snowball" -> { eyes.feel(EyesView.Emotion.SURPRISED, 2500); eyes.caption = "Oi! ❄️"
+                if (awake && Math.random() < 0.5) speakLine(listOf("[angry] Oi! Right in the eye!", "[angry] Who threw that?! Elves!",
+                    "[surprised] Cold! Cold cold cold!").fresh()) }
+            "tinsel" -> if (awake && Math.random() < 0.6) speakLine(listOf("[excited] Get it, lads! Wrap that kettle up!",
+                "[laughing] Ha! The kettle's in tinsel. Best it's ever looked.", "[wink] Good work, elves. The kettle's a Christmas tree now.").fresh())
+            "fixing" -> if (awake && Math.random() < 0.5) speakLine(listOf("[curious] What are you two doing to my crack?",
+                "[suspicious] Is that a hammer? Near my SCREEN?").fresh())
+            "fixfail" -> if (awake) speakLine(listOf("[annoyed] Sticky tape. Brilliant. Thanks, lads.",
+                "[sad] Still cracked. Maybe try Santa.", "[laughing] It fell off. Elf engineering, everybody.").fresh())
+        }
+    }
+    /** Each morning (once): what the elves got up to overnight. */
+    private val ELF_REPORTS = listOf(
+        "The elves were busy last night. One of them licked the Tassimo.",
+        "Elf report: they hid a sprout in the fridge. Good luck finding it.",
+        "Overnight, the elves tried to teach Honey to sit. Honey ate the instructions.",
+        "The elves had a disco on my sleep screen. I didn't get a wink.",
+        "Elf report: someone moved the kettle a millimetre to the left. I know it was them.",
+        "Last night the elves wrapped the air fryer. It's now the world's worst present.",
+        "The elves stole a number off my cuppa counter. I got it back. Mostly.",
+        "Elf report: two of them had a snowball fight with the frozen peas.",
+        "The elves tried to fix my crack with sticky tape. Again.",
+        "Overnight, an elf fell asleep in the dryer. He's very warm and very dizzy.",
+        "Elf report: they drew a moustache on the fridge. It suits it.",
+        "The elves left a note: Dear Pip, you snore. Rude.")
+    private fun elfReport() {
+        if (!Elves.season() || prefs.getString("elfReportDay", "") == todayKey) return
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (hour !in 7..11 || phase != Phase.LISTENING || muted || chloeMode || System.currentTimeMillis() - lastFaceSeen > 10_000) return
+        prefs.edit().putString("elfReportDay", todayKey).apply()
+        speakLine("[excited] " + ELF_REPORTS.fresh())
+    }
+
     /** 4:00 to 7:30 in the morning: whisper, everyone else is asleep. */
     private fun whisperTime(): Boolean {
         val c = java.util.Calendar.getInstance()
@@ -1409,6 +1455,7 @@ class MainActivity : Activity() {
     private fun applianceChanged(snd: Appliances.Sound, on: Boolean) {
         val now = System.currentTimeMillis()
         if (snd === appliances.kettle) {
+            eyes.elves.kettleOn(on && !carMode, now)                  // the elves wrap the kettle in tinsel
             if (on && !carMode && now - prefs.getLong("lastCuppaAt", 0L) > 5 * 60_000) {      // a re-boil isn't a new cuppa
                 prefs.edit().putLong("lastCuppaAt", now).apply(); addCuppa()
             }
@@ -1699,6 +1746,7 @@ class MainActivity : Activity() {
             dryerCheck()
             kettleCheck()
             portalReminders()
+            elfReport()
             if (training) { main.postDelayed(this, 60_000); return }
             temper *= 0.85f                           // tempers cool down over time
             updateBaseMood()
@@ -2430,6 +2478,7 @@ class MainActivity : Activity() {
 
     private fun startCompanion() {
         keepBluetoothInMusicMode()
+        eyes.elves.onEvent = { e -> main.post { elfEvent(e) } }
         portal.start()
         Appliances.tap = { b, n, r -> appliances.feed(b, n, r) }
         appliances.onChange = { snd, on -> main.post { applianceChanged(snd, on) } }
@@ -3768,6 +3817,12 @@ class MainActivity : Activity() {
     }
 
     private fun wakeUp() {
+        if (eyes.elves.doodle > 0f) main.postDelayed({                         // the elves drew on her in her sleep
+            if (phase == Phase.LISTENING) speakLine(listOf("[suspicious] Wait. Has someone been drawing on me?! ELVES!",
+                "[angry] Is that a MOUSTACHE? Who did this? I know it was the elves.",
+                "[embarrassed] Why is everyone looking at me? Oh no. Not the moustache again.").fresh())
+            main.postDelayed({ eyes.elves.doodle = 0f }, 15_000)
+        }, 2500)
         if (napping) noNapUntil = System.currentTimeMillis() + 10 * 60_000     // woken on purpose: stay up a while
         napping = false
         eyes.sleepScreen = false; eyes.napNote = ""
@@ -3796,6 +3851,7 @@ class MainActivity : Activity() {
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 if (phase != Phase.SETUP && eyes.chipHit(e.x, e.y)) { toggleListening(); return true }
                 if (phase == Phase.ASLEEP && eyes.trainHit(e.x, e.y)) { startTraining(); return true }
+                if (eyes.elfHit(e.x, e.y)) return true                       // caught a hiding elf
                 if (phase == Phase.ASLEEP && eyes.volHit(e.x, e.y)) { showVolume(); return true }
                 if (phase != Phase.SETUP && phase != Phase.ASLEEP && eyes.muteHit(e.x, e.y)) {
                     if (muted) { lastMuffle = 0L; muffled() } else toggleMute()     // zipped: only pulling the zip opens it
