@@ -1401,6 +1401,9 @@ class MainActivity : Activity() {
             "tickle" -> { eyes.feel(EyesView.Emotion.LAUGHING, 3500)
                 if (awake && Math.random() < 0.5) speakLine(listOf("[laughing] Hee hee! Stop it! Get off!", "[laughing] No! Not the tickles! Elves!",
                     "[laughing] Ha ha, stop! I'm ticklish in my pixels!").fresh()) }
+            "scared" -> { Mmf.squeak(sfx(0.4f)); eyes.feel(EyesView.Emotion.LAUGHING, 2000)
+                if (awake && Math.random() < 0.4) speakLine(listOf("[laughing] Ha! Run, little elves, run!", "[laughing] Look at them go!",
+                    "[wink] That's right, scatter! And don't come back. Well, do. It's fun.").fresh()) }
             "found" -> { Mmf.squeak(sfx(0.4f))
                 val n = (if (prefs.getString("elfDay", "") == todayKey) prefs.getInt("elfFound", 0) else 0) + 1
                 prefs.edit().putString("elfDay", todayKey).putInt("elfFound", n).apply()

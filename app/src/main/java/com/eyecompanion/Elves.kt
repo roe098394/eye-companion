@@ -13,7 +13,7 @@ import kotlin.random.Random
 class Elves {
     companion object {
         const val CLIMB = 1; const val NICK = 2; const val NICK_BACK = 3; const val DOODLE = 4; const val BOUNCE = 5
-        const val TICKLE = 6; const val PEEK = 7; const val SNOW = 8; const val TINSEL = 9; const val FIX = 10
+        const val TICKLE = 6; const val PEEK = 7; const val SNOW = 8; const val TINSEL = 9; const val FIX = 10; const val FLEE = 11
         /** Where the real crack in Pip's glass is, as a fraction of the physical screen (from Mark's photos). */
         const val CRACK_X = 0.36f; const val CRACK_Y = 0.45f
         fun season(): Boolean {
@@ -64,11 +64,26 @@ class Elves {
     }
     private fun finish(now: Long) { act = 0; nextAt = now + Random.nextLong(90_000, 240_000) }
 
-    /** A tap on a peeking elf? */
+    /** Where each elf was drawn this frame (feet x, y, size, facing), so a tap can find them. */
+    private val drawn = ArrayList<FloatArray>()
+    private var fleeing = ArrayList<FloatArray>()
+
+    /** A tap on an elf? A hiding one is "caught"; any other one gets a fright and runs off. */
     fun hit(x: Float, y: Float): Boolean {
-        if (act != PEEK || peekFound != 0L || peekS == 0f) return false
-        if (abs(x - peekX) < peekS * 0.6f && y > peekY - peekS * 1.1f && y < peekY + peekS * 0.2f) { peekFound = System.currentTimeMillis(); onEvent("found"); return true }
-        return false
+        if (act == PEEK && peekFound == 0L && peekS > 0f &&
+            abs(x - peekX) < peekS * 0.6f && y > peekY - peekS * 1.1f && y < peekY + peekS * 0.2f) {
+            peekFound = System.currentTimeMillis(); onEvent("found"); return true
+        }
+        if (act == 0 || act == PEEK || act == FLEE) return false
+        val near = drawn.any { e -> abs(x - e[0]) < e[2] * 0.7f && y > e[1] - e[2] * 1.2f && y < e[1] + e[2] * 0.3f }
+        if (!near) return false
+        fleeing = ArrayList(drawn.map { it.copyOf() })
+        if (act == NICK && cuppaNicked) { cuppaNicked = false; nickBackAt = 0L }   // dropped the number in the panic
+        if (act == DOODLE && doodle < 1f) doodle = 0f                             // ran off before finishing it
+        if (act == TINSEL) tinsel = false
+        act = FLEE; actStart = System.currentTimeMillis(); fired.clear()
+        onEvent("scared")
+        return true
     }
 
     /**
@@ -82,9 +97,18 @@ class Elves {
         val eyeR = cx + gap / 2 + eyeW / 2; val eyeL = cx - gap / 2 - eyeW / 2
         if (!behind && tinsel) drawTinsel(c, w, h, now)
         if (!behind && doodle > 0f) drawMoustache(c, cx, cy + eyeW * 0.55f, eyeW, doodle)
+        if (behind) drawn.clear()
         if (act == 0) return
         if (behind != (act == PEEK)) return
         when (act) {
+            FLEE -> {                                                    // tapped: scatter to the nearest side, arms up, squeaking
+                if (t > 1.6f) { finish(now); return }
+                for (e in fleeing) {
+                    val dir = if (e[0] < w / 2) -1f else 1f
+                    val q = t / 1.6f
+                    elf(c, e[0] + dir * q * q * w * 0.7f, e[1] - abs(sin(t * 14f)) * e[2] * 0.15f, e[2], dir, t * 2.5f, arms = 1f)
+                }
+            }
             CLIMB -> {                                                   // over the big clock and down the Christmas line
                 val l = w / 2 - clockW / 2 - s * 0.3f; val rr = w / 2 + clockW / 2 + s * 0.3f; val base = h * 0.26f
                 when {
@@ -213,6 +237,7 @@ class Elves {
 
     /** One elf. x,y = feet. facing 1 right / -1 left. walk = phase for the legs (0 = standing). arms 0..1 = raised. */
     private fun elf(c: Canvas, x: Float, y: Float, s: Float, facing: Float, walk: Float, arms: Float = 0f, carry: String? = null, alpha: Float = 1f) {
+        if (act != FLEE) drawn.add(floatArrayOf(x, y, s, facing))
         val a = (255 * alpha).toInt().coerceIn(0, 255)
         fun col(v: Int) { p.color = v; p.alpha = a }
         val sw = sin(walk * 9f) * s * 0.07f
