@@ -676,6 +676,12 @@ class EyesView(context: Context) : View(context) {
             sleepPaint.color = eyeColor
             sleepPaint.textSize = h * 0.16f; sleepPaint.alpha = 150
             canvas.drawText(clock, w / 2, h * 0.24f, sleepPaint)
+            christmasLine()?.let { line ->                          // 🎄 sleeps till Christmas
+                sleepPaint.textSize = h * 0.04f; sleepPaint.alpha = 255
+                val c0 = sleepPaint.color; sleepPaint.color = Color.parseColor("#4CD97B")
+                sleepPaint.alpha = (190 + 50 * sin(secs * 1.5f)).toInt().coerceIn(0, 255)
+                canvas.drawText(line, w / 2, h * 0.315f, sleepPaint); sleepPaint.color = c0
+            }
             sleepPaint.textSize = h * 0.045f; sleepPaint.alpha = 130
             canvas.drawText("☕  Cuppas today: $cuppas", w / 2, h * 0.70f, sleepPaint)
             if (plugNote.isNotEmpty()) {
@@ -779,6 +785,26 @@ class EyesView(context: Context) : View(context) {
 
         canvas.restore()                                  // (the upright frame)
         postInvalidateOnAnimation()
+    }
+
+    /** "🎄 46 sleeps till Christmas" (from 120 sleeps before), "Merry Christmas!" on the day, nothing otherwise. */
+    private var xmasDay = -1; private var xmasText: String? = null
+    private fun christmasLine(): String? {
+        val now = java.util.Calendar.getInstance()
+        val doy = now.get(java.util.Calendar.DAY_OF_YEAR)
+        if (doy == xmasDay) return xmasText
+        xmasDay = doy
+        val today = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, 12); set(java.util.Calendar.MINUTE, 0) }
+        val xmas = java.util.Calendar.getInstance().apply { set(today.get(java.util.Calendar.YEAR), java.util.Calendar.DECEMBER, 25, 12, 0, 0) }
+        if (today.after(xmas) && today.get(java.util.Calendar.DAY_OF_YEAR) != xmas.get(java.util.Calendar.DAY_OF_YEAR)) xmas.add(java.util.Calendar.YEAR, 1)
+        val sleeps = Math.round((xmas.timeInMillis - today.timeInMillis) / 86_400_000.0).toInt()
+        xmasText = when {
+            sleeps == 0 -> "🎄  Merry Christmas!  🎅"
+            sleeps == 1 -> "🎄  1 sleep till Christmas!  🎅"
+            sleeps in 2..120 -> "🎄  $sleeps sleeps till Christmas"
+            else -> null
+        }
+        return xmasText
     }
 
     /** Down, from the screen's point of view (degrees, 0 = the normal way up): set from the motion sensor. */
