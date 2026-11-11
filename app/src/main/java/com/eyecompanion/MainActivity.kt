@@ -1241,8 +1241,8 @@ class MainActivity : Activity() {
                     "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
                     "clothes or laundry. Then, on the same line, say a short, casual hello (by name if you know who it is), " +
                     "a few words at most, like a mate would. No compliments, no gushing, don't say you missed them or were lonely. " +
-                    "Never mention the dishes or clothes in this line. Start it with the [happy] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
-                    "gown matches the kettle (forgiven), a green one matches the recycling bin (very eco), the teddy coat makes her a cuddly bear. If nobody is in the photo, write OTHER and just say hello.",
+                    "Never mention the dishes or clothes in this line. Start it with the [happy] tag. " +
+                    "If nobody is in the photo, write OTHER and just say hello.",
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
             }
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
