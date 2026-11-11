@@ -1227,7 +1227,7 @@ class MainActivity : Activity() {
                 if ((who.isNotEmpty() && who != before) || t - lastGreetPhoto > 30 * 60_000) main.post {
                     if (phase != Phase.LISTENING || t - lastFaceSeen > 5000) return@post
                     lastGreetPhoto = t
-                    complimentNow { speakLine(listOf("[happy] Oh hello! Nice to see a face.", "[love] There you are. I was getting lonely.").fresh()) }
+                    complimentNow { speakLine(listOf("[happy] Oh, hello.", "[happy] Alright?").fresh()) }
                 }
             }
         }, 3000)
@@ -1239,10 +1239,9 @@ class MainActivity : Activity() {
             val raw = jpeg?.let {
                 online.lookAt(it, "Someone just walked up to you. " + WHO_QUESTION + " Then add the word DISHES if you can see used dishes, " +
                     "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
-                    "clothes or laundry. Then, on the same line, say hello " +
-                    "(by name if you know who it is) and give one short, warm, genuine compliment about the PERSON themselves: their smile, hair, top, " +
-                    "glasses, earrings, how they look today. Never compliment the kitchen, the room, the background or " +
-                    "objects. Never mention the dishes or clothes in this line. Start it with the [love] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
+                    "clothes or laundry. Then, on the same line, say a short, casual hello (by name if you know who it is), " +
+                    "a few words at most, like a mate would. No compliments, no gushing, don't say you missed them or were lonely. " +
+                    "Never mention the dishes or clothes in this line. Start it with the [happy] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
                     "gown matches the kettle (forgiven), a green one matches the recycling bin (very eco), the teddy coat makes her a cuddly bear. If nobody is in the photo, write OTHER and just say hello.",
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
             }
