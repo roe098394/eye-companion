@@ -100,7 +100,8 @@ class MainActivity : Activity() {
         OnlineBrain { systemPrompt() }.apply {
             // the key built in from GitHub wins; a key typed on the tablet is only a fallback
             apiKey = BuildConfig.GROQ_KEY.ifBlank { prefs.getString("onlineKey", null) ?: "" }
-            if (prefs.getBoolean("onlineOff", false)) apiKey = ""
+            claudeKey = BuildConfig.CLAUDE_KEY
+            if (prefs.getBoolean("onlineOff", false)) { apiKey = ""; claudeKey = "" }
         }
     }
 
@@ -1199,16 +1200,36 @@ class MainActivity : Activity() {
      * a compliment for them, is it Laura (tablets), and any dirty dishes or folded clothes about.
      */
     private var lastVisitorPhoto = 0L
+    /** Who Pip last saw at the bench (MARK, LAURA...), or "" */
+    @Volatile private var whoSeen = ""
+    private val PEOPLE = listOf("MARK", "LAURA", "BRANDON", "SOPHIE", "AMELIA", "CHLOE")
+    /** How Pip tells the family apart in a photo: by how they look, not by face. */
+    private val WHO_QUESTION = "First write who is in the photo, as one word: " +
+        "MARK (adult man with a beard), LAURA (adult woman with glasses, or in a black or green dressing gown, or a long fluffy brown teddy-bear coat), " +
+        "BRANDON (young man about 20, no beard), SOPHIE (girl with dyed red hair, wears earrings), AMELIA (smaller girl with glasses), " +
+        "CHLOE (small girl about 5), or OTHER if nobody is there or you can't tell. Go by age, size, beard, glasses, hair and clothes; if unsure, OTHER."
+    private var lastGreetPhoto = 0L
     private fun maybeVisitorPhoto(away: Long) {
         val now = System.currentTimeMillis()
-        val quietFor = now - maxOf(lastAnyHeard, lastSpokeEnd, now - away)
-        if (quietFor < 20 * 60_000 || now - lastVisitorPhoto < 90 * 60_000 || Math.random() > 0.5) return
+        if (now - lastVisitorPhoto < 3 * 60_000) return
         if (phase != Phase.LISTENING || chloeMode || carMode || muted || !online.enabled || online.allResting ||
             online.seeingRestMs > 0) return
         lastVisitorPhoto = now
-        main.postDelayed({                          // still there a few seconds later? then have a look
-            if (System.currentTimeMillis() - lastFaceSeen < 1500 && phase == Phase.LISTENING)
-                complimentNow { speakLine(listOf("[happy] Oh hello! Nice to see a face.", "[love] There you are. I was getting lonely.").fresh()) }
+        main.postDelayed({                          // still standing there a few seconds later? then see who it is
+            if (System.currentTimeMillis() - lastFaceSeen >= 1500 || phase != Phase.LISTENING) return@postDelayed
+            val before = whoSeen
+            lookThroughCamera { jpeg ->
+                val who = jpeg?.let { online.lookAt(it, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0) }
+                    ?.trim()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } ?: ""
+                if (who.isNotEmpty()) whoSeen = who
+                val t = System.currentTimeMillis()
+                // a proper hello (with a compliment) for a new face, or when it's been a while
+                if ((who.isNotEmpty() && who != before) || t - lastGreetPhoto > 30 * 60_000) main.post {
+                    if (phase != Phase.LISTENING || t - lastFaceSeen > 5000) return@post
+                    lastGreetPhoto = t
+                    complimentNow { speakLine(listOf("[happy] Oh hello! Nice to see a face.", "[love] There you are. I was getting lonely.").fresh()) }
+                }
+            }
         }, 3000)
     }
 
@@ -1216,21 +1237,21 @@ class MainActivity : Activity() {
         val askTablets = tabletsDue()
         lookThroughCamera { jpeg ->
             val raw = jpeg?.let {
-                online.lookAt(it, "Someone just walked up to you after the kitchen had been quiet for a while. First write LAURA if the person in the photo " +
-                    "is an adult woman wearing glasses, or wearing a black or green dressing gown, or a long fluffy brown teddy-bear coat, otherwise OTHER. Then add the word DISHES if you can see used dishes, " +
+                online.lookAt(it, "Someone just walked up to you. " + WHO_QUESTION + " Then add the word DISHES if you can see used dishes, " +
                     "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
                     "clothes or laundry. Then, on the same line, say hello " +
-                    "and give one short, warm, genuine compliment about the PERSON themselves: their smile, hair, top, " +
+                    "(by name if you know who it is) and give one short, warm, genuine compliment about the PERSON themselves: their smile, hair, top, " +
                     "glasses, earrings, how they look today. Never compliment the kitchen, the room, the background or " +
                     "objects. Never mention the dishes or clothes in this line. Start it with the [love] tag. If she's in a dressing gown or teddy coat, tease it lovingly: a black " +
                     "gown matches the kettle (forgiven), a green one matches the recycling bin (very eco), the teddy coat makes her a cuddly bear. If nobody is in the photo, write OTHER and just say hello.",
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
             }
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
+            whoSeen = raw?.trimStart()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } ?: ""
             if (isLaura) { lastLauraSeen = System.currentTimeMillis(); main.post { lauraVisuals(carpet = Math.random() < 0.4); lastLauraEffort = System.currentTimeMillis() } }
             val head = raw?.substringBefore("[")?.uppercase() ?: ""
             val dishes = "DISHES" in head; val clothes = "CLOTHES" in head
-            val line = raw?.replaceFirst(Regex("^\\s*((LAURA|OTHER|DISHES|CLOTHES)\\s*[:,;\\-]?\\s*)+", RegexOption.IGNORE_CASE), "")?.trim()
+            val line = raw?.replaceFirst(Regex("^\\s*((MARK|LAURA|BRANDON|SOPHIE|AMELIA|CHLOE|OTHER|DISHES|CLOTHES)\\s*[:,;\\-]?\\s*)+", RegexOption.IGNORE_CASE), "")?.trim()
             main.post {
                 if (phase != Phase.LISTENING) return@post
                 if (line.isNullOrBlank()) thanks() else speakLine(line)
@@ -2101,7 +2122,7 @@ class MainActivity : Activity() {
                 val away = now - lastFaceSeen
                 lastFaceSeen = now
                 if (away > 3 * 60_000) main.post { visitStart = now; visitReminded = false; visitChecks = 0 }
-                main.post { maybeGreet(); if (away > 20 * 60_000) maybeVisitorPhoto(away) }
+                main.post { maybeGreet(); if (away > 2 * 60_000) maybeVisitorPhoto(away) }
                 main.post {
                     eyes.seeFace(x, y, size)
                     if (phase == Phase.LISTENING) when {
@@ -3515,12 +3536,13 @@ class MainActivity : Activity() {
                 else if (BuildConfig.GROQ_KEY.isNotBlank()) prefs.edit().remove("onlineKey").apply()
                 prefs.edit().putBoolean("onlineOff", false).apply()
                 online.apiKey = k.ifEmpty { BuildConfig.GROQ_KEY.ifBlank { prefs.getString("onlineKey", null) ?: "" } }
+                online.claudeKey = BuildConfig.CLAUDE_KEY
                 applyMode(); forgetAll()
                 speakLine(if (online.enabled) "Online brain on." else "I need a key for that.")
             }
             .setNegativeButton("Turn off") { _, _ ->
                 prefs.edit().putBoolean("onlineOff", true).apply()
-                online.apiKey = ""
+                online.apiKey = ""; online.claudeKey = ""
                 speakLine("Online brain off.")
             }
             .setNeutralButton("Cancel", null)
@@ -3632,7 +3654,9 @@ class MainActivity : Activity() {
             " and if they sound stressed or the road might need their attention, keep it even shorter."
         val known = try { voices.names } catch (_: Exception) { emptyList() }
         val people = if (known.isEmpty()) "" else " People you know by voice: ${known.joinToString(", ")}."
-        return "$p Today is $today. You are in the UK.$people${moodLine()}"
+        val seen = if (whoSeen.isEmpty() || carMode || System.currentTimeMillis() - lastVisitorPhoto > 30 * 60_000) ""
+            else " The person at the bench is probably ${whoSeen.lowercase().replaceFirstChar { it.uppercase() }} (from your camera; you might be wrong)."
+        return "$p Today is $today. You are in the UK.$people$seen${moodLine()}"
     }
 
     /** Apply car mode (or home mode) to the eyes, voice, brain and screen. */

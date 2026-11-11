@@ -9,12 +9,18 @@ import java.net.URL
 import java.util.concurrent.Executors
 
 /**
- * A big, clever brain online (Groq's free tier). Used first when there's internet and a key;
+ * A big, clever brain online: Claude when there's a Claude key, otherwise Groq's free tier
+ * (Groq always does the hearing). Used first when there's internet and a key;
  * if it fails, Pip falls back to the PC brain, then its own.
  */
 class OnlineBrain(private val systemPrompt: () -> String) {
 
     @Volatile var apiKey: String = ""
+    /** Claude (Anthropic) key: when set, Claude does the talking and the looking; Groq still does the hearing. */
+    @Volatile var claudeKey: String = ""
+    /** Claude had a hiccup: leave it alone until then and use Groq instead. */
+    @Volatile private var claudeRestUntil = 0L
+    val claudeOk get() = claudeKey.isNotBlank() && System.currentTimeMillis() > claudeRestUntil
     @Volatile var maxReplyTokens = 220
     @Volatile var maxTurns = 12
     /** Last problem worth telling the user about (e.g. a rejected key), or "" */
@@ -28,7 +34,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     val restUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private fun resting(m: String) = (restUntil[m] ?: 0L) > System.currentTimeMillis()
     /** The seeing brain (photos) has used up its day: how long until it's back (ms), or 0. */
-    val seeingRestMs get() = ((restUntil[VISION_MODEL] ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0L)
+    val seeingRestMs get() = if (claudeOk) 0L else ((restUntil[VISION_MODEL] ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0L)
     /** Remember Groq's "...per day... try again in 12m30s" for a model. */
     fun noteLimit(model: String, err: String) {
         if (!Regex("per day").containsMatchIn(err)) return
@@ -38,7 +44,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         }
     }
     /** How many of the online brains are resting right now (0..3). */
-    val restingCount get() = if (!enabled) 0 else MODELS.count { resting(it) }
+    val restingCount get() = if (!enabled || claudeOk) 0 else MODELS.count { resting(it) }
 
     /** Photos cost a lot of the daily allowance: send a small one (at most 512 px wide). */
     fun shrink(jpeg: ByteArray): ByteArray = try {
@@ -49,7 +55,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         }
     } catch (_: Exception) { jpeg }
     /** Every model is over its daily limit: nothing to do but wait (Pip naps). */
-    val allResting get() = enabled && MODELS.all { resting(it) }
+    val allResting get() = enabled && !claudeOk && MODELS.all { resting(it) }
     /** When the first model is free again (0 = not resting). */
     val backAt get() = if (allResting) MODELS.minOf { restUntil[it] ?: 0L } else 0L
     private fun recompute() {
@@ -65,9 +71,10 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     @Volatile private var turn = 0
     @Volatile private var lastRateLimit = 0L
 
-    val enabled get() = apiKey.isNotBlank()
+    val enabled get() = apiKey.isNotBlank() || claudeKey.isNotBlank()
+    private val groqOn get() = apiKey.isNotBlank()
     val worthTrying get() = enabled && System.currentTimeMillis() - lastFailure > 20_000
-    val modelName get() = MODELS[modelIndex]
+    val modelName get() = if (claudeOk) "Claude" else MODELS[modelIndex]
 
     fun stop() { stopRequested = true }
     fun forget() = worker.execute { history.clear() }
@@ -92,6 +99,29 @@ class OnlineBrain(private val systemPrompt: () -> String) {
 
         val reply = StringBuilder()
         var problem: String? = null
+        if (claudeOk) {
+            try {
+                streamClaude(reply, onToken, image, userText)
+                lastProblem = ""
+                val text = reply.toString().trim()
+                if (text.isNotEmpty()) history.add("assistant" to text) else history.removeAt(history.lastIndex)
+                onDone(text)
+                return@execute
+            } catch (e: BadKey) {
+                claudeRestUntil = System.currentTimeMillis() + 30 * 60_000
+                lastProblem = "The Claude key wasn't accepted (or it's out of credit): using Groq for now."
+            } catch (e: Exception) {
+                claudeRestUntil = System.currentTimeMillis() + 60_000
+            }
+            if (reply.isNotEmpty()) {          // got part of an answer before it broke: keep that
+                val text = reply.toString().trim()
+                history.add("assistant" to text); onDone(text); return@execute
+            }
+        }
+        if (!groqOn) {
+            history.removeAt(history.lastIndex); lastFailure = System.currentTimeMillis()
+            onUnavailable("offline"); return@execute
+        }
         val tries = if (image != null) 1 else MODELS.size
         if (image == null && allResting) {
             history.removeAt(history.lastIndex); lastFailure = System.currentTimeMillis()
@@ -135,7 +165,13 @@ class OnlineBrain(private val systemPrompt: () -> String) {
 
     /** One-off question about a camera picture (not added to the chat memory). null = couldn't. */
     fun lookAt(jpeg: ByteArray, question: String, system: String? = null, maxTokens: Int = 120,
-               temperature: Double = 0.7): String? = try {
+               temperature: Double = 0.7): String? {
+        if (claudeOk) claudeLook(jpeg, question, system, maxTokens, temperature)?.let { return it }
+        return if (groqOn) groqLook(jpeg, question, system, maxTokens, temperature) else null
+    }
+
+    private fun groqLook(jpeg: ByteArray, question: String, system: String?, maxTokens: Int,
+               temperature: Double): String? = try {
         val b64 = android.util.Base64.encodeToString(shrink(jpeg), android.util.Base64.NO_WRAP)
         val content = JSONArray()
             .put(JSONObject().put("type", "text").put("text", question))
@@ -161,6 +197,93 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             r.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content").trim()
         }
     } catch (_: Exception) { null }
+
+    // ---------------- Claude (Anthropic Messages API) ----------------
+
+    private fun claudeImage(jpeg: ByteArray) = JSONObject().put("type", "image").put("source", JSONObject()
+        .put("type", "base64").put("media_type", "image/jpeg")
+        .put("data", android.util.Base64.encodeToString(shrink(jpeg), android.util.Base64.NO_WRAP)))
+
+    private fun claudeConn(readMs: Int) = (URL(CLAUDE_ENDPOINT).openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"; doOutput = true; connectTimeout = 5000; readTimeout = readMs
+        setRequestProperty("Content-Type", "application/json")
+        setRequestProperty("x-api-key", claudeKey)
+        setRequestProperty("anthropic-version", "2023-06-01")
+    }
+
+    private fun claudeCheck(conn: HttpURLConnection) {
+        when (conn.responseCode) {
+            200 -> {}
+            401, 403 -> { conn.disconnect(); throw BadKey() }
+            400 -> {   // "credit balance is too low" comes back as a 400
+                val err = try { conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (_: Exception) { "" }
+                conn.disconnect()
+                if ("credit" in err.lowercase()) throw BadKey() else throw IllegalStateException("Claude HTTP 400")
+            }
+            else -> { val c = conn.responseCode; conn.disconnect(); throw IllegalStateException("Claude HTTP $c") }
+        }
+    }
+
+    /** One-off look at a picture with Claude. null = couldn't. */
+    private fun claudeLook(jpeg: ByteArray, question: String, system: String?, maxTokens: Int, temperature: Double): String? = try {
+        val content = JSONArray().put(claudeImage(jpeg)).put(JSONObject().put("type", "text").put("text", question))
+        val body = JSONObject().put("model", CLAUDE_MODEL).put("max_tokens", maxTokens)
+            .put("temperature", temperature)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+        if (system != null) body.put("system", system)
+        val conn = claudeConn(20_000)
+        conn.outputStream.use { it.write(body.toString().toByteArray()) }
+        claudeCheck(conn)
+        val r = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        conn.disconnect()
+        val parts = r.optJSONArray("content")
+        (0 until (parts?.length() ?: 0)).joinToString("") { parts!!.getJSONObject(it).optString("text") }.trim().ifEmpty { null }
+    } catch (e: BadKey) {
+        claudeRestUntil = System.currentTimeMillis() + 30 * 60_000; null
+    } catch (_: Exception) {
+        claudeRestUntil = System.currentTimeMillis() + 60_000; null
+    }
+
+    /** Chat with Claude, streaming the reply word by word. */
+    private fun streamClaude(reply: StringBuilder, onToken: (String) -> Boolean, image: ByteArray?, question: String) {
+        // Claude wants user/assistant turns to alternate: glue any repeats together
+        val turns = ArrayList<Pair<String, String>>()
+        history.forEach { if (turns.isNotEmpty() && turns.last().first == it.first)
+            turns[turns.lastIndex] = it.first to (turns.last().second + "\n" + it.second) else turns.add(it) }
+        val msgs = JSONArray()
+        turns.forEachIndexed { i, it ->
+            if (image != null && i == turns.lastIndex) {
+                val content = JSONArray().put(claudeImage(image)).put(JSONObject().put("type", "text").put("text",
+                    "$question\n(This is a photo from your camera, taken just now. Describe only what is really in it.)"))
+                msgs.put(JSONObject().put("role", "user").put("content", content))
+            } else msgs.put(JSONObject().put("role", it.first).put("content", it.second))
+        }
+        val body = JSONObject().put("model", CLAUDE_MODEL).put("max_tokens", maxReplyTokens)
+            .put("system", systemPrompt()).put("messages", msgs)
+            .put("stream", true).put("temperature", 0.7)
+        val conn = claudeConn(30_000)
+        conn.outputStream.use { it.write(body.toString().toByteArray()) }
+        claudeCheck(conn)
+        BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { r ->
+            while (true) {
+                val line = r.readLine() ?: break
+                if (!line.startsWith("data:")) continue
+                val obj = try { JSONObject(line.removePrefix("data:").trim()) } catch (_: Exception) { continue }
+                when (obj.optString("type")) {
+                    "content_block_delta" -> {
+                        val piece = obj.optJSONObject("delta")?.optString("text").orEmpty()
+                        if (piece.isNotEmpty()) {
+                            reply.append(piece)
+                            if (!onToken(piece) || stopRequested) break
+                        }
+                    }
+                    "message_stop" -> break
+                    "error" -> throw IllegalStateException("Claude stream error")
+                }
+            }
+        }
+        conn.disconnect()
+    }
 
     private class RateLimited : Exception()
     private class BadKey : Exception()
@@ -245,7 +368,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
      * ears with British (and Geordie) accents. Returns null if it couldn't (no internet etc.).
      */
     fun transcribe(audio: ShortArray, rate: Int): String? {
-        if (!enabled) return null
+        if (!groqOn) return null
         // 48 kHz → 16 kHz keeps the upload small and quick
         val (pcm, outRate) = if (rate == 48000) ShortArray(audio.size / 3) { i ->
             ((audio[i * 3] + audio[i * 3 + 1] + audio[i * 3 + 2]) / 3).toShort() } to 16000 else audio to rate
@@ -294,6 +417,9 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     }
 
     companion object {
+        const val CLAUDE_ENDPOINT = "https://api.anthropic.com/v1/messages"
+        /** Claude Sonnet: clever and chatty, and it can see photos */
+        const val CLAUDE_MODEL = "claude-sonnet-5-5"
         const val STT_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
         /** Whisper sometimes "hears" these in background noise. */
         val NOISE = setOf("british english", "british english.", "thank you", "thanks", "thank you for watching", "thanks for watching", "you", "bye", "okay", "uh", "um")

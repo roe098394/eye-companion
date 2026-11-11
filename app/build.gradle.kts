@@ -15,6 +15,8 @@ android {
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
         // Online brain key, from the GROQ_API_KEY secret on GitHub (never stored in the code)
+        // Claude key, from the ANTHROPIC_API_KEY secret on GitHub
+        buildConfigField("String", "CLAUDE_KEY", "\"${System.getenv("ANTHROPIC_API_KEY") ?: ""}\"")
         buildConfigField("String", "GROQ_KEY", "\"${System.getenv("GROQ_API_KEY") ?: ""}\"")
         // Azure voice key/region, from the AZURE_SPEECH_KEY / AZURE_SPEECH_REGION repository secrets (optional)
         buildConfigField("String", "AZURE_SPEECH_KEY", "\"${System.getenv("AZURE_SPEECH_KEY") ?: ""}\"")
