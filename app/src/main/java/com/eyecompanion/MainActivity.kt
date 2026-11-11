@@ -1241,6 +1241,7 @@ class MainActivity : Activity() {
                     "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
                     "clothes or laundry. Then, on the same line, say a short, casual hello (by name if you know who it is), " +
                     "a few words at most, like a mate would. No compliments, no gushing, don't say you missed them or were lonely. " +
+                    "BUT if it's LAURA, greet her as the queen of the kitchen, with a bit of royal respect (e.g. 'Morning, your majesty'), still short. " +
                     "Never mention the dishes or clothes in this line. Start it with the [happy] tag. " +
                     "If nobody is in the photo, write OTHER and just say hello.",
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
@@ -3655,7 +3656,8 @@ class MainActivity : Activity() {
         val people = if (known.isEmpty()) "" else " People you know by voice: ${known.joinToString(", ")}."
         val seen = if (whoSeen.isEmpty() || carMode || System.currentTimeMillis() - lastVisitorPhoto > 30 * 60_000) ""
             else " The person at the bench is probably ${whoSeen.lowercase().replaceFirstChar { it.uppercase() }} (from your camera; you might be wrong)."
-        return "$p Today is $today. You are in the UK.$people$seen${moodLine()}"
+        val queen = " Laura is the queen of the kitchen: always be extra kind, helpful and respectful to her, like a loyal royal servant (warm, never creepy or gushing)."
+        return "$p Today is $today. You are in the UK.$people$seen$queen${moodLine()}"
     }
 
     /** Apply car mode (or home mode) to the eyes, voice, brain and screen. */
