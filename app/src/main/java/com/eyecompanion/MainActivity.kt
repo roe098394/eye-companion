@@ -1771,6 +1771,7 @@ class MainActivity : Activity() {
             kettleCheck()
             portalReminders()
             refreshChores()
+            updateWeather()
             elfReport()
             if (training) { main.postDelayed(this, 60_000); return }
             temper *= 0.85f                           // tempers cool down over time
@@ -2040,55 +2041,55 @@ class MainActivity : Activity() {
         return true
     }
 
-    // ---- chore board on the sleep screen: anyone can add a chore for someone with the keyboard.
+    // ---- to-do list on the sleep screen: anyone can type a job in with the keyboard.
     //      Tick one and Pip wakes, looks to see who it is, says a short well done, then goes back to sleep.
-    private fun loadChores(): MutableList<Triple<String, String, String>> {      // person, chore, day ticked ("" = not yet)
-        val out = ArrayList<Triple<String, String, String>>()
+    private fun loadChores(): MutableList<Pair<String, String>> {      // job, day ticked ("" = not yet)
+        val out = ArrayList<Pair<String, String>>()
         try {
             val a = org.json.JSONArray(prefs.getString("chores", "[]") ?: "[]")
             for (i in 0 until a.length()) { val o = a.getJSONObject(i)
                 val done = o.optString("d", "")
-                if (done.isEmpty() || done == todayKey) out += Triple(o.optString("p"), o.optString("t"), done) }   // ticked ones go next day
+                if (done.isEmpty() || done == todayKey) out += o.optString("t") to done }   // ticked ones go next day
         } catch (_: Exception) {}
         return out
     }
-    private fun saveChores(list: List<Triple<String, String, String>>) {
+    private fun saveChores(list: List<Pair<String, String>>) {
         val a = org.json.JSONArray()
-        list.forEach { (p, t, d) -> a.put(org.json.JSONObject().put("p", p).put("t", t).put("d", d)) }
+        list.forEach { (t, d) -> a.put(org.json.JSONObject().put("t", t).put("d", d)) }
         prefs.edit().putString("chores", a.toString()).apply()
         refreshChores()
     }
     private fun refreshChores() {
-        eyes.chores = loadChores().map { EyesView.Chore(it.first, it.second, it.third.isNotEmpty()) }
-        eyes.tabletsCard = if (tabletsDue()) "💊 $tabletPerson: tablets" else ""
+        eyes.chores = loadChores().map { EyesView.Chore(it.first, it.second.isNotEmpty()) }
+        eyes.tabletsCard = if (tabletsDue()) "$tabletPerson's tablets" else ""
     }
     private fun choreTapped(hit: Int) {
         when (hit) {
             EyesView.CHORE_ADD -> showAddChore()
             EyesView.CHORE_TABLETS -> {
                 prefs.edit().putString("tabletsDone", todayKey).apply(); refreshChores()
-                praiseWhoTicked(tabletPerson, "taking her tablets")
+                praiseWhoTicked("taking her tablets", tabletPerson)
             }
             else -> {
                 val list = loadChores(); val c = list.getOrNull(hit) ?: return
-                if (c.third.isNotEmpty()) { list[hit] = c.copy(third = ""); saveChores(list); return }     // tapped a ticked one: untick it
-                list[hit] = c.copy(third = todayKey); saveChores(list)
-                praiseWhoTicked(c.first, c.second)
+                if (c.second.isNotEmpty()) { list[hit] = c.first to ""; saveChores(list); return }     // tapped a ticked one: untick it
+                list[hit] = c.first to todayKey; saveChores(list)
+                praiseWhoTicked(c.first, null)
             }
         }
     }
     /** Wake up, look at whoever ticked it, a short well done by name, then back to sleep. */
-    private fun praiseWhoTicked(assigned: String, what: String) {
+    private fun praiseWhoTicked(what: String, forWho: String?) {
         val wasNapping = napping
         if (phase == Phase.ASLEEP) wakeUp()
         eyes.feel(EyesView.Emotion.HAPPY, 6000)
-        val fallback = "[happy] Nice one, $assigned. ${what.replaceFirstChar { it.uppercase() }}, done."
+        val fallback = "[happy] Nice one" + (forWho?.let { ", $it" } ?: "") + ". ${what.replaceFirstChar { it.uppercase() }}, done."
         main.postDelayed({
             lookThroughCamera { jpeg ->
                 val raw = if (jpeg != null && online.enabled && !online.allResting) online.lookAt(jpeg,
                     WHO_QUESTION + " Then, on the same line, say a short well done to that person, by name if you know who it is, " +
-                    "for just finishing this job: \"$what\". A few words, like a mate would. No gushing. Start it with the [happy] tag. " +
-                    "If you can't tell who it is, say well done to $assigned.",
+                    "for just doing this job: \"$what\". A few words, like a mate would. No gushing. Start it with the [happy] tag. " +
+                    (if (forWho != null) "If you can't tell who it is, say well done to $forWho." else "If you can't tell who it is, just say well done."),
                     system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 60)
                     else null
                 raw?.trimStart()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } }?.let { whoSeen = it }
@@ -2100,14 +2101,10 @@ class MainActivity : Activity() {
             }
         }, 1500)
     }
-    /** Type a chore for someone: pick who, type what, Add. "Remove one" deletes a mistake. */
+    /** Type a job for the to-do list. "Remove one" deletes a mistake. */
     private fun showAddChore() {
         val pad = (16 * resources.displayMetrics.density).toInt()
         val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(pad * 2, pad, pad * 2, 0) }
-        val group = android.widget.RadioGroup(this).apply { orientation = android.widget.RadioGroup.HORIZONTAL }
-        FAMILY.forEachIndexed { i, n -> group.addView(android.widget.RadioButton(this).apply {
-            id = 7000 + i; text = n; textSize = 18f; setPadding(0, 0, pad, 0) }) }
-        box.addView(android.widget.HorizontalScrollView(this).apply { addView(group) })
         val edit = android.widget.EditText(this).apply {
             hint = "What needs doing?"; textSize = 20f; isSingleLine = true
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
@@ -2115,16 +2112,12 @@ class MainActivity : Activity() {
         }
         box.addView(edit)
         fun add(): Boolean {
-            val who = FAMILY.getOrNull(group.checkedRadioButtonId - 7000)
             val what = edit.text.toString().trim()
-            if (who == null || what.isEmpty()) {
-                android.widget.Toast.makeText(this, if (who == null) "Pick who it's for" else "Type the chore", android.widget.Toast.LENGTH_SHORT).show()
-                return false
-            }
-            saveChores(loadChores() + Triple(who, what, ""))
+            if (what.isEmpty()) return false
+            saveChores(loadChores() + (what to ""))
             return true
         }
-        val d = AlertDialog.Builder(this).setTitle("Add a chore").setView(box)
+        val d = AlertDialog.Builder(this).setTitle("Add to the to-do list").setView(box)
             .setPositiveButton("Add", null).setNegativeButton("Cancel", null)
             .setNeutralButton("Remove one") { _, _ -> showRemoveChore() }
             .showOwn()
@@ -2137,9 +2130,51 @@ class MainActivity : Activity() {
     private fun showRemoveChore() {
         val list = loadChores()
         if (list.isEmpty()) return
-        AlertDialog.Builder(this).setTitle("Remove which chore?")
-            .setItems(list.map { "${it.first}: ${it.second}" }.toTypedArray()) { _, i -> saveChores(list.filterIndexed { j, _ -> j != i }) }
+        AlertDialog.Builder(this).setTitle("Remove which one?")
+            .setItems(list.map { it.first }.toTypedArray()) { _, i -> saveChores(list.filterIndexed { j, _ -> j != i }) }
             .setNegativeButton("Cancel", null).showOwn()
+    }
+
+    // ---- weather for the sleep screen (free forecast, no key): checked every half hour
+    private var lastWeather = 0L
+    private fun updateWeather() {
+        val now = System.currentTimeMillis()
+        if (now - lastWeather < (if (eyes.wxKind >= 0) 30 else 5) * 60_000L) return
+        lastWeather = now
+        thread(name = "weather") {
+            try {
+                val c = java.net.URL("https://api.open-meteo.com/v1/forecast?latitude=54.97&longitude=-1.61" +
+                    "&current=temperature_2m,weather_code,is_day,wind_speed_10m" +
+                    "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Europe%2FLondon&forecast_days=1")
+                    .openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 10_000; c.readTimeout = 10_000
+                val j = org.json.JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+                val cur = j.getJSONObject("current"); val d = j.getJSONObject("daily")
+                val code = cur.getInt("weather_code"); val day = cur.optInt("is_day", 1) == 1
+                val (kind, desc) = when (code) {
+                    0 -> EyesView.WX_CLEAR to (if (day) "Sunny" else "Clear")
+                    1 -> EyesView.WX_PARTLY to "Mostly clear"
+                    2 -> EyesView.WX_PARTLY to "Partly cloudy"
+                    3 -> EyesView.WX_CLOUDY to "Cloudy"
+                    45, 48 -> EyesView.WX_FOG to "Foggy"
+                    in 51..57 -> EyesView.WX_RAIN to "Drizzle"
+                    in 61..67 -> EyesView.WX_RAIN to "Rain"
+                    in 80..82 -> EyesView.WX_RAIN to "Showers"
+                    in 71..77, 85, 86 -> EyesView.WX_SNOW to "Snow"
+                    in 95..99 -> EyesView.WX_STORM to "Thunderstorms"
+                    else -> EyesView.WX_CLOUDY to "Cloudy"
+                }
+                fun deg(v: Double) = "${Math.round(v)}°"
+                val temp = deg(cur.getDouble("temperature_2m"))
+                val wind = cur.optDouble("wind_speed_10m", 0.0).toFloat()
+                val line = "High ${deg(d.getJSONArray("temperature_2m_max").getDouble(0))} · Low ${deg(d.getJSONArray("temperature_2m_min").getDouble(0))}" +
+                    " · Rain ${d.getJSONArray("precipitation_probability_max").optInt(0, 0)}%"
+                main.post {
+                    eyes.wxKind = kind; eyes.wxDay = day; eyes.wxTemp = temp; eyes.wxWind = wind
+                    eyes.wxDesc = if (wind >= 40) "$desc and windy" else desc; eyes.wxLine = line
+                }
+            } catch (_: Exception) { lastWeather = now - 25 * 60_000L }     // try again in 5 minutes
+        }
     }
 
     private fun tabletsDue(): Boolean {
@@ -2650,7 +2685,7 @@ class MainActivity : Activity() {
         eyes.subCaption = ""
         setPhase(if (prefs.getBoolean("asleep", false)) Phase.ASLEEP else Phase.LISTENING)
         eyes.sleepScreen = phase == Phase.ASLEEP; eyes.cuppas = cuppas
-        showWeek(); updateSeason(); eyes.shopping = shopping; refreshChores()
+        showWeek(); updateSeason(); eyes.shopping = shopping; refreshChores(); updateWeather()
         if (phase == Phase.LISTENING) eyes.caption = if (carMode) "Ready when you are." else "Question? I listen."
     }
 

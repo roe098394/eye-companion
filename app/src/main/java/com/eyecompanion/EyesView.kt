@@ -23,6 +23,8 @@ class EyesView(context: Context) : View(context) {
         const val KS_STEAM = 1; const val KS_RACE = 2; const val KS_HANDS = 3; const val KS_SHIFTY = 4
         const val KS_HEARTBREAK = 5; const val KS_TALLY = 6; const val KS_BUBBLES = 7
         const val CHORE_ADD = -10; const val CHORE_TABLETS = -11
+        const val WX_CLEAR = 0; const val WX_PARTLY = 1; const val WX_CLOUDY = 2; const val WX_FOG = 3
+        const val WX_RAIN = 4; const val WX_SNOW = 5; const val WX_STORM = 6
     }
     enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY,
         SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING, STONED, SNIGGER, HOT }
@@ -675,67 +677,14 @@ class EyesView(context: Context) : View(context) {
             canvas.drawText(testLine.take(110), w / 2, h * 0.80f, subPaint)
         }
 
-        // sleep screen: a big clock, today's cuppa count, when the brain's back, and floating zzz
+        // sleep screen: weather background, big clock, weather + Christmas cards and the to-do list (no eyes)
         if (mood == Mood.SLEEP && sleepScreen) {
-            val cal = java.util.Calendar.getInstance()
-            val clock = String.format("%d:%02d", cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
-            sleepPaint.color = eyeColor
-            sleepPaint.textSize = h * 0.16f; sleepPaint.alpha = 150
-            lastClockW = sleepPaint.measureText(clock)
-            canvas.drawText(clock, w / 2, h * 0.24f, sleepPaint)
-            christmasLine()?.let { line ->                          // 🎄 sleeps till Christmas
-                sleepPaint.textSize = h * 0.04f; sleepPaint.alpha = 255
-                val c0 = sleepPaint.color; sleepPaint.color = Color.parseColor("#4CD97B")
-                sleepPaint.alpha = (190 + 50 * sin(secs * 1.5f)).toInt().coerceIn(0, 255)
-                canvas.drawText(line, w / 2, h * 0.315f, sleepPaint); sleepPaint.color = c0
-            }
-            sleepPaint.textSize = h * 0.045f; sleepPaint.alpha = 130
-            canvas.drawText("☕  Cuppas today: " + (if (elves.cuppaNicked) "?" else "$cuppas"), w / 2, h * 0.70f, sleepPaint)
-            if (plugNote.isNotEmpty()) {
-                sleepPaint.textSize = h * 0.035f; sleepPaint.alpha = (110 + 90 * sin(secs * 2.5f)).toInt().coerceIn(20, 230)
-                canvas.drawText(plugNote, w / 2, h * 0.78f, sleepPaint)
-            }
-            drawWeek(canvas, w * 0.34f, h * 0.81f, w * 0.32f, h * 0.13f)
-            run {
-                val label = "🎙️ VoiceID Live"
-                chipPaint.textSize = h * 0.032f; chipPaint.color = eyeColor; chipPaint.alpha = 190
-                val pad = h * 0.022f; val tw = chipPaint.measureText(label)
-                trainRect.set(w * 0.975f - tw - pad * 2, h * 0.035f, w * 0.975f, h * 0.035f + chipPaint.textSize + pad * 1.6f)
-                chipBox.color = eyeColor; chipBox.alpha = 120; chipBox.strokeWidth = h * 0.004f
-                canvas.drawRoundRect(trainRect, trainRect.height() / 2, trainRect.height() / 2, chipBox)
-                canvas.drawText(label, trainRect.left + pad, trainRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
-            }
-            if (shopping.isNotEmpty()) {
-                listPaint.color = eyeColor; listPaint.textSize = h * 0.032f; listPaint.alpha = 150
-                canvas.drawText("🛒 Shopping", w * 0.03f, h * 0.36f, listPaint)
-                listPaint.textSize = h * 0.028f; listPaint.alpha = 115
-                shopping.take(9).forEachIndexed { i, item ->
-                    canvas.drawText("• " + (if (item.length > 16) item.take(15) + "…" else item), w * 0.035f, h * (0.41f + i * 0.045f), listPaint)
-                }
-                if (shopping.size > 9) canvas.drawText("+${shopping.size - 9} more", w * 0.035f, h * (0.41f + 9 * 0.045f), listPaint)
-            }
-            drawChores(canvas, w, h)
-            if (xmasNote.isNotEmpty() && choreRows.isEmpty()) { sleepPaint.textSize = h * 0.032f; sleepPaint.alpha = 140; canvas.drawText(xmasNote, w * 0.84f, h * 0.48f, sleepPaint) }
-            if (napNote.isNotEmpty()) drawAlarmClock(canvas, w * 0.82f, h * 0.24f, h * 0.085f, napNote, secs)
-            // zzz: little Z's drifting up and away from the sleeping eyes, wobbling, growing, fading out
-            val startX = cx + gap / 2 + eyeW * 0.9f; val startY = cy - h * 0.04f
-            val bold = sleepPaint.typeface
-            sleepPaint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-            for (i in 0..3) {
-                val ph = ((secs * 0.22f + i / 4f) % 1f)                      // each Z takes ~4.5 s to float away
-                val zx = startX + w * 0.16f * ph + sin(secs * 2.2f + i * 1.7f) * h * 0.015f
-                val zy = startY - h * 0.30f * ph
-                val fade = (if (ph < 0.15f) ph / 0.15f else 1f) * (1f - ph)
-                sleepPaint.textSize = h * (0.04f + 0.06f * ph); sleepPaint.alpha = (235 * fade).toInt().coerceIn(0, 255)
-                canvas.save(); canvas.rotate(-12f + 18f * ph, zx, zy)
-                canvas.drawText(if (i % 2 == 0) "Z" else "z", zx, zy, sleepPaint)
-                canvas.restore()
-            }
-            sleepPaint.typeface = bold
+            drawSleepScene(canvas, w, h, secs)
+            if (timerText.isNotEmpty()) drawAlarmClock(canvas, w * 0.52f, h * 0.17f, h * 0.075f, timerText, secs)
         }
 
         // daily allowance meter, top-left
-        if (usageText.isNotEmpty() && mood != Mood.LOADING && t >= takeoverUntil) {      // hidden while the takeover HUD is up
+        if (usageText.isNotEmpty() && mood != Mood.LOADING && t >= takeoverUntil && !(mood == Mood.SLEEP && sleepScreen)) {      // hidden while the takeover HUD is up
             val c = when { usageLevel >= 90 -> Color.parseColor("#FF5A3C"); usageLevel >= 70 -> Color.parseColor("#FFB23E"); else -> eyeColor }
             usagePaint.textSize = h * 0.028f; usagePaint.color = c; usagePaint.alpha = 140
             val x = w * 0.02f; val y = h * 0.055f
@@ -779,7 +728,7 @@ class EyesView(context: Context) : View(context) {
             canvas.drawRoundRect(volRect, volRect.height() / 2, volRect.height() / 2, chipBox)
             canvas.drawText(label, volRect.left + pad, volRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         } else volRect.setEmpty()
-        if (!carMode) elves.draw(canvas, t, w, h, false, cx, cy, gap, eyeW, eyeH, lastClockW, zzX, zzY, crackV[0], crackV[1])
+        if (!carMode && !(mood == Mood.SLEEP && sleepScreen)) elves.draw(canvas, t, w, h, false, cx, cy, gap, eyeW, eyeH, lastClockW, zzX, zzY, crackV[0], crackV[1])
 
         // mute button: awake only, just above the sleep button
         if (mood != Mood.SLEEP && mood != Mood.LOADING && sleepChip.isNotEmpty() && !carMode && muteAllowed) {
@@ -1120,89 +1069,356 @@ class EyesView(context: Context) : View(context) {
     private val chipRect = RectF()
     private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val chipBox = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    // ---- chore board: right side of the sleep screen. Tap a chore to tick it, "+ Add" to type a new one.
-    data class Chore(val person: String, val text: String, val done: Boolean)
+    // ---- the sleep screen: a moving background that matches the weather outside, a big clock,
+    //      weather and Christmas cards, and the to-do list. Tap a job to tick it, "+ Add" to type one.
+    data class Chore(val text: String, val done: Boolean)
     @Volatile var chores: List<Chore> = emptyList()
-    /** Laura's morning tablets card at the top of the board ("" = hidden). */
+    /** Laura's tablets card at the top of the list ("" = hidden). */
     @Volatile var tabletsCard = ""
-    private val choreRows = ArrayList<RectF>()          // row i = chores[i]; tablets card handled separately
+    /** The weather (from the forecast): kind is one of WX_*, -1 until the first forecast arrives. */
+    @Volatile var wxKind = -1
+    @Volatile var wxDay = true
+    @Volatile var wxTemp = ""
+    @Volatile var wxDesc = ""
+    @Volatile var wxLine = ""
+    @Volatile var wxWind = 0f
+    private val choreRows = ArrayList<RectF>()          // row i = chores[i]; the tablets card is separate
     private val choreAddRect = RectF()
     private val choreTabRect = RectF()
     private val chorePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val choreBox = Paint(Paint.ANTI_ALIAS_FLAG)
-    private fun personColor(p: String) = when (p.lowercase()) {
-        "sophie" -> Color.parseColor("#F9A8D4"); "amelia" -> Color.parseColor("#C4B5FD")
-        "chloe" -> Color.parseColor("#FDE68A"); "brandon" -> Color.parseColor("#93C5FD")
-        "laura" -> Color.parseColor("#FCA5A5"); "mark" -> Color.parseColor("#86EFAC")
-        else -> eyeColor
+    private val bgPaint = Paint()
+    private val blobPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val fxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
+    private val cardFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(26, 255, 255, 255) }
+    private val cardLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.argb(48, 255, 255, 255) }
+    private val wxText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val thinFace = android.graphics.Typeface.create("sans-serif-thin", android.graphics.Typeface.NORMAL)
+    private val lightFace = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
+    private val mediumFace = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+    private val boldFace = android.graphics.Typeface.DEFAULT_BOLD
+    private val seeds = Random(7).let { r -> FloatArray(120 * 4) { r.nextFloat() } }    // x, y, size, speed per particle
+    private var bgKey = ""
+    private val rr = RectF()
+    private fun soft(color: Int) = android.graphics.RadialGradient(0f, 0f, 1f,
+        intArrayOf(color, Color.argb(0, Color.red(color), Color.green(color), Color.blue(color))), null, android.graphics.Shader.TileMode.CLAMP)
+    private val glowCache = HashMap<Int, android.graphics.Shader>()
+    /** A soft round glow centred on (x, y), rx by ry, fading to nothing at the edge. */
+    private fun blob(c: Canvas, x: Float, y: Float, rx: Float, ry: Float, color: Int) {
+        blobPaint.shader = glowCache.getOrPut(color) { soft(color) }
+        c.save(); c.translate(x, y); c.scale(rx, ry); c.drawCircle(0f, 0f, 1f, blobPaint); c.restore()
     }
-    private fun fit(text: String, paint: Paint, maxW: Float): String {
+    private fun wrap(v: Float) = ((v % 1f) + 1f) % 1f
+
+    private fun drawSleepScene(c: Canvas, w: Float, h: Float, secs: Float) {
+        val kind = wxKind; val day = wxDay
+        // background colours: top -> bottom, darker at night
+        val (top, bot) = when (kind) {
+            WX_CLEAR -> if (day) "#1D4F86" to "#4F86B8" else "#040A17" to "#0E1D38"
+            WX_PARTLY -> if (day) "#2B4A6E" to "#5E7F9F" else "#060C18" to "#16233A"
+            WX_CLOUDY -> if (day) "#3A4757" to "#5F6D7D" else "#0A0F16" to "#1B232E"
+            WX_FOG -> if (day) "#4A525B" to "#6B737C" else "#101418" to "#22272D"
+            WX_RAIN, WX_STORM -> if (day) "#202B37" to "#3C4856" else "#05080D" to "#121A23"
+            WX_SNOW -> if (day) "#33435A" to "#647893" else "#0A1324" to "#1A2740"
+            else -> "#0A1324" to "#14213A"
+        }
+        val key = "$top$bot$h"
+        if (key != bgKey) {
+            bgKey = key
+            bgPaint.shader = android.graphics.LinearGradient(0f, 0f, 0f, h, Color.parseColor(top), Color.parseColor(bot), android.graphics.Shader.TileMode.CLAMP)
+        }
+        c.drawRect(0f, 0f, w, h, bgPaint)
+        val wind = 1f + (wxWind / 25f).coerceIn(0f, 2.5f)
+
+        // slow drifting glows
+        val d1 = sin(secs * 0.05f); val d2 = cos(secs * 0.037f)
+        when {
+            kind == WX_CLEAR && day -> blob(c, w * (0.82f + 0.03f * d1), h * (0.12f + 0.03f * d2), h * 0.75f, h * 0.75f, Color.argb(120, 255, 214, 120))
+            kind == WX_RAIN || kind == WX_STORM || kind == WX_FOG -> {}
+            else -> {
+                blob(c, w * (0.12f + 0.04f * d1), h * (0.1f + 0.05f * d2), h * 0.85f, h * 0.85f, Color.argb(95, 56, 110, 190))
+                blob(c, w * (0.88f + 0.04f * d2), h * (0.95f + 0.04f * d1), h, h, Color.argb(70, 120, 90, 200))
+            }
+        }
+
+        // stars and, now and then, northern lights on clear nights
+        if (!day && (kind == WX_CLEAR || kind == WX_PARTLY || kind == -1)) {
+            fxPaint.style = Paint.Style.FILL; fxPaint.color = Color.WHITE
+            for (i in 0 until 70) {
+                val x = seeds[i * 4] * w; val y = seeds[i * 4 + 1] * h * 0.7f
+                val tw = 0.5f + 0.5f * sin(secs * (0.6f + seeds[i * 4 + 3] * 1.5f) + i)
+                fxPaint.alpha = (60 + 150 * tw * seeds[i * 4 + 2]).toInt().coerceIn(0, 255)
+                c.drawCircle(x, y, h * (0.0015f + 0.0025f * seeds[i * 4 + 2]), fxPaint)
+            }
+            if (kind == WX_CLEAR) {
+                val show = (0.5f + 0.5f * sin(secs * 0.02f)).let { it * it }        // comes and goes over a few minutes
+                if (show > 0.05f) {
+                    val a = (show * 110).toInt()
+                    blob(c, w * (0.3f + 0.05f * d1), h * 0.12f, w * 0.55f, h * 0.22f, Color.argb(a, 52, 211, 153))
+                    blob(c, w * (0.62f + 0.05f * d2), h * 0.08f, w * 0.45f, h * 0.18f, Color.argb(a * 3 / 4, 56, 189, 248))
+                    blob(c, w * (0.85f - 0.04f * d1), h * 0.2f, w * 0.35f, h * 0.2f, Color.argb(a * 2 / 3, 167, 139, 250))
+                }
+            }
+        }
+
+        // clouds drifting across
+        val clouds = when (kind) { WX_PARTLY -> 3; WX_CLOUDY -> 6; WX_RAIN, WX_STORM -> 5; WX_SNOW -> 3; else -> 0 }
+        val cloudA = when { kind == WX_RAIN || kind == WX_STORM -> if (day) 60 else 40; day -> 75; else -> 38 }
+        for (i in 0 until clouds) {
+            val s = seeds[(i + 80) * 4 + 2]; val sp = 0.004f + 0.006f * seeds[(i + 80) * 4 + 3]
+            val x = (wrap(seeds[(i + 80) * 4] + secs * sp * wind) * 1.6f - 0.3f) * w
+            val y = h * (0.06f + 0.4f * seeds[(i + 80) * 4 + 1])
+            val r = h * (0.16f + 0.12f * s)
+            val col = Color.argb(cloudA, 235, 240, 248)
+            blob(c, x, y, r * 1.6f, r * 0.7f, col)
+            blob(c, x - r * 0.7f, y + r * 0.15f, r, r * 0.55f, col)
+            blob(c, x + r * 0.8f, y + r * 0.1f, r * 1.1f, r * 0.6f, col)
+        }
+
+        // fog: wide bands of mist rolling slowly
+        if (kind == WX_FOG) for (i in 0 until 5) {
+            val x = (wrap(seeds[(i + 90) * 4] + secs * 0.004f * (if (i % 2 == 0) 1f else -1f)) * 1.6f - 0.3f) * w
+            blob(c, x, h * (0.2f + 0.17f * i), w * 0.6f, h * 0.12f, Color.argb(if (day) 70 else 40, 220, 225, 230))
+        }
+
+        // rain: streaks falling on a slant (more slant when it's windy); storms flash now and then
+        if (kind == WX_RAIN || kind == WX_STORM) {
+            fxPaint.style = Paint.Style.STROKE; fxPaint.strokeWidth = h * 0.0025f; fxPaint.color = Color.rgb(190, 210, 235)
+            val slant = 0.15f * wind
+            for (i in 0 until 90) {
+                val sp = 0.9f + 0.6f * seeds[i * 4 + 3]
+                val y = wrap(seeds[i * 4 + 1] + secs * sp) * (h * 1.1f) - h * 0.05f
+                val x = wrap(seeds[i * 4] + y / h * slant * 0.3f) * w
+                val len = h * (0.03f + 0.03f * seeds[i * 4 + 2])
+                fxPaint.alpha = (50 + 70 * seeds[i * 4 + 2]).toInt()
+                c.drawLine(x, y, x - len * slant, y + len, fxPaint)
+            }
+            if (kind == WX_STORM) {
+                val ph = secs % 23f
+                if (ph < 0.12f || ph in 0.25f..0.32f) { fxPaint.style = Paint.Style.FILL; fxPaint.color = Color.WHITE; fxPaint.alpha = 70; c.drawRect(0f, 0f, w, h, fxPaint) }
+            }
+        }
+
+        // snow: flakes falling softly, wobbling side to side
+        if (kind == WX_SNOW || kind == -1) {
+            fxPaint.style = Paint.Style.FILL; fxPaint.color = Color.WHITE
+            val n = if (kind == WX_SNOW) 80 else 25
+            for (i in 0 until n) {
+                val sp = 0.035f + 0.05f * seeds[i * 4 + 3]
+                val y = wrap(seeds[i * 4 + 1] + secs * sp) * (h * 1.1f) - h * 0.05f
+                val x = wrap(seeds[i * 4] + sin(secs * 0.8f + i) * 0.01f + secs * 0.002f * (wind - 1f)) * w
+                fxPaint.alpha = (90 + 120 * seeds[i * 4 + 2]).toInt()
+                c.drawCircle(x, y, h * (0.002f + 0.004f * seeds[i * 4 + 2]), fxPaint)
+            }
+        }
+
+        // ---- the clock and date, top left
+        val pad = w * 0.044f
+        val cal = java.util.Calendar.getInstance()
+        val clock = String.format("%d:%02d", cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
+        wxText.textAlign = Paint.Align.LEFT; wxText.color = Color.WHITE; wxText.alpha = 245
+        wxText.typeface = thinFace; wxText.textSize = h * 0.29f
+        val clockBase = pad + h * 0.24f
+        c.drawText(clock, pad - h * 0.01f, clockBase, wxText)
+        lastClockW = wxText.measureText(clock)
+        wxText.typeface = mediumFace; wxText.textSize = h * 0.04f; wxText.alpha = 205
+        val date = java.text.SimpleDateFormat("EEEE d MMMM", java.util.Locale.UK).format(cal.time)
+        c.drawText(date, pad, clockBase + h * 0.075f, wxText)
+        var noteY = clockBase + h * 0.13f
+        wxText.typeface = lightFace; wxText.textSize = h * 0.028f
+        if (napNote.isNotEmpty()) { wxText.alpha = 170; c.drawText("😴 $napNote", pad, noteY, wxText); noteY += h * 0.045f }
+        if (plugNote.isNotEmpty()) { wxText.alpha = (120 + 90 * sin(secs * 2.5f)).toInt().coerceIn(20, 230); c.drawText(plugNote, pad, noteY, wxText) }
+
+        // ---- weather and Christmas cards, bottom left
+        val colR = w * 0.56f
+        val cardTop = h * 0.585f; val cardBot = h * 0.85f; val gapC = w * 0.016f
+        val xd = xmasDays()
+        val showXmas = xd in 0..120
+        val wR = if (showXmas) pad + (colR - pad - gapC) / 2 else colR
+        card(c, pad, cardTop, wR, cardBot, h)
+        val ix = pad + h * 0.075f; val iy = cardTop + h * 0.085f
+        drawWxIcon(c, if (kind < 0) WX_CLOUDY else kind, day, ix, iy, h * 0.05f)
+        wxText.typeface = lightFace; wxText.alpha = 255; wxText.textSize = h * 0.085f
+        c.drawText(if (wxTemp.isEmpty()) "–°" else wxTemp, ix + h * 0.075f, iy + h * 0.03f, wxText)
+        wxText.typeface = boldFace; wxText.textSize = h * 0.032f; wxText.alpha = 240
+        c.drawText(fitW(if (wxDesc.isEmpty()) "Getting the weather…" else wxDesc, wxText, wR - pad - h * 0.06f), pad + h * 0.03f, cardTop + h * 0.185f, wxText)
+        wxText.typeface = lightFace; wxText.textSize = h * 0.025f; wxText.alpha = 200
+        if (wxLine.isNotEmpty()) c.drawText(fitW(wxLine, wxText, wR - pad - h * 0.06f), pad + h * 0.03f, cardTop + h * 0.228f, wxText)
+        if (showXmas) {
+            val x0 = wR + gapC
+            card(c, x0, cardTop, colR, cardBot, h)
+            drawTree(c, x0 + h * 0.075f, cardTop + h * 0.085f, h * 0.055f)
+            wxText.typeface = lightFace; wxText.alpha = 255; wxText.textSize = h * 0.085f
+            c.drawText(if (xd == 0) "🎅" else "$xd", x0 + h * 0.15f, cardTop + h * 0.115f, wxText)
+            wxText.typeface = boldFace; wxText.textSize = h * 0.032f; wxText.alpha = 240
+            c.drawText(when (xd) { 0 -> "Merry Christmas!"; 1 -> "sleep till Christmas"; else -> "sleeps till Christmas" }, x0 + h * 0.03f, cardTop + h * 0.185f, wxText)
+            wxText.typeface = lightFace; wxText.textSize = h * 0.025f; wxText.alpha = 200
+            val xmasDate = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, xd) }
+            c.drawText(java.text.SimpleDateFormat("EEEE d MMMM", java.util.Locale.UK).format(xmasDate.time), x0 + h * 0.03f, cardTop + h * 0.228f, wxText)
+        }
+
+        // ---- the to-do list, right
+        drawChores(c, w * 0.6f, h * 0.07f, w - pad, h * 0.78f, h)
+
+        // VoiceID button: small, bottom middle
+        run {
+            val label = "🎙️ VoiceID Live"
+            chipPaint.textSize = h * 0.028f; chipPaint.color = Color.WHITE; chipPaint.alpha = 120
+            val p = h * 0.02f; val tw = chipPaint.measureText(label)
+            trainRect.set(w * 0.3f, h * 0.9f, w * 0.3f + tw + p * 2, h * 0.9f + chipPaint.textSize + p * 1.6f)
+            chipBox.color = Color.WHITE; chipBox.alpha = 50; chipBox.strokeWidth = h * 0.003f
+            c.drawRoundRect(trainRect, trainRect.height() / 2, trainRect.height() / 2, chipBox)
+            c.drawText(label, trainRect.left + p, trainRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
+        }
+    }
+
+    private fun card(c: Canvas, l: Float, t: Float, r: Float, b: Float, h: Float) {
+        rr.set(l, t, r, b); val rad = h * 0.04f
+        c.drawRoundRect(rr, rad, rad, cardFill)
+        cardLine.strokeWidth = h * 0.002f; c.drawRoundRect(rr, rad, rad, cardLine)
+    }
+    private fun fitW(text: String, paint: Paint, maxW: Float): String {
         if (paint.measureText(text) <= maxW) return text
         var t = text
         while (t.length > 1 && paint.measureText("$t…") > maxW) t = t.dropLast(1)
         return "$t…"
     }
-    private fun drawChores(canvas: Canvas, w: Float, h: Float) {
-        choreRows.clear(); choreTabRect.setEmpty()
-        val x0 = w * 0.765f; val x1 = w * 0.975f; val pw = x1 - x0
-        var y = h * 0.16f
-        // header + "+ Add" button
-        chorePaint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        chorePaint.textAlign = Paint.Align.LEFT
-        chorePaint.color = eyeColor; chorePaint.alpha = 170; chorePaint.textSize = h * 0.034f
-        val done = chores.count { it.done }
-        canvas.drawText(if (chores.isEmpty()) "Chores" else "Chores $done/${chores.size}", x0, y + h * 0.03f, chorePaint)
-        chorePaint.textSize = h * 0.03f
-        val addLabel = "+ Add"; val pad = h * 0.018f
-        val aw = chorePaint.measureText(addLabel) + pad * 2
-        choreAddRect.set(x1 - aw, y, x1, y + h * 0.05f)
-        choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.004f; choreBox.color = eyeColor; choreBox.alpha = 110
-        canvas.drawRoundRect(choreAddRect, choreAddRect.height() / 2, choreAddRect.height() / 2, choreBox)
-        canvas.drawText(addLabel, choreAddRect.left + pad, choreAddRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
-        y += h * 0.075f
-        // Laura's tablets: a bright card until it's ticked
-        if (tabletsCard.isNotEmpty()) {
-            val ch = h * 0.085f
-            choreTabRect.set(x0, y, x1, y + ch)
-            choreBox.style = Paint.Style.FILL; choreBox.color = Color.parseColor("#3A2C10"); choreBox.alpha = 255
-            canvas.drawRoundRect(choreTabRect, h * 0.02f, h * 0.02f, choreBox)
-            choreBox.style = Paint.Style.STROKE; choreBox.color = Color.parseColor("#FBBF24"); choreBox.alpha = (170 + 70 * sin(now() / 400.0)).toInt().coerceIn(0, 255)
-            canvas.drawRoundRect(choreTabRect, h * 0.02f, h * 0.02f, choreBox)
-            chorePaint.color = Color.parseColor("#FCD34D"); chorePaint.alpha = 255; chorePaint.textSize = h * 0.032f
-            canvas.drawText(fit(tabletsCard, chorePaint, pw - h * 0.04f), x0 + h * 0.02f, choreTabRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
-            y += ch + h * 0.02f
+    /** Days until the next Christmas Day (0 on the day). */
+    private fun xmasDays(): Int {
+        val today = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, 12); set(java.util.Calendar.MINUTE, 0) }
+        val xmas = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.MONTH, java.util.Calendar.DECEMBER); set(java.util.Calendar.DAY_OF_MONTH, 25)
+            set(java.util.Calendar.HOUR_OF_DAY, 12); set(java.util.Calendar.MINUTE, 0)
         }
-        // the chores, up to what fits above the volume button
-        val rowH = h * 0.058f; val bottom = h * 0.78f
-        chorePaint.typeface = android.graphics.Typeface.DEFAULT
-        for (c in chores) {
-            if (y + rowH > bottom) { chorePaint.alpha = 110; chorePaint.textSize = h * 0.026f; chorePaint.color = eyeColor
-                canvas.drawText("+${chores.size - choreRows.size} more", x0, y + rowH * 0.6f, chorePaint); break }
-            val r = RectF(x0, y, x1, y + rowH); choreRows.add(r)
-            val box = h * 0.03f; val bx = x0; val by = r.centerY() - box / 2
-            choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.004f; choreBox.color = personColor(c.person); choreBox.alpha = if (c.done) 120 else 200
-            rect.set(bx, by, bx + box, by + box); canvas.drawRoundRect(rect, box * 0.25f, box * 0.25f, choreBox)
-            if (c.done) {
-                choreBox.strokeWidth = h * 0.006f
-                canvas.drawLine(bx + box * 0.2f, by + box * 0.5f, bx + box * 0.42f, by + box * 0.75f, choreBox)
-                canvas.drawLine(bx + box * 0.42f, by + box * 0.75f, bx + box * 0.82f, by + box * 0.25f, choreBox)
+        if (xmas.before(today) && today.get(java.util.Calendar.DAY_OF_YEAR) != xmas.get(java.util.Calendar.DAY_OF_YEAR)) xmas.add(java.util.Calendar.YEAR, 1)
+        return Math.round((xmas.timeInMillis - today.timeInMillis) / 86_400_000.0).toInt()
+    }
+    private fun drawTree(c: Canvas, x: Float, y: Float, s: Float) {
+        val p = android.graphics.Path()
+        p.moveTo(x, y - s); p.lineTo(x + s * 0.45f, y - s * 0.35f); p.lineTo(x + s * 0.25f, y - s * 0.35f)
+        p.lineTo(x + s * 0.7f, y + s * 0.3f); p.lineTo(x + s * 0.4f, y + s * 0.3f); p.lineTo(x + s * 0.85f, y + s * 0.85f)
+        p.lineTo(x - s * 0.85f, y + s * 0.85f); p.lineTo(x - s * 0.4f, y + s * 0.3f); p.lineTo(x - s * 0.7f, y + s * 0.3f)
+        p.lineTo(x - s * 0.25f, y - s * 0.35f); p.lineTo(x - s * 0.45f, y - s * 0.35f); p.close()
+        fxPaint.style = Paint.Style.FILL; fxPaint.color = Color.parseColor("#34D399"); c.drawPath(p, fxPaint)
+        fxPaint.color = Color.parseColor("#A16207"); c.drawRect(x - s * 0.12f, y + s * 0.85f, x + s * 0.12f, y + s * 1.15f, fxPaint)
+        fxPaint.color = Color.parseColor("#FCD34D"); c.drawCircle(x, y - s, s * 0.13f, fxPaint)
+        fxPaint.color = Color.parseColor("#F87171"); c.drawCircle(x - s * 0.2f, y - s * 0.05f, s * 0.08f, fxPaint)
+        fxPaint.color = Color.parseColor("#FCD34D"); c.drawCircle(x + s * 0.25f, y + s * 0.5f, s * 0.08f, fxPaint)
+        fxPaint.color = Color.parseColor("#93C5FD"); c.drawCircle(x - s * 0.3f, y + s * 0.65f, s * 0.08f, fxPaint)
+    }
+    private fun drawCloud(c: Canvas, x: Float, y: Float, s: Float, col: Int) {
+        fxPaint.style = Paint.Style.FILL; fxPaint.color = col
+        c.drawCircle(x - s * 0.4f, y + s * 0.1f, s * 0.42f, fxPaint)
+        c.drawCircle(x + s * 0.1f, y - s * 0.15f, s * 0.55f, fxPaint)
+        c.drawCircle(x + s * 0.6f, y + s * 0.12f, s * 0.4f, fxPaint)
+        rr.set(x - s * 0.8f, y + s * 0.1f, x + s * 0.98f, y + s * 0.52f); c.drawRoundRect(rr, s * 0.21f, s * 0.21f, fxPaint)
+    }
+    private fun drawSun(c: Canvas, x: Float, y: Float, s: Float) {
+        fxPaint.color = Color.parseColor("#FCD34D"); fxPaint.style = Paint.Style.FILL
+        c.drawCircle(x, y, s * 0.42f, fxPaint)
+        fxPaint.style = Paint.Style.STROKE; fxPaint.strokeWidth = s * 0.1f
+        for (k in 0 until 8) {
+            val a = Math.toRadians(k * 45.0); val cx = cos(a).toFloat(); val sy = sin(a).toFloat()
+            c.drawLine(x + cx * s * 0.6f, y + sy * s * 0.6f, x + cx * s * 0.82f, y + sy * s * 0.82f, fxPaint)
+        }
+    }
+    private fun drawMoon(c: Canvas, x: Float, y: Float, s: Float, behind: Int) {
+        fxPaint.style = Paint.Style.FILL; fxPaint.color = Color.parseColor("#FDE68A"); c.drawCircle(x, y, s * 0.5f, fxPaint)
+        fxPaint.color = behind; c.drawCircle(x + s * 0.25f, y - s * 0.18f, s * 0.42f, fxPaint)
+    }
+    /** A little weather picture, about 2s wide, centred on (x, y). */
+    private fun drawWxIcon(c: Canvas, kind: Int, day: Boolean, x: Float, y: Float, s: Float) {
+        val behind = Color.parseColor("#2A3446")        // roughly the card colour, for the moon's bite
+        val grey = Color.parseColor("#E2E8F0"); val dark = Color.parseColor("#94A3B8")
+        when (kind) {
+            WX_CLEAR -> if (day) drawSun(c, x, y, s) else drawMoon(c, x, y, s * 1.4f, behind)
+            WX_PARTLY -> { if (day) drawSun(c, x - s * 0.35f, y - s * 0.35f, s * 0.9f) else drawMoon(c, x - s * 0.3f, y - s * 0.35f, s, behind)
+                drawCloud(c, x + s * 0.15f, y + s * 0.2f, s * 0.75f, grey) }
+            WX_CLOUDY -> { drawCloud(c, x - s * 0.3f, y - s * 0.25f, s * 0.6f, dark); drawCloud(c, x + s * 0.1f, y + s * 0.1f, s * 0.75f, grey) }
+            WX_FOG -> { fxPaint.style = Paint.Style.STROKE; fxPaint.color = grey; fxPaint.strokeWidth = s * 0.14f
+                for (k in 0 until 3) c.drawLine(x - s * (0.8f - 0.15f * (k % 2)), y - s * 0.4f + k * s * 0.4f, x + s * (0.8f - 0.15f * ((k + 1) % 2)), y - s * 0.4f + k * s * 0.4f, fxPaint) }
+            WX_RAIN, WX_STORM -> {
+                drawCloud(c, x, y - s * 0.3f, s * 0.75f, grey)
+                if (kind == WX_STORM) { fxPaint.style = Paint.Style.FILL; fxPaint.color = Color.parseColor("#FCD34D")
+                    val p = android.graphics.Path(); p.moveTo(x + s * 0.05f, y + s * 0.2f); p.lineTo(x - s * 0.25f, y + s * 0.65f)
+                    p.lineTo(x, y + s * 0.6f); p.lineTo(x - s * 0.15f, y + s * 1.0f); p.lineTo(x + s * 0.25f, y + s * 0.5f); p.lineTo(x, y + s * 0.52f); p.close(); c.drawPath(p, fxPaint) }
+                else { fxPaint.style = Paint.Style.STROKE; fxPaint.color = Color.parseColor("#93C5FD"); fxPaint.strokeWidth = s * 0.1f
+                    for (k in 0 until 3) { val dx = x - s * 0.45f + k * s * 0.45f; c.drawLine(dx, y + s * 0.42f, dx - s * 0.12f, y + s * 0.75f, fxPaint) } }
             }
-            val tx = bx + box + h * 0.018f
-            chorePaint.textSize = h * 0.028f; chorePaint.color = personColor(c.person); chorePaint.alpha = if (c.done) 110 else 230
-            chorePaint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-            val name = c.person + " "
-            canvas.drawText(name, tx, r.centerY() + chorePaint.textSize * 0.35f, chorePaint)
-            val nx = tx + chorePaint.measureText(name)
-            chorePaint.typeface = android.graphics.Typeface.DEFAULT
-            chorePaint.color = Color.argb(if (c.done) 110 else 220, 232, 236, 242)
-            chorePaint.isStrikeThruText = c.done
-            canvas.drawText(fit(c.text, chorePaint, x1 - nx), nx, r.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+            WX_SNOW -> { drawCloud(c, x, y - s * 0.3f, s * 0.75f, grey); fxPaint.style = Paint.Style.FILL; fxPaint.color = Color.WHITE
+                for (k in 0 until 3) c.drawCircle(x - s * 0.45f + k * s * 0.45f, y + s * (0.55f + 0.15f * (k % 2)), s * 0.1f, fxPaint) }
+        }
+    }
+
+    private fun drawChores(c: Canvas, x0: Float, top: Float, x1: Float, bottom: Float, h: Float) {
+        choreRows.clear(); choreTabRect.setEmpty()
+        card(c, x0, top, x1, bottom, h)
+        val ip = h * 0.035f
+        val l = x0 + ip; val r = x1 - ip
+        var y = top + ip
+        // header: "To do", how many left, and the + Add button
+        val left = chores.count { !it.done } + (if (tabletsCard.isNotEmpty()) 1 else 0)
+        chorePaint.textAlign = Paint.Align.LEFT; chorePaint.color = Color.WHITE
+        chorePaint.typeface = boldFace; chorePaint.textSize = h * 0.042f; chorePaint.alpha = 250
+        c.drawText("To do", l, y + h * 0.04f, chorePaint)
+        chorePaint.typeface = lightFace; chorePaint.textSize = h * 0.022f; chorePaint.alpha = 190
+        c.drawText(if (left == 0) "All done" else "$left left · tap to tick", l, y + h * 0.075f, chorePaint)
+        chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.026f; chorePaint.alpha = 250
+        val addLabel = "+ Add"; val ap = h * 0.026f
+        val aw = chorePaint.measureText(addLabel) + ap * 2
+        choreAddRect.set(r - aw, y + h * 0.005f, r, y + h * 0.065f)
+        choreBox.style = Paint.Style.FILL; choreBox.color = Color.argb(34, 255, 255, 255)
+        c.drawRoundRect(choreAddRect, choreAddRect.height() / 2, choreAddRect.height() / 2, choreBox)
+        choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.002f; choreBox.color = Color.argb(80, 255, 255, 255)
+        c.drawRoundRect(choreAddRect, choreAddRect.height() / 2, choreAddRect.height() / 2, choreBox)
+        c.drawText(addLabel, choreAddRect.left + ap, choreAddRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+        y += h * 0.1f
+        val rowH = h * 0.072f; val gapR = h * 0.012f; val box = h * 0.034f; val rad = h * 0.022f
+        // Laura's tablets: a gold card until it's ticked
+        if (tabletsCard.isNotEmpty()) {
+            choreTabRect.set(l, y, r, y + rowH)
+            choreBox.style = Paint.Style.FILL; choreBox.color = Color.argb(40, 251, 191, 36)
+            c.drawRoundRect(choreTabRect, rad, rad, choreBox)
+            choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.003f; choreBox.color = Color.parseColor("#FBBF24")
+            choreBox.alpha = (190 + 60 * sin(now() / 500.0)).toInt().coerceIn(0, 255)
+            c.drawRoundRect(choreTabRect, rad, rad, choreBox)
+            val bx = l + h * 0.022f; val by = choreTabRect.centerY() - box / 2
+            choreBox.alpha = 255; rr.set(bx, by, bx + box, by + box); c.drawRoundRect(rr, box * 0.28f, box * 0.28f, choreBox)
+            chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.031f; chorePaint.color = Color.WHITE; chorePaint.alpha = 255
+            val tx = bx + box + h * 0.022f
+            c.drawText(fitW(tabletsCard, chorePaint, r - tx - h * 0.02f), tx, choreTabRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+            y += rowH + gapR
+        }
+        for (ch in chores) {
+            if (y + rowH > bottom - ip * 0.5f) {
+                chorePaint.typeface = lightFace; chorePaint.textSize = h * 0.024f; chorePaint.color = Color.WHITE; chorePaint.alpha = 170
+                c.drawText("+${chores.size - choreRows.size} more", l + h * 0.022f, y + h * 0.03f, chorePaint); break
+            }
+            val row = RectF(l, y, r, y + rowH); choreRows.add(row)
+            if (!ch.done) { choreBox.style = Paint.Style.FILL; choreBox.color = Color.argb(16, 255, 255, 255); c.drawRoundRect(row, rad, rad, choreBox) }
+            val bx = l + h * 0.022f; val by = row.centerY() - box / 2
+            rr.set(bx, by, bx + box, by + box)
+            if (ch.done) {
+                choreBox.style = Paint.Style.FILL; choreBox.color = Color.parseColor("#34D399"); choreBox.alpha = 170
+                c.drawRoundRect(rr, box * 0.28f, box * 0.28f, choreBox)
+                choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.005f; choreBox.color = Color.parseColor("#0A1324")
+                c.drawLine(bx + box * 0.22f, by + box * 0.52f, bx + box * 0.43f, by + box * 0.73f, choreBox)
+                c.drawLine(bx + box * 0.43f, by + box * 0.73f, bx + box * 0.8f, by + box * 0.3f, choreBox)
+            } else {
+                choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.003f; choreBox.color = Color.argb(160, 255, 255, 255)
+                c.drawRoundRect(rr, box * 0.28f, box * 0.28f, choreBox)
+            }
+            val tx = bx + box + h * 0.022f
+            chorePaint.typeface = if (ch.done) lightFace else mediumFace; chorePaint.textSize = h * 0.03f
+            chorePaint.color = Color.WHITE; chorePaint.alpha = if (ch.done) 140 else 245
+            chorePaint.isStrikeThruText = ch.done
+            c.drawText(fitW(ch.text, chorePaint, r - tx - h * 0.02f), tx, row.centerY() + chorePaint.textSize * 0.35f, chorePaint)
             chorePaint.isStrikeThruText = false
-            y += rowH
+            y += rowH + gapR
         }
         if (chores.isEmpty() && tabletsCard.isEmpty()) {
-            chorePaint.textSize = h * 0.026f; chorePaint.color = eyeColor; chorePaint.alpha = 90
-            canvas.drawText("Nothing to do. Tap + Add", x0, y + h * 0.03f, chorePaint)
+            chorePaint.typeface = lightFace; chorePaint.textSize = h * 0.026f; chorePaint.color = Color.WHITE; chorePaint.alpha = 160
+            c.drawText("Nothing to do. Tap + Add", l + h * 0.01f, y + h * 0.03f, chorePaint)
         }
     }
     /** What was tapped on the chore board: a chore's index, ADD, TABLETS, or -1 for nothing. */
