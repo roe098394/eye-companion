@@ -2041,9 +2041,11 @@ class MainActivity : Activity() {
         return true
     }
 
-    // ---- to-do list on the sleep screen: anyone can type a job in with the keyboard.
+    // ---- to-do list on the sleep screen: everyday house jobs appear by themselves, anyone can type more in.
     //      Tick one and Pip wakes, looks to see who it is, says a short well done, then goes back to sleep.
-    private fun loadChores(): MutableList<Pair<String, String>> {      // job, day ticked ("" = not yet)
+    /** A job on the list: [key] is set for the automatic ones, [typed] is its place in the typed list otherwise. */
+    private data class Job(val key: String?, val typed: Int, val text: String, val done: Boolean)
+    private fun loadTyped(): MutableList<Pair<String, String>> {      // job, day ticked ("" = not yet)
         val out = ArrayList<Pair<String, String>>()
         try {
             val a = org.json.JSONArray(prefs.getString("chores", "[]") ?: "[]")
@@ -2053,30 +2055,94 @@ class MainActivity : Activity() {
         } catch (_: Exception) {}
         return out
     }
-    private fun saveChores(list: List<Pair<String, String>>) {
+    private fun saveTyped(list: List<Pair<String, String>>) {
         val a = org.json.JSONArray()
         list.forEach { (t, d) -> a.put(org.json.JSONObject().put("t", t).put("d", d)) }
         prefs.edit().putString("chores", a.toString()).apply()
         refreshChores()
     }
+    /** "yyyy-MM-dd|a,b,c" kept for today only. */
+    private fun todaySet(key: String): MutableSet<String> {
+        val v = prefs.getString(key, "") ?: ""
+        return if (v.startsWith("$todayKey|")) v.substringAfter("|").split(",").filter { it.isNotEmpty() }.toMutableSet() else mutableSetOf()
+    }
+    private fun saveTodaySet(key: String, set: Set<String>) { prefs.edit().putString(key, "$todayKey|" + set.joinToString(",")).apply() }
+    private fun binNightKey() = binThursday()?.let { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(it.time) }
+    /** Today's everyday jobs (key to words). */
+    private fun autoJobs(): List<Pair<String, String>> {
+        val cal = java.util.Calendar.getInstance()
+        val dow = cal.get(java.util.Calendar.DAY_OF_WEEK); val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val out = ArrayList<Pair<String, String>>()
+        out += "beds" to "Make the beds"
+        out += "dishes" to "Wash the dishes"
+        out += "sides" to "Wipe the kitchen sides"
+        out += "honey" to "Feed Honey"
+        if (dow in java.util.Calendar.MONDAY..java.util.Calendar.FRIDAY) out += "lunch" to "Pack lunch made"
+        if (dow in java.util.Calendar.SUNDAY..java.util.Calendar.THURSDAY) out += "uniform" to "Uniforms washed"
+        when (dow) {
+            java.util.Calendar.MONDAY -> out += "hoover1" to "Hoover downstairs"
+            java.util.Calendar.TUESDAY -> out += "bathroom" to "Clean the bathroom"
+            java.util.Calendar.WEDNESDAY -> if (hour >= 18) out += "bins" to (if (blackBinWeek()) "Both black bins out" else "Green bin out")
+            java.util.Calendar.THURSDAY -> out += "binsin" to "Bring the bins back in"
+            java.util.Calendar.FRIDAY -> out += "hamster" to "Clean the hamster cage"
+            java.util.Calendar.SATURDAY -> { out += "sheets" to "Change the bed sheets"; out += "hoover2" to "Hoover upstairs" }
+            java.util.Calendar.SUNDAY -> { out += "bath" to "Chloe's bath"; out += "washing" to "Do the washing" }
+        }
+        if (hour >= 20) out += "rubbish" to "Rubbish out"
+        val skip = todaySet("autoSkip")
+        return out.filter { it.first !in skip }
+    }
+    /** Ticked here, or already done another way (told Pip the dog's fed, bins are out...). */
+    private fun autoDone(key: String, ticked: Set<String>): Boolean = key in ticked || when (key) {
+        "honey" -> prefs.getString("dogDone", "") == todayKey
+        "bins" -> binNightKey()?.let { prefs.getString("binsDone", "") == it } ?: false
+        "rubbish" -> prefs.getString("rubbishDone", "") == cuppaDayKey
+        else -> false
+    }
+    private fun jobs(): List<Job> {
+        val ticked = todaySet("autoDone")
+        return autoJobs().map { (k, t) -> Job(k, -1, t, autoDone(k, ticked)) } +
+            loadTyped().mapIndexed { i, (t, d) -> Job(null, i, t, d.isNotEmpty()) }
+    }
     private fun refreshChores() {
-        eyes.chores = loadChores().map { EyesView.Chore(it.first, it.second.isNotEmpty()) }
+        eyes.chores = jobs().map { EyesView.Chore(it.text, it.done) }
         eyes.tabletsCard = if (tabletsDue()) "$tabletPerson's tablets" else ""
+        eyes.teethRow = FAMILY.map { it to teethToday(it) }
+        eyes.todoHidden = prefs.getBoolean("todoHidden", false)
     }
     private fun choreTapped(hit: Int) {
         when (hit) {
             EyesView.CHORE_ADD -> showAddChore()
+            EyesView.CHORE_HIDE -> { prefs.edit().putBoolean("todoHidden", true).apply(); refreshChores() }
+            EyesView.CHORE_SHOW -> { prefs.edit().putBoolean("todoHidden", false).apply(); refreshChores() }
+            EyesView.CHORE_TEETH -> teethTapped()
             EyesView.CHORE_TABLETS -> {
                 prefs.edit().putString("tabletsDone", todayKey).apply(); refreshChores()
                 praiseWhoTicked("taking her tablets", tabletPerson)
             }
             else -> {
-                val list = loadChores(); val c = list.getOrNull(hit) ?: return
-                if (c.second.isNotEmpty()) { list[hit] = c.first to ""; saveChores(list); return }     // tapped a ticked one: untick it
-                list[hit] = c.first to todayKey; saveChores(list)
-                praiseWhoTicked(c.first, null)
+                val job = jobs().getOrNull(hit) ?: return
+                setJobDone(job, !job.done)
+                if (!job.done) praiseWhoTicked(job.text, null)
             }
         }
+    }
+    private fun setJobDone(job: Job, done: Boolean) {
+        if (job.key == null) {
+            val list = loadTyped(); val c = list.getOrNull(job.typed) ?: return
+            list[job.typed] = c.first to (if (done) todayKey else ""); saveTyped(list); return
+        }
+        val ticked = todaySet("autoDone"); if (done) ticked += job.key else ticked -= job.key
+        saveTodaySet("autoDone", ticked)
+        // the same jobs Pip already nags about: tick those off too, so the nagging stops
+        val e = prefs.edit()
+        when (job.key) {
+            "honey" -> e.putString("dogDone", if (done) todayKey else "")
+            "bins" -> { e.putString("binsDone", if (done) binNightKey() ?: "" else ""); if (done) e.putBoolean("binsDoneWeek_" + weekKey(), true) }
+            "rubbish" -> e.putString("rubbishDone", if (done) cuppaDayKey else "")
+        }
+        e.apply()
+        refreshChores()
     }
     /** Wake up, look at whoever ticked it, a short well done by name, then back to sleep. */
     private fun praiseWhoTicked(what: String, forWho: String?) {
@@ -2101,7 +2167,7 @@ class MainActivity : Activity() {
             }
         }, 1500)
     }
-    /** Type a job for the to-do list. "Remove one" deletes a mistake. */
+    /** Type a job for the to-do list. "Remove one" takes a job off (an everyday one just for today). */
     private fun showAddChore() {
         val pad = (16 * resources.displayMetrics.density).toInt()
         val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(pad * 2, pad, pad * 2, 0) }
@@ -2114,7 +2180,7 @@ class MainActivity : Activity() {
         fun add(): Boolean {
             val what = edit.text.toString().trim()
             if (what.isEmpty()) return false
-            saveChores(loadChores() + (what to ""))
+            saveTyped(loadTyped() + (what to ""))
             return true
         }
         val d = AlertDialog.Builder(this).setTitle("Add to the to-do list").setView(box)
@@ -2128,11 +2194,84 @@ class MainActivity : Activity() {
         edit.requestFocus()
     }
     private fun showRemoveChore() {
-        val list = loadChores()
+        val list = jobs()
         if (list.isEmpty()) return
         AlertDialog.Builder(this).setTitle("Remove which one?")
-            .setItems(list.map { it.first }.toTypedArray()) { _, i -> saveChores(list.filterIndexed { j, _ -> j != i }) }
+            .setItems(list.map { if (it.key != null) "${it.text} (just today)" else it.text }.toTypedArray()) { _, i ->
+                val j = list[i]
+                if (j.key != null) { saveTodaySet("autoSkip", todaySet("autoSkip") + j.key); refreshChores() }
+                else saveTyped(loadTyped().filterIndexed { k, _ -> k != j.typed })
+            }
             .setNegativeButton("Cancel", null).showOwn()
+    }
+
+    // ---- teeth: tap the teeth row, Pip works out who you are (or you tap your name), and your score goes up.
+    //      Scores never reset. Up to two a day (morning and night), streaks for both done days in a row, badges.
+    private fun teethToday(n: String): Int = if (prefs.getString("teethDay_$n", "") == todayKey) prefs.getInt("teethN_$n", 0) else 0
+    private var teethAsking = 0L
+    private fun teethTapped() {
+        if (System.currentTimeMillis() - teethAsking < 30_000) return
+        teethAsking = System.currentTimeMillis()
+        val wasAsleep = phase == Phase.ASLEEP; val wasNapping = napping
+        if (wasAsleep) wakeUp()
+        eyes.feel(EyesView.Emotion.HAPPY, 6000)
+        fun ask() {
+            speakLine("[curious] Who's brushed their teeth? Tap your name.")
+            var picked = false
+            showChoices(FAMILY, big = true) { pick -> picked = true; hideChoices(); awardTeeth(pick, wasAsleep, wasNapping) }
+            main.postDelayed({ if (!picked) { hideChoices(); teethAsking = 0L; if (wasAsleep) sleepAfterTalking(nap = wasNapping) } }, 30_000)
+        }
+        main.postDelayed({
+            lookThroughCamera { jpeg ->
+                val who = if (jpeg != null && online.enabled && !online.allResting)
+                    online.lookAt(jpeg, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0)
+                        ?.trim()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } else null
+                main.post {
+                    val name = who?.let { w -> FAMILY.firstOrNull { it.equals(w, true) } }
+                    if (name != null) { whoSeen = who ?: ""; awardTeeth(name, wasAsleep, wasNapping) } else ask()
+                }
+            }
+        }, 1200)
+    }
+    private fun awardTeeth(name: String, wasAsleep: Boolean, wasNapping: Boolean) {
+        teethAsking = 0L
+        val now = System.currentTimeMillis()
+        val n = teethToday(name)
+        fun after(line: String) { speakLine(line); if (wasAsleep) sleepAfterTalking(nap = wasNapping) }
+        if (n >= 2) { after("[happy] $name, you've done both already today. Proper sparkly."); return }
+        if (n == 1 && now - prefs.getLong("teethLast_$name", 0) < 3 * 3_600_000L) {
+            after("[suspicious] $name, you only brushed a little while ago. The next one counts later."); return
+        }
+        val from = prefs.getInt("teeth_$name", 0); val to = from + 1
+        val e = prefs.edit().putInt("teeth_$name", to).putString("teethDay_$name", todayKey).putInt("teethN_$name", n + 1).putLong("teethLast_$name", now)
+        val yesterday = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK)
+            .format(java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }.time)
+        val lastFull = prefs.getString("teethFull_$name", "") ?: ""
+        var streak = prefs.getInt("teethStreak_$name", 0)
+        if (n + 1 == 2) {                                      // both done today: the streak grows
+            streak = if (lastFull == yesterday) streak + 1 else 1
+            e.putString("teethFull_$name", todayKey).putInt("teethStreak_$name", streak)
+        } else if (lastFull != yesterday && lastFull != todayKey) streak = 0
+        e.apply()
+        val badge = when {
+            to == 10 -> "🥉 Bronze tooth!"; to == 50 -> "🥈 Silver tooth!"; to == 100 -> "🥇 Gold tooth!"
+            to == 365 -> "💎 Diamond tooth!"; to > 365 && to % 100 == 0 -> "💎 $to brushes!"; else -> ""
+        }
+        eyes.celebrateTeeth(name, from, to, streak, badge)
+        refreshChores()
+        try {
+            val tg = android.media.ToneGenerator(AudioManager.STREAM_MUSIC, 70)
+            main.postDelayed({ tg.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 250) }, 1300)
+            if (badge.isNotEmpty()) main.postDelayed({ tg.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 250) }, 1700)
+            main.postDelayed({ tg.release() }, 3000)
+        } catch (_: Exception) {}
+        val line = if (badge.isNotEmpty()) listOf("[excited] $name! $to brushes! ${badge.drop(2).trim().trimEnd('!')}! Look at those teeth go.",
+                "[excited] Whoa, $name. $to! That's a ${badge.drop(2).trim().trimEnd('!').lowercase()}. Shiny.").fresh()
+            else listOf("[happy] Sparkly teeth, $name. That's $to.", "[happy] Nice one, $name. $to brushes.",
+                "[happy] Minty fresh, $name. $to and counting.", "[happy] $name, $to. Your teeth thank you.",
+                "[happy] Clean teeth, $name. That's $to now.").fresh() +
+                (if (streak >= 2 && n + 1 == 2) " $streak days in a row!" else "")
+        main.postDelayed({ after(line) }, 1500)
     }
 
     // ---- weather for the sleep screen (free forecast, no key): checked every half hour

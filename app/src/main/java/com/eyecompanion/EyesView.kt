@@ -22,7 +22,7 @@ class EyesView(context: Context) : View(context) {
     companion object {
         const val KS_STEAM = 1; const val KS_RACE = 2; const val KS_HANDS = 3; const val KS_SHIFTY = 4
         const val KS_HEARTBREAK = 5; const val KS_TALLY = 6; const val KS_BUBBLES = 7
-        const val CHORE_ADD = -10; const val CHORE_TABLETS = -11
+        const val CHORE_ADD = -10; const val CHORE_TABLETS = -11; const val CHORE_TEETH = -12; const val CHORE_HIDE = -13; const val CHORE_SHOW = -14
         const val WX_CLEAR = 0; const val WX_PARTLY = 1; const val WX_CLOUDY = 2; const val WX_FOG = 3
         const val WX_RAIN = 4; const val WX_SNOW = 5; const val WX_STORM = 6
     }
@@ -742,6 +742,7 @@ class EyesView(context: Context) : View(context) {
             canvas.drawText(label, muteRect.left + pad, muteRect.centerY() + chipPaint.textSize * 0.35f, chipPaint)
         } else muteRect.setEmpty()
 
+        if (teethAt > 0L) drawTeethParty(canvas, w, h, t)
         canvas.restore()                                  // (the upright frame)
         postInvalidateOnAnimation()
     }
@@ -1075,6 +1076,13 @@ class EyesView(context: Context) : View(context) {
     @Volatile var chores: List<Chore> = emptyList()
     /** Laura's tablets card at the top of the list ("" = hidden). */
     @Volatile var tabletsCard = ""
+    /** Teeth row: each person and how many times they've brushed today (empty = no row). */
+    @Volatile var teethRow: List<Pair<String, Int>> = emptyList()
+    /** The to-do list folded away (visitors round). */
+    @Volatile var todoHidden = false
+    private val choreTeethRect = RectF()
+    private val choreHideRect = RectF()
+    private val choreShowRect = RectF()
     /** The weather (from the forecast): kind is one of WX_*, -1 until the first forecast arrives. */
     @Volatile var wxKind = -1
     @Volatile var wxDay = true
@@ -1230,7 +1238,7 @@ class EyesView(context: Context) : View(context) {
         if (plugNote.isNotEmpty()) { wxText.alpha = (120 + 90 * sin(secs * 2.5f)).toInt().coerceIn(20, 230); c.drawText(plugNote, pad, noteY, wxText) }
 
         // ---- weather and Christmas cards, bottom left
-        val colR = w * 0.56f
+        val colR = if (todoHidden) w - pad else w * 0.56f
         val cardTop = h * 0.585f; val cardBot = h * 0.85f; val gapC = w * 0.016f
         val xd = xmasDays()
         val showXmas = xd in 0..120
@@ -1257,8 +1265,18 @@ class EyesView(context: Context) : View(context) {
             c.drawText(java.text.SimpleDateFormat("EEEE d MMMM", java.util.Locale.UK).format(xmasDate.time), x0 + h * 0.03f, cardTop + h * 0.228f, wxText)
         }
 
-        // ---- the to-do list, right
-        drawChores(c, w * 0.6f, h * 0.07f, w - pad, h * 0.78f, h)
+        // ---- the to-do list, right (or just a small "Show to-do" button when it's hidden)
+        choreShowRect.setEmpty()
+        if (todoHidden) {
+            choreRows.clear(); choreTabRect.setEmpty(); choreTeethRect.setEmpty(); choreAddRect.setEmpty(); choreHideRect.setEmpty()
+            chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.026f; chorePaint.color = Color.WHITE; chorePaint.alpha = 150
+            chorePaint.textAlign = Paint.Align.LEFT
+            val label = "Show to-do"; val ap = h * 0.024f; val tw = chorePaint.measureText(label)
+            choreShowRect.set(w - pad - tw - ap * 2, pad, w - pad, pad + h * 0.06f)
+            choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.002f; choreBox.color = Color.argb(70, 255, 255, 255)
+            c.drawRoundRect(choreShowRect, choreShowRect.height() / 2, choreShowRect.height() / 2, choreBox)
+            c.drawText(label, choreShowRect.left + ap, choreShowRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+        } else drawChores(c, w * 0.6f, h * 0.07f, w - pad, h * 0.78f, h)
 
         // VoiceID button: small, bottom middle
         run {
@@ -1372,6 +1390,12 @@ class EyesView(context: Context) : View(context) {
         choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.002f; choreBox.color = Color.argb(80, 255, 255, 255)
         c.drawRoundRect(choreAddRect, choreAddRect.height() / 2, choreAddRect.height() / 2, choreBox)
         c.drawText(addLabel, choreAddRect.left + ap, choreAddRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+        val hideLabel = "Hide"; val hw = chorePaint.measureText(hideLabel) + ap * 2
+        choreHideRect.set(choreAddRect.left - h * 0.015f - hw, choreAddRect.top, choreAddRect.left - h * 0.015f, choreAddRect.bottom)
+        choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.002f; choreBox.color = Color.argb(60, 255, 255, 255)
+        c.drawRoundRect(choreHideRect, choreHideRect.height() / 2, choreHideRect.height() / 2, choreBox)
+        chorePaint.alpha = 190
+        c.drawText(hideLabel, choreHideRect.left + ap, choreHideRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
         y += h * 0.1f
         val rowH = h * 0.072f; val gapR = h * 0.012f; val box = h * 0.034f; val rad = h * 0.022f
         // Laura's tablets: a gold card until it's ticked
@@ -1387,6 +1411,31 @@ class EyesView(context: Context) : View(context) {
             chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.031f; chorePaint.color = Color.WHITE; chorePaint.alpha = 255
             val tx = bx + box + h * 0.022f
             c.drawText(fitW(tabletsCard, chorePaint, r - tx - h * 0.02f), tx, choreTabRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+            y += rowH + gapR
+        }
+        // brush teeth: everyone's initial lights up when they've brushed today (two dots = morning and night)
+        choreTeethRect.setEmpty()
+        if (teethRow.isNotEmpty()) {
+            choreTeethRect.set(l, y, r, y + rowH)
+            choreBox.style = Paint.Style.FILL; choreBox.color = Color.argb(30, 147, 197, 253)
+            c.drawRoundRect(choreTeethRect, rad, rad, choreBox)
+            chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.03f; chorePaint.color = Color.WHITE; chorePaint.alpha = 245
+            c.drawText("🪥 Teeth", l + h * 0.022f, choreTeethRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+            val dr = h * 0.021f; val step = dr * 2.45f
+            var dx = r - h * 0.02f - dr - (teethRow.size - 1) * step
+            chorePaint.typeface = boldFace; chorePaint.textSize = dr * 1.1f; chorePaint.textAlign = Paint.Align.CENTER
+            for ((name, n) in teethRow) {
+                val cy = choreTeethRect.centerY() - h * 0.004f
+                choreBox.style = Paint.Style.FILL; choreBox.color = if (n > 0) Color.parseColor("#7DD3FC") else Color.argb(30, 255, 255, 255)
+                if (n == 1) choreBox.alpha = 150
+                c.drawCircle(dx, cy, dr, choreBox)
+                chorePaint.color = if (n > 0) Color.parseColor("#0A1324") else Color.WHITE; chorePaint.alpha = if (n > 0) 255 else 150
+                c.drawText(name.take(1), dx, cy + chorePaint.textSize * 0.36f, chorePaint)
+                choreBox.color = Color.WHITE
+                for (k in 0 until 2) { choreBox.alpha = if (k < n) 230 else 45; c.drawCircle(dx - dr * 0.35f + k * dr * 0.7f, cy + dr * 1.45f, dr * 0.17f, choreBox) }
+                dx += step
+            }
+            chorePaint.textAlign = Paint.Align.LEFT
             y += rowH + gapR
         }
         for (ch in chores) {
@@ -1421,14 +1470,138 @@ class EyesView(context: Context) : View(context) {
             c.drawText("Nothing to do. Tap + Add", l + h * 0.01f, y + h * 0.03f, chorePaint)
         }
     }
+    // ---- teeth brushed: a happy tooth getting scrubbed, foam and sparkles, the name and the score ticking up
+    @Volatile var teethAt = 0L
+    private var teethName = ""; private var teethFrom = 0; private var teethTo = 0
+    private var teethStreak = 0; private var teethBadge = ""
+    fun celebrateTeeth(name: String, from: Int, to: Int, streak: Int, badge: String) {
+        teethName = name; teethFrom = from; teethTo = to; teethStreak = streak; teethBadge = badge; teethAt = now()
+    }
+    private val partyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val toothPath = android.graphics.Path()
+    private fun teethColor(n: String) = when (n.lowercase()) {
+        "sophie" -> Color.parseColor("#F9A8D4"); "amelia" -> Color.parseColor("#C4B5FD"); "chloe" -> Color.parseColor("#FDE68A")
+        "brandon" -> Color.parseColor("#93C5FD"); "laura" -> Color.parseColor("#FCA5A5"); "mark" -> Color.parseColor("#86EFAC")
+        else -> Color.parseColor("#7DD3FC")
+    }
+    private fun drawTeethParty(c: Canvas, w: Float, h: Float, t: Long) {
+        val big = teethBadge.isNotEmpty()
+        val dur = if (big) 9000f else 7000f
+        val e = (t - teethAt) / 1000f
+        if (e * 1000f > dur) { teethAt = 0L; return }
+        val fade = min(1f, min(e / 0.35f, (dur / 1000f - e) / 0.5f)).coerceIn(0f, 1f)
+        partyPaint.shader = null; partyPaint.style = Paint.Style.FILL
+        partyPaint.color = Color.BLACK; partyPaint.alpha = (215 * fade).toInt(); c.drawRect(0f, 0f, w, h, partyPaint)
+        val a = (255 * fade).toInt()
+
+        // confetti for a new badge
+        if (big) for (i in 0 until 60) {
+            val sx = seeds[i * 4]; val sp = 0.25f + 0.35f * seeds[i * 4 + 3]
+            val y = (seeds[i * 4 + 1] * 0.3f - 0.3f + e * sp) * h * 1.3f
+            val x = sx * w + sin(e * 3f + i) * h * 0.02f
+            partyPaint.color = intArrayOf(0xFFFCD34D.toInt(), 0xFFF472B6.toInt(), 0xFF34D399.toInt(), 0xFF60A5FA.toInt(), 0xFFA78BFA.toInt())[i % 5]
+            partyPaint.alpha = a
+            c.save(); c.rotate(e * 200f * (if (i % 2 == 0) 1f else -1f) + i * 20f, x, y)
+            c.drawRect(x - h * 0.008f, y - h * 0.004f, x + h * 0.008f, y + h * 0.004f, partyPaint); c.restore()
+        }
+
+        // the tooth, bouncing happily
+        val tx = w * 0.3f; val ty = h * 0.5f + sin(e * 5f) * h * 0.015f; val s = h * 0.2f
+        toothPath.reset()
+        toothPath.moveTo(tx - s * 0.75f, ty - s * 0.35f)
+        toothPath.cubicTo(tx - s * 0.8f, ty - s * 0.95f, tx - s * 0.2f, ty - s * 1.0f, tx, ty - s * 0.78f)
+        toothPath.cubicTo(tx + s * 0.2f, ty - s * 1.0f, tx + s * 0.8f, ty - s * 0.95f, tx + s * 0.75f, ty - s * 0.35f)
+        toothPath.cubicTo(tx + s * 0.72f, ty + s * 0.2f, tx + s * 0.55f, ty + s * 0.4f, tx + s * 0.5f, ty + s * 0.85f)
+        toothPath.cubicTo(tx + s * 0.45f, ty + s * 1.05f, tx + s * 0.2f, ty + s * 1.05f, tx + s * 0.15f, ty + s * 0.8f)
+        toothPath.cubicTo(tx + s * 0.1f, ty + s * 0.5f, tx - s * 0.1f, ty + s * 0.5f, tx - s * 0.15f, ty + s * 0.8f)
+        toothPath.cubicTo(tx - s * 0.2f, ty + s * 1.05f, tx - s * 0.45f, ty + s * 1.05f, tx - s * 0.5f, ty + s * 0.85f)
+        toothPath.cubicTo(tx - s * 0.55f, ty + s * 0.4f, tx - s * 0.72f, ty + s * 0.2f, tx - s * 0.75f, ty - s * 0.35f)
+        toothPath.close()
+        partyPaint.color = Color.WHITE; partyPaint.alpha = a; c.drawPath(toothPath, partyPaint)
+        partyPaint.style = Paint.Style.STROKE; partyPaint.strokeWidth = s * 0.04f; partyPaint.color = Color.parseColor("#BAE6FD"); partyPaint.alpha = a
+        c.drawPath(toothPath, partyPaint)
+        // face: happy closed eyes and a big smile, rosy cheeks
+        partyPaint.color = Color.parseColor("#1E293B"); partyPaint.alpha = a; partyPaint.strokeWidth = s * 0.055f; partyPaint.strokeCap = Paint.Cap.ROUND
+        c.drawArc(tx - s * 0.42f, ty - s * 0.45f, tx - s * 0.16f, ty - s * 0.2f, 200f, 140f, false, partyPaint)
+        c.drawArc(tx + s * 0.16f, ty - s * 0.45f, tx + s * 0.42f, ty - s * 0.2f, 200f, 140f, false, partyPaint)
+        c.drawArc(tx - s * 0.3f, ty - s * 0.25f, tx + s * 0.3f, ty + s * 0.18f, 20f, 140f, false, partyPaint)
+        partyPaint.style = Paint.Style.FILL; partyPaint.color = Color.parseColor("#FDA4AF"); partyPaint.alpha = (a * 0.7f).toInt()
+        c.drawCircle(tx - s * 0.5f, ty - s * 0.08f, s * 0.08f, partyPaint); c.drawCircle(tx + s * 0.5f, ty - s * 0.08f, s * 0.08f, partyPaint)
+        // sparkle on the clean tooth
+        drawSparkle(c, tx + s * 0.55f, ty - s * 0.75f, s * (0.12f + 0.06f * sin(e * 6f)), a)
+
+        // foam bubbles rising off the tooth
+        partyPaint.style = Paint.Style.STROKE; partyPaint.strokeWidth = s * 0.02f
+        for (i in 0 until 14) {
+            val ph = wrap(seeds[(i + 20) * 4] + e * (0.3f + 0.3f * seeds[(i + 20) * 4 + 3]))
+            val bx = tx + (seeds[(i + 20) * 4 + 1] - 0.5f) * s * 2.2f + sin(e * 2f + i) * s * 0.08f
+            val by = ty - s * 0.8f - ph * s * 1.3f
+            partyPaint.color = Color.WHITE; partyPaint.alpha = (a * (1f - ph) * 0.8f).toInt()
+            c.drawCircle(bx, by, s * (0.05f + 0.07f * seeds[(i + 20) * 4 + 2]), partyPaint)
+        }
+
+        // the toothbrush scrubbing across the top
+        val scrub = sin(e * 16f) * s * 0.35f
+        c.save(); c.translate(tx + scrub, ty - s * 1.0f); c.rotate(-8f)
+        partyPaint.style = Paint.Style.FILL
+        partyPaint.color = teethColor(teethName); partyPaint.alpha = a
+        rr.set(s * 0.35f, -s * 0.09f, s * 1.9f, s * 0.07f); c.drawRoundRect(rr, s * 0.08f, s * 0.08f, partyPaint)       // handle
+        rr.set(-s * 0.45f, -s * 0.1f, s * 0.45f, s * 0.07f); c.drawRoundRect(rr, s * 0.06f, s * 0.06f, partyPaint)        // head
+        partyPaint.color = Color.WHITE; partyPaint.alpha = a
+        for (k in 0 until 8) { val bx = -s * 0.38f + k * s * 0.105f; rr.set(bx, s * 0.06f, bx + s * 0.07f, s * 0.25f); c.drawRoundRect(rr, s * 0.03f, s * 0.03f, partyPaint) }
+        partyPaint.color = Color.parseColor("#7DD3FC"); partyPaint.alpha = a                                              // a blob of toothpaste foam
+        c.drawCircle(-s * 0.1f, s * 0.3f, s * 0.1f, partyPaint); c.drawCircle(s * 0.12f, s * 0.32f, s * 0.08f, partyPaint)
+        c.restore()
+
+        // name, score and streak on the right
+        val rx = w * 0.52f
+        partyPaint.style = Paint.Style.FILL; partyPaint.textAlign = Paint.Align.LEFT; partyPaint.typeface = boldFace
+        val slide = (1f - min(1f, e / 0.5f)).let { it * it }
+        partyPaint.color = teethColor(teethName); partyPaint.alpha = a; partyPaint.textSize = h * 0.11f
+        c.drawText(teethName, rx + slide * w * 0.2f, h * 0.3f, partyPaint)
+        partyPaint.color = Color.WHITE; partyPaint.alpha = (a * 0.8f).toInt(); partyPaint.typeface = lightFace; partyPaint.textSize = h * 0.04f
+        c.drawText("teeth brushed", rx, h * 0.37f, partyPaint)
+        val ticked = e > 1.3f
+        val pop = if (ticked) 1f + 0.45f * kotlin.math.exp(-(e - 1.3f) * 5f) * kotlin.math.abs(cos((e - 1.3f) * 9f)) else 1f
+        partyPaint.typeface = boldFace; partyPaint.textSize = h * 0.24f * pop
+        partyPaint.color = if (ticked) Color.parseColor("#FCD34D") else Color.WHITE; partyPaint.alpha = a
+        c.drawText("${if (ticked) teethTo else teethFrom}", rx, h * 0.6f + (pop - 1f) * h * 0.05f, partyPaint)
+        if (ticked && e < 2.3f) {
+            partyPaint.textSize = h * 0.06f; partyPaint.alpha = (a * (1f - (e - 1.3f))).toInt().coerceIn(0, 255)
+            c.drawText("+1", rx + h * 0.34f, h * 0.45f - (e - 1.3f) * h * 0.08f, partyPaint)
+            for (k in 0 until 6) {
+                val ang = k * 60.0 + 20; val d = (e - 1.3f) * h * 0.35f
+                drawSparkle(c, rx + h * 0.12f + cos(Math.toRadians(ang)).toFloat() * d, h * 0.52f + sin(Math.toRadians(ang)).toFloat() * d, h * 0.025f, partyPaint.alpha)
+            }
+        }
+        var ly = h * 0.71f
+        partyPaint.typeface = mediumFace; partyPaint.textSize = h * 0.042f
+        if (teethStreak >= 2) { partyPaint.color = Color.parseColor("#FDBA74"); partyPaint.alpha = a
+            c.drawText("🔥 $teethStreak days in a row", rx, ly, partyPaint); ly += h * 0.07f }
+        if (big) {
+            partyPaint.color = Color.parseColor("#FCD34D"); partyPaint.alpha = (a * (0.75f + 0.25f * sin(e * 6f))).toInt().coerceIn(0, 255)
+            partyPaint.textSize = h * 0.05f; c.drawText(teethBadge, rx, ly, partyPaint)
+        }
+        partyPaint.textAlign = Paint.Align.LEFT
+    }
+    private fun drawSparkle(c: Canvas, x: Float, y: Float, r: Float, alpha: Int) {
+        partyPaint.style = Paint.Style.FILL; partyPaint.color = Color.parseColor("#FEF3C7"); partyPaint.alpha = alpha.coerceIn(0, 255)
+        val p = android.graphics.Path()
+        p.moveTo(x, y - r); p.quadTo(x, y, x + r, y); p.quadTo(x, y, x, y + r); p.quadTo(x, y, x - r, y); p.quadTo(x, y, x, y - r); p.close()
+        c.drawPath(p, partyPaint)
+    }
+
     /** What was tapped on the chore board: a chore's index, ADD, TABLETS, or -1 for nothing. */
     fun choreHit(x0: Float, y0: Float): Int {
         if (mood != Mood.SLEEP || !sleepScreen) return -1
         val pt = toV(x0, y0); val x = pt[0]; val y = pt[1]
         val m = height * 0.02f
         fun inR(r: RectF) = !r.isEmpty && x >= r.left - m && x <= r.right + m && y >= r.top - m * 0.3f && y <= r.bottom + m * 0.3f
+        if (inR(choreShowRect)) return CHORE_SHOW
         if (inR(choreAddRect)) return CHORE_ADD
+        if (inR(choreHideRect)) return CHORE_HIDE
         if (inR(choreTabRect)) return CHORE_TABLETS
+        if (!choreTeethRect.isEmpty && x >= choreTeethRect.left && x <= choreTeethRect.right && y >= choreTeethRect.top && y < choreTeethRect.bottom) return CHORE_TEETH
         choreRows.forEachIndexed { i, r -> if (x >= r.left - m && x <= r.right + m && y >= r.top && y < r.bottom) return i }
         return -1
     }
