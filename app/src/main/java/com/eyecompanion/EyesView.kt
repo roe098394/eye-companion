@@ -1528,7 +1528,7 @@ class EyesView(context: Context) : View(context) {
         partyPaint.style = Paint.Style.FILL; partyPaint.color = Color.parseColor("#FDA4AF"); partyPaint.alpha = (a * 0.7f).toInt()
         c.drawCircle(tx - s * 0.5f, ty - s * 0.08f, s * 0.08f, partyPaint); c.drawCircle(tx + s * 0.5f, ty - s * 0.08f, s * 0.08f, partyPaint)
         // sparkle on the clean tooth
-        drawSparkle(c, tx + s * 0.55f, ty - s * 0.75f, s * (0.12f + 0.06f * sin(e * 6f)), a)
+        drawTwinkle(c, tx + s * 0.55f, ty - s * 0.75f, s * (0.12f + 0.06f * sin(e * 6f)), a)
 
         // foam bubbles rising off the tooth
         partyPaint.style = Paint.Style.STROKE; partyPaint.strokeWidth = s * 0.02f
@@ -1571,7 +1571,7 @@ class EyesView(context: Context) : View(context) {
             c.drawText("+1", rx + h * 0.34f, h * 0.45f - (e - 1.3f) * h * 0.08f, partyPaint)
             for (k in 0 until 6) {
                 val ang = k * 60.0 + 20; val d = (e - 1.3f) * h * 0.35f
-                drawSparkle(c, rx + h * 0.12f + cos(Math.toRadians(ang)).toFloat() * d, h * 0.52f + sin(Math.toRadians(ang)).toFloat() * d, h * 0.025f, partyPaint.alpha)
+                drawTwinkle(c, rx + h * 0.12f + cos(Math.toRadians(ang)).toFloat() * d, h * 0.52f + sin(Math.toRadians(ang)).toFloat() * d, h * 0.025f, partyPaint.alpha)
             }
         }
         var ly = h * 0.71f
@@ -1584,7 +1584,7 @@ class EyesView(context: Context) : View(context) {
         }
         partyPaint.textAlign = Paint.Align.LEFT
     }
-    private fun drawSparkle(c: Canvas, x: Float, y: Float, r: Float, alpha: Int) {
+    private fun drawTwinkle(c: Canvas, x: Float, y: Float, r: Float, alpha: Int) {
         partyPaint.style = Paint.Style.FILL; partyPaint.color = Color.parseColor("#FEF3C7"); partyPaint.alpha = alpha.coerceIn(0, 255)
         val p = android.graphics.Path()
         p.moveTo(x, y - r); p.quadTo(x, y, x + r, y); p.quadTo(x, y, x, y + r); p.quadTo(x, y, x - r, y); p.quadTo(x, y, x, y - r); p.close()
