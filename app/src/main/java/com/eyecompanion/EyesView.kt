@@ -22,6 +22,7 @@ class EyesView(context: Context) : View(context) {
     companion object {
         const val KS_STEAM = 1; const val KS_RACE = 2; const val KS_HANDS = 3; const val KS_SHIFTY = 4
         const val KS_HEARTBREAK = 5; const val KS_TALLY = 6; const val KS_BUBBLES = 7
+        const val CHORE_ADD = -10; const val CHORE_TABLETS = -11
     }
     enum class Emotion { NEUTRAL, HAPPY, SAD, ANGRY, SURPRISED, SLEEPY, LOVE, CONFUSED, THINKING, DIZZY,
         SCARED, EXCITED, SUSPICIOUS, BORED, EMBARRASSED, WINK, CURIOUS, LAUGHING, CRYING, STONED, SNIGGER, HOT }
@@ -713,7 +714,8 @@ class EyesView(context: Context) : View(context) {
                 }
                 if (shopping.size > 9) canvas.drawText("+${shopping.size - 9} more", w * 0.035f, h * (0.41f + 9 * 0.045f), listPaint)
             }
-            if (xmasNote.isNotEmpty()) { sleepPaint.textSize = h * 0.032f; sleepPaint.alpha = 140; canvas.drawText(xmasNote, w * 0.84f, h * 0.48f, sleepPaint) }
+            drawChores(canvas, w, h)
+            if (xmasNote.isNotEmpty() && choreRows.isEmpty()) { sleepPaint.textSize = h * 0.032f; sleepPaint.alpha = 140; canvas.drawText(xmasNote, w * 0.84f, h * 0.48f, sleepPaint) }
             if (napNote.isNotEmpty()) drawAlarmClock(canvas, w * 0.82f, h * 0.24f, h * 0.085f, napNote, secs)
             // zzz: little Z's drifting up and away from the sleeping eyes, wobbling, growing, fading out
             val startX = cx + gap / 2 + eyeW * 0.9f; val startY = cy - h * 0.04f
@@ -1118,6 +1120,103 @@ class EyesView(context: Context) : View(context) {
     private val chipRect = RectF()
     private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val chipBox = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    // ---- chore board: right side of the sleep screen. Tap a chore to tick it, "+ Add" to type a new one.
+    data class Chore(val person: String, val text: String, val done: Boolean)
+    @Volatile var chores: List<Chore> = emptyList()
+    /** Laura's morning tablets card at the top of the board ("" = hidden). */
+    @Volatile var tabletsCard = ""
+    private val choreRows = ArrayList<RectF>()          // row i = chores[i]; tablets card handled separately
+    private val choreAddRect = RectF()
+    private val choreTabRect = RectF()
+    private val chorePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val choreBox = Paint(Paint.ANTI_ALIAS_FLAG)
+    private fun personColor(p: String) = when (p.lowercase()) {
+        "sophie" -> Color.parseColor("#F9A8D4"); "amelia" -> Color.parseColor("#C4B5FD")
+        "chloe" -> Color.parseColor("#FDE68A"); "brandon" -> Color.parseColor("#93C5FD")
+        "laura" -> Color.parseColor("#FCA5A5"); "mark" -> Color.parseColor("#86EFAC")
+        else -> eyeColor
+    }
+    private fun fit(text: String, paint: Paint, maxW: Float): String {
+        if (paint.measureText(text) <= maxW) return text
+        var t = text
+        while (t.length > 1 && paint.measureText("$t…") > maxW) t = t.dropLast(1)
+        return "$t…"
+    }
+    private fun drawChores(canvas: Canvas, w: Float, h: Float) {
+        choreRows.clear(); choreTabRect.setEmpty()
+        val x0 = w * 0.765f; val x1 = w * 0.975f; val pw = x1 - x0
+        var y = h * 0.16f
+        // header + "+ Add" button
+        chorePaint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        chorePaint.textAlign = Paint.Align.LEFT
+        chorePaint.color = eyeColor; chorePaint.alpha = 170; chorePaint.textSize = h * 0.034f
+        val done = chores.count { it.done }
+        canvas.drawText(if (chores.isEmpty()) "Chores" else "Chores $done/${chores.size}", x0, y + h * 0.03f, chorePaint)
+        chorePaint.textSize = h * 0.03f
+        val addLabel = "+ Add"; val pad = h * 0.018f
+        val aw = chorePaint.measureText(addLabel) + pad * 2
+        choreAddRect.set(x1 - aw, y, x1, y + h * 0.05f)
+        choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.004f; choreBox.color = eyeColor; choreBox.alpha = 110
+        canvas.drawRoundRect(choreAddRect, choreAddRect.height() / 2, choreAddRect.height() / 2, choreBox)
+        canvas.drawText(addLabel, choreAddRect.left + pad, choreAddRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+        y += h * 0.075f
+        // Laura's tablets: a bright card until it's ticked
+        if (tabletsCard.isNotEmpty()) {
+            val ch = h * 0.085f
+            choreTabRect.set(x0, y, x1, y + ch)
+            choreBox.style = Paint.Style.FILL; choreBox.color = Color.parseColor("#3A2C10"); choreBox.alpha = 255
+            canvas.drawRoundRect(choreTabRect, h * 0.02f, h * 0.02f, choreBox)
+            choreBox.style = Paint.Style.STROKE; choreBox.color = Color.parseColor("#FBBF24"); choreBox.alpha = (170 + 70 * sin(now() / 400.0)).toInt().coerceIn(0, 255)
+            canvas.drawRoundRect(choreTabRect, h * 0.02f, h * 0.02f, choreBox)
+            chorePaint.color = Color.parseColor("#FCD34D"); chorePaint.alpha = 255; chorePaint.textSize = h * 0.032f
+            canvas.drawText(fit(tabletsCard, chorePaint, pw - h * 0.04f), x0 + h * 0.02f, choreTabRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+            y += ch + h * 0.02f
+        }
+        // the chores, up to what fits above the volume button
+        val rowH = h * 0.058f; val bottom = h * 0.78f
+        chorePaint.typeface = android.graphics.Typeface.DEFAULT
+        for (c in chores) {
+            if (y + rowH > bottom) { chorePaint.alpha = 110; chorePaint.textSize = h * 0.026f; chorePaint.color = eyeColor
+                canvas.drawText("+${chores.size - choreRows.size} more", x0, y + rowH * 0.6f, chorePaint); break }
+            val r = RectF(x0, y, x1, y + rowH); choreRows.add(r)
+            val box = h * 0.03f; val bx = x0; val by = r.centerY() - box / 2
+            choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.004f; choreBox.color = personColor(c.person); choreBox.alpha = if (c.done) 120 else 200
+            rect.set(bx, by, bx + box, by + box); canvas.drawRoundRect(rect, box * 0.25f, box * 0.25f, choreBox)
+            if (c.done) {
+                choreBox.strokeWidth = h * 0.006f
+                canvas.drawLine(bx + box * 0.2f, by + box * 0.5f, bx + box * 0.42f, by + box * 0.75f, choreBox)
+                canvas.drawLine(bx + box * 0.42f, by + box * 0.75f, bx + box * 0.82f, by + box * 0.25f, choreBox)
+            }
+            val tx = bx + box + h * 0.018f
+            chorePaint.textSize = h * 0.028f; chorePaint.color = personColor(c.person); chorePaint.alpha = if (c.done) 110 else 230
+            chorePaint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            val name = c.person + " "
+            canvas.drawText(name, tx, r.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+            val nx = tx + chorePaint.measureText(name)
+            chorePaint.typeface = android.graphics.Typeface.DEFAULT
+            chorePaint.color = Color.argb(if (c.done) 110 else 220, 232, 236, 242)
+            chorePaint.isStrikeThruText = c.done
+            canvas.drawText(fit(c.text, chorePaint, x1 - nx), nx, r.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+            chorePaint.isStrikeThruText = false
+            y += rowH
+        }
+        if (chores.isEmpty() && tabletsCard.isEmpty()) {
+            chorePaint.textSize = h * 0.026f; chorePaint.color = eyeColor; chorePaint.alpha = 90
+            canvas.drawText("Nothing to do. Tap + Add", x0, y + h * 0.03f, chorePaint)
+        }
+    }
+    /** What was tapped on the chore board: a chore's index, ADD, TABLETS, or -1 for nothing. */
+    fun choreHit(x0: Float, y0: Float): Int {
+        if (mood != Mood.SLEEP || !sleepScreen) return -1
+        val pt = toV(x0, y0); val x = pt[0]; val y = pt[1]
+        val m = height * 0.02f
+        fun inR(r: RectF) = !r.isEmpty && x >= r.left - m && x <= r.right + m && y >= r.top - m * 0.3f && y <= r.bottom + m * 0.3f
+        if (inR(choreAddRect)) return CHORE_ADD
+        if (inR(choreTabRect)) return CHORE_TABLETS
+        choreRows.forEachIndexed { i, r -> if (x >= r.left - m && x <= r.right + m && y >= r.top && y < r.bottom) return i }
+        return -1
+    }
+
     /** VoiceID Live button, top-right of the sleep screen. */
     private val trainRect = RectF()
     fun trainHit(x0: Float, y0: Float): Boolean {

@@ -1770,6 +1770,7 @@ class MainActivity : Activity() {
             dryerCheck()
             kettleCheck()
             portalReminders()
+            refreshChores()
             elfReport()
             if (training) { main.postDelayed(this, 60_000); return }
             temper *= 0.85f                           // tempers cool down over time
@@ -2037,6 +2038,108 @@ class MainActivity : Activity() {
             else -> return false
         }
         return true
+    }
+
+    // ---- chore board on the sleep screen: anyone can add a chore for someone with the keyboard.
+    //      Tick one and Pip wakes, looks to see who it is, says a short well done, then goes back to sleep.
+    private fun loadChores(): MutableList<Triple<String, String, String>> {      // person, chore, day ticked ("" = not yet)
+        val out = ArrayList<Triple<String, String, String>>()
+        try {
+            val a = org.json.JSONArray(prefs.getString("chores", "[]") ?: "[]")
+            for (i in 0 until a.length()) { val o = a.getJSONObject(i)
+                val done = o.optString("d", "")
+                if (done.isEmpty() || done == todayKey) out += Triple(o.optString("p"), o.optString("t"), done) }   // ticked ones go next day
+        } catch (_: Exception) {}
+        return out
+    }
+    private fun saveChores(list: List<Triple<String, String, String>>) {
+        val a = org.json.JSONArray()
+        list.forEach { (p, t, d) -> a.put(org.json.JSONObject().put("p", p).put("t", t).put("d", d)) }
+        prefs.edit().putString("chores", a.toString()).apply()
+        refreshChores()
+    }
+    private fun refreshChores() {
+        eyes.chores = loadChores().map { EyesView.Chore(it.first, it.second, it.third.isNotEmpty()) }
+        eyes.tabletsCard = if (tabletsDue()) "💊 $tabletPerson: tablets" else ""
+    }
+    private fun choreTapped(hit: Int) {
+        when (hit) {
+            EyesView.CHORE_ADD -> showAddChore()
+            EyesView.CHORE_TABLETS -> {
+                prefs.edit().putString("tabletsDone", todayKey).apply(); refreshChores()
+                praiseWhoTicked(tabletPerson, "taking her tablets")
+            }
+            else -> {
+                val list = loadChores(); val c = list.getOrNull(hit) ?: return
+                if (c.third.isNotEmpty()) { list[hit] = c.copy(third = ""); saveChores(list); return }     // tapped a ticked one: untick it
+                list[hit] = c.copy(third = todayKey); saveChores(list)
+                praiseWhoTicked(c.first, c.second)
+            }
+        }
+    }
+    /** Wake up, look at whoever ticked it, a short well done by name, then back to sleep. */
+    private fun praiseWhoTicked(assigned: String, what: String) {
+        val wasNapping = napping
+        if (phase == Phase.ASLEEP) wakeUp()
+        eyes.feel(EyesView.Emotion.HAPPY, 6000)
+        val fallback = "[happy] Nice one, $assigned. ${what.replaceFirstChar { it.uppercase() }}, done."
+        main.postDelayed({
+            lookThroughCamera { jpeg ->
+                val raw = if (jpeg != null && online.enabled && !online.allResting) online.lookAt(jpeg,
+                    WHO_QUESTION + " Then, on the same line, say a short well done to that person, by name if you know who it is, " +
+                    "for just finishing this job: \"$what\". A few words, like a mate would. No gushing. Start it with the [happy] tag. " +
+                    "If you can't tell who it is, say well done to $assigned.",
+                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 60)
+                    else null
+                raw?.trimStart()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } }?.let { whoSeen = it }
+                val line = raw?.replaceFirst(Regex("^\\s*(MARK|LAURA|BRANDON|SOPHIE|AMELIA|CHLOE|OTHER)\\s*[:,;\\-]?\\s*", RegexOption.IGNORE_CASE), "")?.trim()
+                main.post {
+                    speakLine(if (line.isNullOrBlank() || !line.contains("[")) fallback else line)
+                    sleepAfterTalking(nap = wasNapping)
+                }
+            }
+        }, 1500)
+    }
+    /** Type a chore for someone: pick who, type what, Add. "Remove one" deletes a mistake. */
+    private fun showAddChore() {
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(pad * 2, pad, pad * 2, 0) }
+        val group = android.widget.RadioGroup(this).apply { orientation = android.widget.RadioGroup.HORIZONTAL }
+        FAMILY.forEachIndexed { i, n -> group.addView(android.widget.RadioButton(this).apply {
+            id = 7000 + i; text = n; textSize = 18f; setPadding(0, 0, pad, 0) }) }
+        box.addView(android.widget.HorizontalScrollView(this).apply { addView(group) })
+        val edit = android.widget.EditText(this).apply {
+            hint = "What needs doing?"; textSize = 20f; isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            filters = arrayOf<android.text.InputFilter>(android.text.InputFilter.LengthFilter(40))
+        }
+        box.addView(edit)
+        fun add(): Boolean {
+            val who = FAMILY.getOrNull(group.checkedRadioButtonId - 7000)
+            val what = edit.text.toString().trim()
+            if (who == null || what.isEmpty()) {
+                android.widget.Toast.makeText(this, if (who == null) "Pick who it's for" else "Type the chore", android.widget.Toast.LENGTH_SHORT).show()
+                return false
+            }
+            saveChores(loadChores() + Triple(who, what, ""))
+            return true
+        }
+        val d = AlertDialog.Builder(this).setTitle("Add a chore").setView(box)
+            .setPositiveButton("Add", null).setNegativeButton("Cancel", null)
+            .setNeutralButton("Remove one") { _, _ -> showRemoveChore() }
+            .showOwn()
+        d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { if (add()) d.dismiss() }
+        edit.setOnEditorActionListener { _, _, _ -> if (add()) d.dismiss(); true }
+        d.window?.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+        d.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        edit.requestFocus()
+    }
+    private fun showRemoveChore() {
+        val list = loadChores()
+        if (list.isEmpty()) return
+        AlertDialog.Builder(this).setTitle("Remove which chore?")
+            .setItems(list.map { "${it.first}: ${it.second}" }.toTypedArray()) { _, i -> saveChores(list.filterIndexed { j, _ -> j != i }) }
+            .setNegativeButton("Cancel", null).showOwn()
     }
 
     private fun tabletsDue(): Boolean {
@@ -2547,7 +2650,7 @@ class MainActivity : Activity() {
         eyes.subCaption = ""
         setPhase(if (prefs.getBoolean("asleep", false)) Phase.ASLEEP else Phase.LISTENING)
         eyes.sleepScreen = phase == Phase.ASLEEP; eyes.cuppas = cuppas
-        showWeek(); updateSeason(); eyes.shopping = shopping
+        showWeek(); updateSeason(); eyes.shopping = shopping; refreshChores()
         if (phase == Phase.LISTENING) eyes.caption = if (carMode) "Ready when you are." else "Question? I listen."
     }
 
@@ -3840,7 +3943,7 @@ class MainActivity : Activity() {
         if (!nap) prefs.edit().putBoolean("asleep", true).apply()
         eyes.caption = ""; eyes.subCaption = ""
         eyes.coffee = false
-        eyes.sleepScreen = true; napNote()
+        eyes.sleepScreen = true; napNote(); refreshChores()
         setPhase(Phase.ASLEEP)
     }
 
@@ -3890,6 +3993,7 @@ class MainActivity : Activity() {
                     else { speakLine(listOf("[sleepy] Night night.", "[sleepy] Nap time. Tap the sun to wake me.").fresh()); sleepAfterTalking(nap = false) }
                     return true
                 }
+                if (phase == Phase.ASLEEP) { val c = eyes.choreHit(e.x, e.y); if (c != -1) { choreTapped(c); return true } }
                 when (phase) {
                     Phase.ASLEEP -> if (napping) {
                         eyes.feel(EyesView.Emotion.SLEEPY, 3000)
