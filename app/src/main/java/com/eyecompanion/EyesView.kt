@@ -22,7 +22,7 @@ class EyesView(context: Context) : View(context) {
     companion object {
         const val KS_STEAM = 1; const val KS_RACE = 2; const val KS_HANDS = 3; const val KS_SHIFTY = 4
         const val KS_HEARTBREAK = 5; const val KS_TALLY = 6; const val KS_BUBBLES = 7
-        const val CHORE_ADD = -10; const val CHORE_TABLETS = -11; const val CHORE_TEETH = -12; const val CHORE_HIDE = -13; const val CHORE_SHOW = -14
+        const val CHORE_ADD = -10; const val CHORE_TABLETS = -11; const val CHORE_TEETH = -12; const val CHORE_HIDE = -13; const val CHORE_SHOW = -14; const val CHORE_MORE = -15; const val CHORE_NONE = -16
         const val WX_CLEAR = 0; const val WX_PARTLY = 1; const val WX_CLOUDY = 2; const val WX_FOG = 3
         const val WX_RAIN = 4; const val WX_SNOW = 5; const val WX_STORM = 6
     }
@@ -1083,6 +1083,12 @@ class EyesView(context: Context) : View(context) {
     private val choreTeethRect = RectF()
     private val choreHideRect = RectF()
     private val choreShowRect = RectF()
+    private val choreMoreRect = RectF()
+    private val chorePanelRect = RectF()
+    /** First job shown (the list pages on when "+3 more" is tapped). */
+    var choreOffset = 0
+    /** Move the list on a page (or back to the top after the last page). */
+    fun nextChorePage() { choreOffset = if (choreOffset + choreRows.size >= chores.size || choreRows.isEmpty()) 0 else choreOffset + choreRows.size }
     /** The weather (from the forecast): kind is one of WX_*, -1 until the first forecast arrives. */
     @Volatile var wxKind = -1
     @Volatile var wxDay = true
@@ -1269,6 +1275,7 @@ class EyesView(context: Context) : View(context) {
         choreShowRect.setEmpty()
         if (todoHidden) {
             choreRows.clear(); choreTabRect.setEmpty(); choreTeethRect.setEmpty(); choreAddRect.setEmpty(); choreHideRect.setEmpty()
+            choreMoreRect.setEmpty(); chorePanelRect.setEmpty()
             chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.026f; chorePaint.color = Color.WHITE; chorePaint.alpha = 150
             chorePaint.textAlign = Paint.Align.LEFT
             val label = "Show to-do"; val ap = h * 0.024f; val tw = chorePaint.measureText(label)
@@ -1369,8 +1376,10 @@ class EyesView(context: Context) : View(context) {
     }
 
     private fun drawChores(c: Canvas, x0: Float, top: Float, x1: Float, bottom: Float, h: Float) {
-        choreRows.clear(); choreTabRect.setEmpty()
+        choreRows.clear(); choreTabRect.setEmpty(); choreMoreRect.setEmpty()
+        chorePanelRect.set(x0, top, x1, bottom)
         card(c, x0, top, x1, bottom, h)
+        if (choreOffset >= chores.size) choreOffset = 0
         val ip = h * 0.035f
         val l = x0 + ip; val r = x1 - ip
         var y = top + ip
@@ -1420,13 +1429,12 @@ class EyesView(context: Context) : View(context) {
             choreBox.style = Paint.Style.FILL; choreBox.color = Color.argb(30, 147, 197, 253)
             c.drawRoundRect(choreTeethRect, rad, rad, choreBox)
             chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.03f; chorePaint.color = Color.WHITE; chorePaint.alpha = 245
-            c.drawText("Teeth", l + h * 0.022f, choreTeethRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
-            // the name dots go after the word, shrinking if they need to so nothing overlaps
-            val startX = l + h * 0.022f + chorePaint.measureText("Teeth") + h * 0.025f
+            // just the family's initials, no label (the family knows what it's for)
+            val startX = l + h * 0.022f
             val room = r - h * 0.02f - startX
-            val step = min(h * 0.021f * 2.45f, room / teethRow.size)
-            val dr = step / 2.45f
-            var dx = r - h * 0.02f - dr - (teethRow.size - 1) * step
+            val step = min(h * 0.075f, room / teethRow.size)
+            val dr = min(h * 0.023f, step / 2.45f)
+            var dx = (startX + r - h * 0.02f) / 2 - (teethRow.size - 1) * step / 2      // spread across the row
             chorePaint.typeface = boldFace; chorePaint.textSize = dr * 1.1f; chorePaint.textAlign = Paint.Align.CENTER
             for ((name, n) in teethRow) {
                 val cy = choreTeethRect.centerY() - h * 0.004f
@@ -1442,10 +1450,9 @@ class EyesView(context: Context) : View(context) {
             chorePaint.textAlign = Paint.Align.LEFT
             y += rowH + gapR
         }
-        for (ch in chores) {
+        for (ch in chores.drop(choreOffset)) {
             if (y + rowH > bottom - ip * 0.5f) {
-                chorePaint.typeface = lightFace; chorePaint.textSize = h * 0.024f; chorePaint.color = Color.WHITE; chorePaint.alpha = 170
-                c.drawText("+${chores.size - choreRows.size} more", l + h * 0.022f, y + h * 0.03f, chorePaint); break
+                drawMore(c, "+${chores.size - choreOffset - choreRows.size} more  ↓", l, y, h); break
             }
             val row = RectF(l, y, r, y + rowH); choreRows.add(row)
             if (!ch.done) { choreBox.style = Paint.Style.FILL; choreBox.color = Color.argb(16, 255, 255, 255); c.drawRoundRect(row, rad, rad, choreBox) }
@@ -1469,6 +1476,7 @@ class EyesView(context: Context) : View(context) {
             chorePaint.isStrikeThruText = false
             y += rowH + gapR
         }
+        if (choreOffset > 0 && choreMoreRect.isEmpty) drawMore(c, "↑ Back to the top", l, y, h)
         if (chores.isEmpty() && tabletsCard.isEmpty()) {
             chorePaint.typeface = lightFace; chorePaint.textSize = h * 0.026f; chorePaint.color = Color.WHITE; chorePaint.alpha = 160
             c.drawText("Nothing to do. Tap + Add", l + h * 0.01f, y + h * 0.03f, chorePaint)
@@ -1595,6 +1603,15 @@ class EyesView(context: Context) : View(context) {
         c.drawPath(p, partyPaint)
     }
 
+    private fun drawMore(c: Canvas, label: String, l: Float, y: Float, h: Float) {
+        chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.026f; chorePaint.color = Color.WHITE; chorePaint.alpha = 200
+        chorePaint.textAlign = Paint.Align.LEFT
+        val ap = h * 0.024f; val tw = chorePaint.measureText(label)
+        choreMoreRect.set(l, y + h * 0.004f, l + tw + ap * 2, y + h * 0.058f)
+        choreBox.style = Paint.Style.STROKE; choreBox.strokeWidth = h * 0.002f; choreBox.color = Color.argb(70, 255, 255, 255)
+        c.drawRoundRect(choreMoreRect, choreMoreRect.height() / 2, choreMoreRect.height() / 2, choreBox)
+        c.drawText(label, choreMoreRect.left + ap, choreMoreRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+    }
     /** What was tapped on the chore board: a chore's index, ADD, TABLETS, or -1 for nothing. */
     fun choreHit(x0: Float, y0: Float): Int {
         if (mood != Mood.SLEEP || !sleepScreen) return -1
@@ -1602,11 +1619,13 @@ class EyesView(context: Context) : View(context) {
         val m = height * 0.02f
         fun inR(r: RectF) = !r.isEmpty && x >= r.left - m && x <= r.right + m && y >= r.top - m * 0.3f && y <= r.bottom + m * 0.3f
         if (inR(choreShowRect)) return CHORE_SHOW
+        if (inR(choreMoreRect)) return CHORE_MORE
         if (inR(choreAddRect)) return CHORE_ADD
         if (inR(choreHideRect)) return CHORE_HIDE
         if (inR(choreTabRect)) return CHORE_TABLETS
         if (!choreTeethRect.isEmpty && x >= choreTeethRect.left && x <= choreTeethRect.right && y >= choreTeethRect.top && y < choreTeethRect.bottom) return CHORE_TEETH
-        choreRows.forEachIndexed { i, r -> if (x >= r.left - m && x <= r.right + m && y >= r.top && y < r.bottom) return i }
+        choreRows.forEachIndexed { i, r -> if (x >= r.left - m && x <= r.right + m && y >= r.top && y < r.bottom) return choreOffset + i }
+        if (!chorePanelRect.isEmpty && !todoHidden && x >= chorePanelRect.left && x <= chorePanelRect.right && y >= chorePanelRect.top && y <= chorePanelRect.bottom) return CHORE_NONE
         return -1
     }
 

@@ -2116,6 +2116,8 @@ class MainActivity : Activity() {
             EyesView.CHORE_HIDE -> { prefs.edit().putBoolean("todoHidden", true).apply(); refreshChores() }
             EyesView.CHORE_SHOW -> { prefs.edit().putBoolean("todoHidden", false).apply(); refreshChores() }
             EyesView.CHORE_TEETH -> teethTapped()
+            EyesView.CHORE_MORE -> eyes.nextChorePage()
+            EyesView.CHORE_NONE -> {}                                   // a tap on the list itself: stay asleep
             EyesView.CHORE_TABLETS -> {
                 prefs.edit().putString("tabletsDone", todayKey).apply(); refreshChores()
                 praiseWhoTicked("taking her tablets", tabletPerson)
