@@ -1420,8 +1420,12 @@ class EyesView(context: Context) : View(context) {
             choreBox.style = Paint.Style.FILL; choreBox.color = Color.argb(30, 147, 197, 253)
             c.drawRoundRect(choreTeethRect, rad, rad, choreBox)
             chorePaint.typeface = mediumFace; chorePaint.textSize = h * 0.03f; chorePaint.color = Color.WHITE; chorePaint.alpha = 245
-            c.drawText("🪥 Teeth", l + h * 0.022f, choreTeethRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
-            val dr = h * 0.021f; val step = dr * 2.45f
+            c.drawText("Teeth", l + h * 0.022f, choreTeethRect.centerY() + chorePaint.textSize * 0.35f, chorePaint)
+            // the name dots go after the word, shrinking if they need to so nothing overlaps
+            val startX = l + h * 0.022f + chorePaint.measureText("Teeth") + h * 0.025f
+            val room = r - h * 0.02f - startX
+            val step = min(h * 0.021f * 2.45f, room / teethRow.size)
+            val dr = step / 2.45f
             var dx = r - h * 0.02f - dr - (teethRow.size - 1) * step
             chorePaint.typeface = boldFace; chorePaint.textSize = dr * 1.1f; chorePaint.textAlign = Paint.Align.CENTER
             for ((name, n) in teethRow) {

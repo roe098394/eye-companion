@@ -2209,39 +2209,33 @@ class MainActivity : Activity() {
     //      Scores never reset. Up to two a day (morning and night), streaks for both done days in a row, badges.
     private fun teethToday(n: String): Int = if (prefs.getString("teethDay_$n", "") == todayKey) prefs.getInt("teethN_$n", 0) else 0
     private var teethAsking = 0L
+    /** Quiet on purpose: no talking, just a soft ping and the celebration on screen. Pip stays asleep. */
     private fun teethTapped() {
         if (System.currentTimeMillis() - teethAsking < 30_000) return
         teethAsking = System.currentTimeMillis()
-        val wasAsleep = phase == Phase.ASLEEP; val wasNapping = napping
-        if (wasAsleep) wakeUp()
-        eyes.feel(EyesView.Emotion.HAPPY, 6000)
         fun ask() {
-            speakLine("[curious] Who's brushed their teeth? Tap your name.")
+            android.widget.Toast.makeText(this, "Who's brushed their teeth? Tap your name.", android.widget.Toast.LENGTH_LONG).show()
             var picked = false
-            showChoices(FAMILY, big = true) { pick -> picked = true; hideChoices(); awardTeeth(pick, wasAsleep, wasNapping) }
-            main.postDelayed({ if (!picked) { hideChoices(); teethAsking = 0L; if (wasAsleep) sleepAfterTalking(nap = wasNapping) } }, 30_000)
+            showChoices(FAMILY, big = true) { pick -> picked = true; hideChoices(); awardTeeth(pick) }
+            main.postDelayed({ if (!picked) { hideChoices(); teethAsking = 0L } }, 30_000)
         }
-        main.postDelayed({
-            lookThroughCamera { jpeg ->
-                val who = if (jpeg != null && online.enabled && !online.allResting)
-                    online.lookAt(jpeg, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0)
-                        ?.trim()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } else null
-                main.post {
-                    val name = who?.let { w -> FAMILY.firstOrNull { it.equals(w, true) } }
-                    if (name != null) { whoSeen = who ?: ""; awardTeeth(name, wasAsleep, wasNapping) } else ask()
-                }
+        lookThroughCamera { jpeg ->
+            val who = if (jpeg != null && online.enabled && !online.allResting)
+                online.lookAt(jpeg, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0)
+                    ?.trim()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } else null
+            main.post {
+                val name = who?.let { w -> FAMILY.firstOrNull { it.equals(w, true) } }
+                if (name != null) { whoSeen = who ?: ""; awardTeeth(name) } else ask()
             }
-        }, 1200)
+        }
     }
-    private fun awardTeeth(name: String, wasAsleep: Boolean, wasNapping: Boolean) {
+    private fun awardTeeth(name: String) {
         teethAsking = 0L
         val now = System.currentTimeMillis()
         val n = teethToday(name)
-        fun after(line: String) { speakLine(line); if (wasAsleep) sleepAfterTalking(nap = wasNapping) }
-        if (n >= 2) { after("[happy] $name, you've done both already today. Proper sparkly."); return }
-        if (n == 1 && now - prefs.getLong("teethLast_$name", 0) < 3 * 3_600_000L) {
-            after("[suspicious] $name, you only brushed a little while ago. The next one counts later."); return
-        }
+        fun note(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
+        if (n >= 2) { note("$name, both done already today ✓"); return }
+        if (n == 1 && now - prefs.getLong("teethLast_$name", 0) < 3 * 3_600_000L) { note("$name, you only brushed a little while ago. The next one counts later."); return }
         val from = prefs.getInt("teeth_$name", 0); val to = from + 1
         val e = prefs.edit().putInt("teeth_$name", to).putString("teethDay_$name", todayKey).putInt("teethN_$name", n + 1).putLong("teethLast_$name", now)
         val yesterday = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK)
@@ -2259,19 +2253,11 @@ class MainActivity : Activity() {
         }
         eyes.celebrateTeeth(name, from, to, streak, badge)
         refreshChores()
-        try {
-            val tg = android.media.ToneGenerator(AudioManager.STREAM_MUSIC, 70)
-            main.postDelayed({ tg.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 250) }, 1300)
-            if (badge.isNotEmpty()) main.postDelayed({ tg.startTone(android.media.ToneGenerator.TONE_PROP_ACK, 250) }, 1700)
-            main.postDelayed({ tg.release() }, 3000)
+        try {                                                  // one soft ping as the score ticks up
+            val tg = android.media.ToneGenerator(AudioManager.STREAM_MUSIC, 30)
+            main.postDelayed({ tg.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 120) }, 1300)
+            main.postDelayed({ tg.release() }, 2500)
         } catch (_: Exception) {}
-        val line = if (badge.isNotEmpty()) listOf("[excited] $name! $to brushes! ${badge.drop(2).trim().trimEnd('!')}! Look at those teeth go.",
-                "[excited] Whoa, $name. $to! That's a ${badge.drop(2).trim().trimEnd('!').lowercase()}. Shiny.").fresh()
-            else listOf("[happy] Sparkly teeth, $name. That's $to.", "[happy] Nice one, $name. $to brushes.",
-                "[happy] Minty fresh, $name. $to and counting.", "[happy] $name, $to. Your teeth thank you.",
-                "[happy] Clean teeth, $name. That's $to now.").fresh() +
-                (if (streak >= 2 && n + 1 == 2) " $streak days in a row!" else "")
-        main.postDelayed({ after(line) }, 1500)
     }
 
     // ---- weather for the sleep screen (free forecast, no key): checked every half hour
