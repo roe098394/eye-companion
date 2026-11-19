@@ -62,6 +62,8 @@ const Zone ZONES[] = {
 const int ZONE_COUNT = sizeof(ZONES) / sizeof(ZONES[0]);
 const char* VOICES[] = {"troy", "austin", "daniel", "autumn", "diana", "hannah"};
 const int VOICE_COUNT = sizeof(VOICES) / sizeof(VOICES[0]);
+// a short phrase saved to flash (defined up here so Arduino's automatic declarations can see it)
+struct Phrase { const char* path; const char* text; };
 
 // ---------------------------------------------------------------- settings (saved in flash)
 struct Settings {
@@ -560,7 +562,6 @@ bool playFile(const char* path) {
 }
 
 // short phrases saved to flash the first time, so they still work with no signal
-struct Phrase { const char* path; const char* text; };
 const Phrase READY   = {"/ready.wav",   "Co-pilot here. Hold the button and ask me anything."};
 const Phrase OFFLINE = {"/offline.wav", "I've lost my internet connection. Try again when there's signal."};
 const Phrase TROUBLE = {"/trouble.wav", "Sorry, I couldn't get an answer just then. Please try again."};
@@ -667,7 +668,7 @@ void handleSave() {
   ESP.restart();
 }
 
-[[noreturn]] void setupMode() {
+void setupMode() {
   Serial.println("Setup mode: join Wi-Fi 'CoPilot-Setup' (password copilot123) and open http://192.168.4.1");
   led(160, 0, 255);
   WiFi.mode(WIFI_AP);
