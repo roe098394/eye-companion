@@ -373,6 +373,14 @@ class MainActivity : Activity() {
             when (key) { "mic" -> micSensitivity = value.toIntOrNull()?.coerceIn(0, 2) ?: 1; "questions" -> questionsOnly = value == "1"
                 "alexa" -> alexaChat = value == "1" }
         } }
+        override fun liveFrame(): ByteArray? {
+            val f = faces
+            if (f == null || !f.running) return null
+            var jpg: ByteArray? = null; val latch = java.util.concurrent.CountDownLatch(1)
+            f.grabJpeg { j -> jpg = j; latch.countDown() }
+            latch.await(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            return jpg
+        }
         override fun snapshot(): ByteArray? {
             var jpg: ByteArray? = null; val latch = java.util.concurrent.CountDownLatch(1)
             main.post { lookThroughCamera { j -> jpg = j; latch.countDown() } }

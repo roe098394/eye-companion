@@ -32,6 +32,8 @@ class Portal(private val prefs: SharedPreferences, private val host: Host) {
         fun setting(key: String): String
         fun setSetting(key: String, value: String)
         fun snapshot(): ByteArray?
+        /** The next frame from the face-tracking camera (quick), or null if it isn't running. */
+        fun liveFrame(): ByteArray? = null
     }
     data class Reminder(val id: Long, val text: String, val at: Long)
 
@@ -171,6 +173,30 @@ class Portal(private val prefs: SharedPreferences, private val host: Host) {
             method == "POST" && path == "/unremind" -> { val id = form["id"]?.toLongOrNull(); synchronized(this) { saveReminders(reminders().filterNot { it.id == id }) }; back() }
             method == "POST" && path == "/do" -> { flash = host.action(form["a"].orEmpty()); back() }
             method == "POST" && path == "/set" -> { form["k"]?.let { k -> host.setSetting(k, form["v"].orEmpty()) }; flash = "Saved."; back() }
+            // live camera: a motion-JPEG stream (a new picture several times a second) until the page is closed
+            method == "GET" && path.startsWith("/cam.mjpg") -> {
+                if (query(path)["pin"] != pin) { send("403 Forbidden", "text/plain", "Wrong code."); return }
+                if (streams.incrementAndGet() > 2) { streams.decrementAndGet(); send("503 Service Unavailable", "text/plain", "Too many viewers."); return }
+                try {
+                    out.write(("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=pipframe\r\n" +
+                        "Cache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray()); out.flush()
+                    val until = System.currentTimeMillis() + 20 * 60_000            // stop after 20 minutes (the page reconnects)
+                    while (System.currentTimeMillis() < until) {
+                        val started = System.currentTimeMillis()
+                        val quick = host.liveFrame()
+                        val jpg = quick ?: host.snapshot()                         // tracking off (asleep): a slower photo instead
+                        if (jpg != null) {
+                            out.write("--pipframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpg.size}\r\n\r\n".toByteArray())
+                            out.write(jpg); out.write("\r\n".toByteArray()); out.flush()
+                        }
+                        val gap = if (quick != null) 160L else 2500L                 // about 6 a second when live
+                        val left = gap - (System.currentTimeMillis() - started)
+                        if (left > 0) Thread.sleep(left)
+                    }
+                } catch (_: Exception) {                                           // the viewer went away
+                } finally { streams.decrementAndGet() }
+                return
+            }
             method == "GET" && path.startsWith("/cam.jpg") -> {
                 if (query(path)["pin"] != pin) { send("403 Forbidden", "text/plain", "Wrong code."); return }
                 val jpg = host.snapshot()
@@ -227,6 +253,7 @@ class Portal(private val prefs: SharedPreferences, private val host: Host) {
     }
 
     @Volatile private var flash = ""
+    private val streams = java.util.concurrent.atomic.AtomicInteger(0)
     private fun query(path: String): Map<String, String> = path.substringAfter('?', "").split("&").mapNotNull { kv ->
         kv.split("=", limit = 2).takeIf { it.size == 2 }?.let { URLDecoder.decode(it[0], "UTF-8") to URLDecoder.decode(it[1], "UTF-8") } }.toMap()
 
@@ -324,7 +351,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}td{padding:3px 0;vertic
 <div class="top"><span class="dot" id="dot"></span><h1>Pip control</h1><a href="/faces?pin=$pin">Faces</a><a href="/">Main page</a></div>
 <div class="grid">
 <div>
- <div class="card"><img id="v" alt="Pip's camera"><div class="st" id="camst">Camera refreshes every 3 seconds. Nothing is saved.</div></div>
+ <div class="card"><img id="v" alt="Pip's camera"><div class="st" id="camst">Live camera. Nothing is saved.</div></div>
  <div class="card" style="margin-top:12px"><h2>Remote</h2><div class="rem">
   <button data-a="wake">☀️ Wake</button><button data-a="sleep">😴 Sleep</button><button data-a="voldown">🔉 Quieter</button>
   <button data-a="mute">🤐 Zip</button><button data-a="unmute">🗣️ Unzip</button><button data-a="volup">🔊 Louder</button></div>
@@ -344,8 +371,10 @@ table{width:100%;border-collapse:collapse;font-size:14px}td{padding:3px 0;vertic
 <script>
 const PIN='$code';let since=0,busy=false;const v=document.getElementById('v'),log=document.getElementById('log'),dot=document.getElementById('dot');
 function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2600)}
-function cam(){if(busy)return;busy=true;const i=new Image();i.onload=()=>{v.src=i.src;busy=false;dot.classList.add('on')};
- i.onerror=()=>{busy=false;dot.classList.remove('on')};i.src='/cam.jpg?pin='+PIN+'&t='+Date.now()}
+function cam(){if(document.hidden)return;v.src='/cam.mjpg?pin='+PIN+'&t='+Date.now()}
+v.onload=()=>dot.classList.add('on');
+v.onerror=()=>{dot.classList.remove('on');clearTimeout(v._r);v._r=setTimeout(cam,3000)};
+document.addEventListener('visibilitychange',()=>{if(document.hidden){v.removeAttribute('src');dot.classList.remove('on')}else cam()});
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function hm(t){const d=new Date(t);return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
 async function live(){try{const r=await fetch('/live.json?pin='+PIN+'&since='+since);if(!r.ok)return;const j=await r.json();
@@ -358,7 +387,7 @@ async function post(url,data){const b=new URLSearchParams(Object.assign({pin:PIN
 document.querySelectorAll('.qr').forEach(b=>b.onclick=()=>post('/api/say',{text:b.textContent.replace(/[^\p{L}\p{N}\p{P}\s]/gu,'').trim()}));
 document.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>post('/api/do',{a:b.dataset.a}));
 document.getElementById('sayf').onsubmit=e=>{e.preventDefault();const t=document.getElementById('sayt');if(!t.value.trim())return;post('/api/say',{text:t.value});t.value=''};
-cam();live();setInterval(cam,3000);setInterval(live,2000);
+cam();live();setInterval(live,2000);setInterval(cam,15*60000);
 </script></main></body></html>"""
     }
 

@@ -35,10 +35,11 @@ class FaceTracker(
     @Volatile private var lastFrameAt = 0L
     @Volatile private var busy = false
     private var prevGrid: IntArray? = null
-    @Volatile private var grab: ((ByteArray?) -> Unit)? = null
+    /** everyone waiting for the next picture (the live web camera and a greeting photo can both ask at once) */
+    private val grabs = java.util.concurrent.CopyOnWriteArrayList<(ByteArray?) -> Unit>()
 
     /** Hand back the next camera picture as a small upright JPEG (without stopping tracking). */
-    fun grabJpeg(onDone: (ByteArray?) -> Unit) { if (running) grab = onDone else onDone(null) }
+    fun grabJpeg(onDone: (ByteArray?) -> Unit) { if (running) grabs.add(onDone) else onDone(null) }
 
     private val detector by lazy {
         FaceDetection.getClient(
@@ -94,15 +95,15 @@ class FaceTracker(
             c.addCallbackBuffer(ByteArray(w * h * 3 / 2))
             c.addCallbackBuffer(ByteArray(w * h * 3 / 2))
             c.setPreviewCallbackWithBuffer { data, camera ->
-                grab?.let { g ->
-                    grab = null
+                if (grabs.isNotEmpty()) {
+                    val waiting = grabs.toList(); grabs.removeAll(waiting)
                     val jpeg = try {
                         val out = java.io.ByteArrayOutputStream()
                         android.graphics.YuvImage(data, android.graphics.ImageFormat.NV21, w, h, null)
                             .compressToJpeg(android.graphics.Rect(0, 0, w, h), 85, out)
                         Snapshot.shrink(out.toByteArray(), rotation)
                     } catch (_: Throwable) { null }
-                    g(jpeg)
+                    waiting.forEach { g -> try { g(jpeg) } catch (_: Throwable) {} }
                 }
                 val now = System.currentTimeMillis()
                 if (!busy && now - lastFrameAt > 250) {   // ~4 a second: leaves the old processor free for listening
@@ -119,6 +120,7 @@ class FaceTracker(
     }
 
     private fun close() {
+        grabs.toList().also { grabs.removeAll(it) }.forEach { g -> try { g(null) } catch (_: Throwable) {} }
         try { cam?.setPreviewCallbackWithBuffer(null) } catch (_: Throwable) {}
         try { cam?.stopPreview() } catch (_: Throwable) {}
         try { cam?.release() } catch (_: Throwable) {}
