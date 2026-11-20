@@ -1447,31 +1447,21 @@ class MainActivity : Activity() {
     /** Volume for Pip's own sound effects at this time of day. */
     private fun sfx(normal: Float): Float = normal * (if (whisperTime()) 0.35f else if (eveningTime()) 0.6f else 1f)
 
-    // ---- the Christmas elves (6 Nov to Christmas): Pip reacts to their mischief
+    // ---- the Christmas elves (6 Nov to Christmas): Pip reacts to their mischief with her face only.
+    //      She stays quiet while they're up to things; she only speaks when someone taps and catches one.
     private fun elfEvent(e: String) {
         val awake = phase == Phase.LISTENING && !muted && !chloeMode
         when (e) {
-            "tickle" -> { eyes.feel(EyesView.Emotion.LAUGHING, 3500)
-                if (awake && Math.random() < 0.5) speakLine(listOf("[laughing] Hee hee! Stop it! Get off!", "[laughing] No! Not the tickles! Elves!",
-                    "[laughing] Ha ha, stop! I'm ticklish in my pixels!").fresh()) }
-            "scared" -> { Mmf.squeak(sfx(0.4f)); eyes.feel(EyesView.Emotion.LAUGHING, 2000)
-                if (awake && Math.random() < 0.4) speakLine(listOf("[laughing] Ha! Run, little elves, run!", "[laughing] Look at them go!",
-                    "[wink] That's right, scatter! And don't come back. Well, do. It's fun.").fresh()) }
+            "tickle" -> eyes.feel(EyesView.Emotion.LAUGHING, 3500)
+            "scared" -> { Mmf.squeak(sfx(0.4f)); eyes.feel(EyesView.Emotion.LAUGHING, 2000) }
             "found" -> { Mmf.squeak(sfx(0.4f))
                 val n = (if (prefs.getString("elfDay", "") == todayKey) prefs.getInt("elfFound", 0) else 0) + 1
                 prefs.edit().putString("elfDay", todayKey).putInt("elfFound", n).apply()
                 eyes.feel(EyesView.Emotion.EXCITED, 2500)
                 if (awake) speakLine(listOf("[excited] You caught one! That's $n today.", "[laughing] Got him! Elves caught today: $n.",
                     "[excited] Ha! Busted. Number $n.").fresh()) else eyes.caption = "🧝 Caught one! ($n today)" }
-            "snowball" -> { eyes.feel(EyesView.Emotion.SURPRISED, 2500); eyes.caption = "Oi! ❄️"
-                if (awake && Math.random() < 0.5) speakLine(listOf("[angry] Oi! Right in the eye!", "[angry] Who threw that?! Elves!",
-                    "[surprised] Cold! Cold cold cold!").fresh()) }
-            "tinsel" -> if (awake && Math.random() < 0.6) speakLine(listOf("[excited] Get it, lads! Wrap that kettle up!",
-                "[laughing] Ha! The kettle's in tinsel. Best it's ever looked.", "[wink] Good work, elves. The kettle's a Christmas tree now.").fresh())
-            "fixing" -> if (awake && Math.random() < 0.5) speakLine(listOf("[curious] What are you two doing to my crack?",
-                "[suspicious] Is that a hammer? Near my SCREEN?").fresh())
-            "fixfail" -> if (awake) speakLine(listOf("[annoyed] Sticky tape. Brilliant. Thanks, lads.",
-                "[sad] Still cracked. Maybe try Santa.", "[laughing] It fell off. Elf engineering, everybody.").fresh())
+            "snowball" -> { eyes.feel(EyesView.Emotion.SURPRISED, 2500); eyes.caption = "Oi! ❄️" }
+            "fixfail" -> eyes.feel(EyesView.Emotion.SAD, 2500)
         }
     }
     /** Each morning (once): what the elves got up to overnight. */
