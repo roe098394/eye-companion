@@ -94,6 +94,9 @@ class EyesView(context: Context) : View(context) {
             field = value
         }
 
+    /** 0..1 how loud Pip's own voice is right now (from the sound she's playing), or -1 if unknown. */
+    @Volatile var voiceLevel: () -> Float = { -1f }
+
     /** 0..1 loudness from the mic or voice, used to make the eyes "breathe". */
     @Volatile var level = 0f
 
@@ -1579,8 +1582,13 @@ class EyesView(context: Context) : View(context) {
         if (mood == Mood.THINK) { curve = 0f; width = 0.5f; amp = 0.03f; speed = 0.8f }
         if (mood == Mood.LISTEN) amp = max(amp, 0.012f + level * 0.08f)          // listening: the wave follows the room's sound
         val talking = mood == Mood.TALK
-        if (talking) {
-            // the mic is off while she speaks, so the loudness is made up: uneven syllables with little gaps between words
+        val real = if (talking) voiceLevel() else -1f
+        if (talking && real >= 0f) {
+            // the real voice: the wave swells on loud words and flattens in the gaps
+            amp = max(amp, 0.015f + 0.19f * real)
+            curve = curve.coerceIn(-0.03f, 0.04f); width = max(width, 0.9f); speed = max(speed, 2f)
+        } else if (talking) {
+            // the tablet's own voice gives no sound to measure, so the loudness is made up: uneven syllables with little gaps
             val syl = abs(sin(secs * 10.5f + 1.8f * sin(secs * 2.3f)))
             val word = (0.55f + 0.45f * sin(secs * 3.1f + 0.7f * sin(secs * 1.3f))).coerceIn(0f, 1f) *
                 (if (sin(secs * 1.7f) > 0.85f) 0.1f else 1f)

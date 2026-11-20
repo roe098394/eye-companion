@@ -60,6 +60,19 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
     private val player = Executors.newSingleThreadExecutor()
     @Volatile private var generation = 0
     @Volatile private var track: AudioTrack? = null
+    // loudness of the sentence being played, one value per 20 ms, so the mouth can follow the real voice
+    @Volatile private var envelope: FloatArray? = null
+    @Volatile private var envFrames = 480
+
+    /** 0..1 how loud Pip's voice is right now, or -1 if unknown (the tablet's own voice, or not talking). */
+    fun levelNow(): Float {
+        val t = track ?: return -1f
+        val e = envelope ?: return -1f
+        return try {
+            val i = t.playbackHeadPosition / envFrames
+            if (i in e.indices) e[i] else 0f
+        } catch (_: Exception) { -1f }
+    }
 
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
@@ -476,6 +489,22 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
             pos += 8 + len + (len and 1)
         }
         if (dataStart < 0 || bits != 16) return false
+        // loudness envelope (first channel, 20 ms windows)
+        run {
+            val win = maxOf(1, rate / 50); val frameBytes = 2 * channels
+            val frames = dataLen / frameBytes
+            val env = FloatArray(frames / win + 1)
+            var k = 0
+            while (k < env.size) {
+                var sum = 0.0; var cnt = 0
+                var f = k * win
+                val stop = minOf(frames, f + win)
+                while (f < stop) { val v = bb.getShort(dataStart + f * frameBytes).toDouble(); sum += v * v; cnt++; f += 2 }
+                env[k] = if (cnt == 0) 0f else (Math.sqrt(sum / cnt) / 7000.0).coerceIn(0.0, 1.0).toFloat()
+                k++
+            }
+            envFrames = win; envelope = env
+        }
         val chMask = if (channels == 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
         val minBuf = AudioTrack.getMinBufferSize(rate, chMask, AudioFormat.ENCODING_PCM_16BIT)
         val t = AudioTrack.Builder()
@@ -521,7 +550,7 @@ class Voice(context: Context, onReady: (Boolean) -> Unit) {
         } finally {
             try { t.stop() } catch (_: Exception) {}
             t.release()
-            if (track === t) track = null
+            if (track === t) { track = null; envelope = null }
             if (alarmWas >= 0) try {                    // put the alarm volume back how it was
                 (appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager)
                     .setStreamVolume(android.media.AudioManager.STREAM_ALARM, alarmWas, 0)

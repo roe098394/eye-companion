@@ -30,10 +30,13 @@ object Faces {
     private fun safeId(id: String) = id.filter { it.isDigit() }.take(19)
     private fun personDir(name: String) = File(knownDir, cleanName(name)).takeIf { cleanName(name).isNotEmpty() }
 
-    @Synchronized fun addUnsorted(jpeg: ByteArray) {
-        if (!ready) return
-        File(unsortedDir, "${System.currentTimeMillis()}.jpg").writeBytes(small(jpeg, 640))
+    /** Keep a photo to be named later. Returns its id ("" if it couldn't). */
+    @Synchronized fun addUnsorted(jpeg: ByteArray): String {
+        if (!ready) return ""
+        val id = System.currentTimeMillis().toString()
+        File(unsortedDir, "$id.jpg").writeBytes(small(jpeg, 640))
         unsortedDir.listFiles()?.sortedByDescending { it.name }?.drop(MAX_UNSORTED)?.forEach { it.delete() }
+        return id
     }
     @Synchronized fun unsorted(): List<String> =
         if (!ready) emptyList() else unsortedDir.listFiles()?.map { it.nameWithoutExtension }?.sortedDescending().orEmpty()

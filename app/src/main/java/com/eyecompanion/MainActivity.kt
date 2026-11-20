@@ -317,6 +317,12 @@ class MainActivity : Activity() {
             out += "Shopping" to (if (shopping.isEmpty()) "list empty" else shopping.joinToString(", "))
             out += "Bins" to (if (blackBinWeek()) "black bins this Thursday" else "green recycling this Thursday")
             if (eyes.usageText.isNotEmpty()) out += "Online brain" to eyes.usageText
+            Faces.unsorted().size.let { u -> out += "Faces" to "${Faces.names().size} known" + (if (u > 0) ", $u to name" else "") }
+            out += "Build" to "${BuildConfig.VERSION_CODE}"
+            val crashAt = prefs.getLong("crashAt", 0L)
+            out += "Last crash" to (if (crashAt == 0L) "none" else
+                java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.UK).format(java.util.Date(crashAt)) +
+                " (build ${prefs.getInt("crashBuild", 0)}): " + (prefs.getString("crashWhat", "") ?: ""))
             out.toList()
         } ?: listOf("Pip" to "busy, try again")
         override fun getShopping() = shopping
@@ -1202,6 +1208,49 @@ class MainActivity : Activity() {
     private var lastVisitorPhoto = 0L
     /** Who Pip last saw at the bench (MARK, LAURA...), or "" */
     @Volatile private var whoSeen = ""
+        set(v) { field = v; if (v.isNotEmpty()) prefs.edit().putLong("seenAt_$v", System.currentTimeMillis()).apply() }
+
+    /** When the camera last saw each person (for "has Brandon been down yet?"). */
+    private fun seenLine(): String {
+        val now = System.currentTimeMillis()
+        val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK)
+        val startToday = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }.timeInMillis
+        val bits = knownNames().sortedBy { it }.mapNotNull { n ->
+            val at = prefs.getLong("seenAt_$n", 0L); if (at == 0L) return@mapNotNull null
+            val nice = n.lowercase().split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+            val mins = (now - at) / 60_000
+            nice + " " + when {
+                mins < 2 -> "just now"
+                mins < 60 -> "$mins minutes ago"
+                at >= startToday -> "today at ${fmt.format(java.util.Date(at))}"
+                at >= startToday - 86_400_000L -> "yesterday at ${fmt.format(java.util.Date(at))}"
+                else -> "${(now - at) / 86_400_000L} days ago"
+            }
+        }
+        return if (bits.isEmpty()) "" else " Last seen at the bench by your camera (it can miss people, so say 'I last saw...'): ${bits.joinToString("; ")}."
+    }
+    /** Names not yet seen today (since 4am). */
+    private fun notSeenToday(): List<String> {
+        val start = java.util.Calendar.getInstance().apply {
+            if (get(java.util.Calendar.HOUR_OF_DAY) < 4) add(java.util.Calendar.DAY_OF_YEAR, -1)
+            set(java.util.Calendar.HOUR_OF_DAY, 4); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0) }.timeInMillis
+        return knownNames().filter { prefs.getLong("seenAt_$it", 0L) < start }
+    }
+    /** One line of today's news for someone's first hello of the morning: weather, bins, sleeps till Christmas. */
+    private fun morningBrief(): String {
+        val bits = ArrayList<String>()
+        if (eyes.wxDesc.isNotEmpty()) bits.add("weather ${eyes.wxDesc.lowercase()}${if (eyes.wxTemp.isNotEmpty()) ", ${eyes.wxTemp}" else ""}" +
+            (if (eyes.wxLine.isNotEmpty()) " (${eyes.wxLine})" else ""))
+        val cal = java.util.Calendar.getInstance()
+        if (cal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.WEDNESDAY)
+            bits.add("bins go out tonight: ${if (blackBinWeek()) "both black bins" else "the green recycling bin"}")
+        val xmas = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.MONTH, java.util.Calendar.DECEMBER); set(java.util.Calendar.DAY_OF_MONTH, 25) }
+        val days = (xmas.get(java.util.Calendar.DAY_OF_YEAR) - cal.get(java.util.Calendar.DAY_OF_YEAR))
+        if (days in 0..40) bits.add(if (days == 0) "it's Christmas Day" else "$days sleeps till Christmas")
+        return bits.joinToString("; ")
+    }
     private val PEOPLE = listOf("MARK", "LAURA", "BRANDON", "SOPHIE", "AMELIA", "CHLOE")
     /** The family, plus anyone named on the web page's Faces page (longest first, so "MARK" can't swallow "MARKUS"). */
     private fun knownNames() = (PEOPLE + Faces.names().map { it.uppercase() }).distinct().sortedByDescending { it.length }
@@ -1213,14 +1262,46 @@ class MainActivity : Activity() {
         ")\\s*[:,;\\-]?\\s*)+", RegexOption.IGNORE_CASE), "")?.trim()
     /** Someone's there but Pip doesn't know them (or has no named photo of them yet): keep the photo for the Faces page. */
     @Volatile private var lastFaceKept = 0L
-    private fun keepIfUnknown(jpeg: ByteArray?, raw: String?) {
-        if (jpeg == null || raw.isNullOrBlank() || raw.trimStart().uppercase().startsWith("NOBODY")) return
+    @Volatile private var lastFaceKeptId = ""
+    /** Returns the id of the photo kept for this person (or the one kept a moment ago), or null. */
+    private fun keepIfUnknown(jpeg: ByteArray?, raw: String?): String? {
+        if (jpeg == null || raw.isNullOrBlank() || raw.trimStart().uppercase().startsWith("NOBODY")) return null
         val who = whoIn(raw)
-        if (who.isNotEmpty() && Faces.names().any { it.uppercase() == who }) return
+        if (who.isNotEmpty() && Faces.names().any { it.uppercase() == who }) return null
         val now = System.currentTimeMillis()
-        if (now - lastFaceKept < 60_000) return             // the hello right after the "who is it?" look: one photo is enough
+        if (now - lastFaceKept < 60_000) return lastFaceKeptId.ifEmpty { null }   // the hello right after the "who is it?" look: one photo is enough
         lastFaceKept = now
-        Faces.addUnsorted(jpeg)
+        lastFaceKeptId = Faces.addUnsorted(jpeg)
+        return lastFaceKeptId.ifEmpty { null }
+    }
+
+    // ---- a face Pip doesn't know: she asks their name and files the photo under whatever they say
+    @Volatile private var askingNameFor: String? = null
+    @Volatile private var askingNameAt = 0L
+    private var lastNameAsk = 0L
+    private val NAME_IS = Regex("\\b(?:i'?m|i am|my name'?s|my name is|it'?s|its|call me|this is|they call me)\\s+([a-z][a-z'-]+(?:\\s[a-z][a-z'-]+)?)")
+    private val NOT_A_NAME = setOf("no", "nope", "nah", "nee", "nobody", "none", "pip", "what", "yes", "yeah", "aye", "hello", "hi",
+        "hiya", "me", "just", "fine", "good", "ok", "okay", "alright", "not", "telling", "sorry", "the", "a", "here", "back", "home")
+    private fun nameAnswer(raw: String): Boolean {
+        val id = askingNameFor ?: return false
+        if (System.currentTimeMillis() - askingNameAt > 25_000) { askingNameFor = null; return false }
+        val t = raw.lowercase().trim().trimEnd('.', '!', '?')
+        if (Regex("^(no|nope|nah|nee|not telling|mind your own|none of your|shan'?t)\\b").containsMatchIn(t)) {
+            askingNameFor = null
+            speakLine(listOf("[suspicious] Fine. Mystery human. I'll be watching you.", "[embarrassed] Fair enough. I'll call you Mystery.").fresh())
+            return true
+        }
+        val words = t.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val picked = NAME_IS.find(t)?.groupValues?.get(1) ?: if (words.size in 1..2) words.joinToString(" ") else return false
+        val parts = picked.split(" ").takeWhile { it !in NOT_A_NAME }
+        val name = Faces.cleanName(parts.joinToString(" "))
+        if (name.length < 2) return false
+        askingNameFor = null
+        val saved = Faces.label(id, name)
+        speakLine(if (saved != null) listOf("[happy] Nice to meet you, $saved. I'll remember your face.",
+            "[excited] $saved! Got it. Face saved. Welcome to the kitchen.").fresh()
+            else "[happy] Nice to meet you, $name.")
+        return true
     }
     /**
      * How Pip tells people apart: named photos from the Faces page first (comparing faces), then for anyone
@@ -1266,6 +1347,12 @@ class MainActivity : Activity() {
     private fun complimentNow(thanks: () -> Unit) {
         val askTablets = tabletsDue()
         lookThroughCamera { jpeg ->
+            val hourC = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val brief = if (hourC in 5..11) morningBrief() else ""
+            val firsts = notSeenToday()
+            val extra = (if (hourC >= 21 || hourC < 4) " It's late: make it a goodnight instead of a hello (e.g. 'Night, Sophie')." else "") +
+                (if (brief.isNotEmpty() && firsts.isNotEmpty()) " If it's one of ${firsts.joinToString(", ")} (not seen yet today), " +
+                    "add ONE more short sentence to the line with the morning news, casually: $brief." else "")
             val raw = jpeg?.let {
                 online.lookAt(it, "Someone just walked up to you. " + WHO_QUESTION + " Then add the word DISHES if you can see used dishes, " +
                     "dirty cups or mugs, or plates waiting to be washed, and the word CLOTHES if you can see a pile of folded " +
@@ -1273,11 +1360,12 @@ class MainActivity : Activity() {
                     "a few words at most, like a mate would. No compliments, no gushing, don't say you missed them or were lonely. " +
                     "BUT if it's LAURA, greet her as the queen of the kitchen, with a bit of royal respect (e.g. 'Morning, your majesty'), still short. " +
                     "Never mention the dishes or clothes in this line. Start it with the [happy] tag. " +
-                    "If nobody is in the photo, write NOBODY and just say hello.",
-                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100,
+                    "If nobody is in the photo, write NOBODY and just say hello." + extra,
+                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 150,
                     refs = Faces.references())
             }
-            keepIfUnknown(jpeg, raw)
+            val keptId = keepIfUnknown(jpeg, raw)
+            val stranger = raw?.trimStart()?.uppercase()?.startsWith("OTHER") == true
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
             whoSeen = whoIn(raw)
             if (isLaura) { lastLauraSeen = System.currentTimeMillis(); main.post { lauraVisuals(carpet = Math.random() < 0.4); lastLauraEffort = System.currentTimeMillis() } }
@@ -1286,7 +1374,13 @@ class MainActivity : Activity() {
             val line = afterWho(raw)
             main.post {
                 if (phase != Phase.LISTENING) return@post
-                if (line.isNullOrBlank()) thanks() else speakLine(line)
+                val nowA = System.currentTimeMillis()
+                if (stranger && keptId != null && !chloeMode && !carMode && nowA - lastNameAsk > 30 * 60_000) {
+                    // someone Pip doesn't know: ask who they are, and the answer names the photo
+                    lastNameAsk = nowA; askingNameFor = keptId; askingNameAt = nowA + 4000
+                    speakLine(listOf("[curious] Hiya. I don't think we've met. I'm Pip. What's your name?",
+                        "[curious] Ooh, a new face. I'm Pip. Who are you?").fresh())
+                } else if (line.isNullOrBlank()) thanks() else speakLine(line)
                 lastMessCheck = System.currentTimeMillis()            // just looked: the 2-hour check can wait
                 moanAboutMess(dishes, clothes)
                 // Laura, and she hasn't had her tablets yet today: ask once she's been complimented
@@ -2430,8 +2524,20 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Faces.init(filesDir)
+        // if Pip crashes, note what happened so the web page can show it (then crash as normal)
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { th, e ->
+            try {
+                val where = e.stackTrace.firstOrNull { it.className.startsWith("com.eyecompanion") } ?: e.stackTrace.firstOrNull()
+                prefs.edit().putLong("crashAt", System.currentTimeMillis()).putInt("crashBuild", BuildConfig.VERSION_CODE)
+                    .putString("crashWhat", "${e.javaClass.simpleName}: ${e.message?.take(140) ?: ""}" +
+                        (where?.let { " at ${it.fileName}:${it.lineNumber}" } ?: "")).commit()
+            } catch (_: Throwable) {}
+            previousHandler?.uncaughtException(th, e)
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         eyes = EyesView(this)
+        eyes.voiceLevel = { voice?.levelNow() ?: -1f }
         eyes.showCaptions = prefs.getBoolean("captions", true)
         val rootView = android.widget.FrameLayout(this)
         rootView.addView(eyes)
@@ -3342,6 +3448,7 @@ class MainActivity : Activity() {
         val shouted = lastShouted; lastShouted = false
         // tablets answer ("I've taken them") counts whoever it's said to
         if (!fromAlexa) {
+        if (phase == Phase.LISTENING && nameAnswer(removeName(text))) return
         if (phase == Phase.LISTENING && tabletAnswer(removeName(text).lowercase())) return
         if (phase == Phase.LISTENING && dogAnswer(removeName(text).lowercase())) return
         if (phase == Phase.LISTENING && binsAnswer(removeName(text).lowercase())) return
@@ -3889,7 +3996,7 @@ class MainActivity : Activity() {
         val seen = if (whoSeen.isEmpty() || carMode || System.currentTimeMillis() - lastVisitorPhoto > 30 * 60_000) ""
             else " The person at the bench is probably ${whoSeen.lowercase().replaceFirstChar { it.uppercase() }} (from your camera; you might be wrong)."
         val queen = " Laura is the queen of the kitchen: always be extra kind, helpful and respectful to her, like a loyal royal servant (warm, never creepy or gushing)."
-        return "$p Today is $today. You are in the UK.$people$seen$queen${moodLine()}"
+        return "$p Today is $today. You are in the UK.$people$seen${if (carMode) "" else seenLine()}$queen${moodLine()}"
     }
 
     /** Apply car mode (or home mode) to the eyes, voice, brain and screen. */
