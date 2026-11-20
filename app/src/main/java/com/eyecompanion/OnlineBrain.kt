@@ -163,10 +163,11 @@ class OnlineBrain(private val systemPrompt: () -> String) {
             when { it.contains("yes") -> true; it.contains("no") -> false; else -> null }
         }
 
-    /** One-off question about a camera picture (not added to the chat memory). null = couldn't. */
+    /** One-off question about a camera picture (not added to the chat memory). null = couldn't.
+     *  [refs] = named photos of people Pip knows, shown before the new photo so the brain can compare faces (Claude only). */
     fun lookAt(jpeg: ByteArray, question: String, system: String? = null, maxTokens: Int = 120,
-               temperature: Double = 0.7): String? {
-        if (claudeOk) claudeLook(jpeg, question, system, maxTokens, temperature)?.let { return it }
+               temperature: Double = 0.7, refs: List<Pair<String, ByteArray>> = emptyList()): String? {
+        if (claudeOk) claudeLook(jpeg, question, system, maxTokens, temperature, refs)?.let { return it }
         return if (groqOn) groqLook(jpeg, question, system, maxTokens, temperature) else null
     }
 
@@ -225,8 +226,17 @@ class OnlineBrain(private val systemPrompt: () -> String) {
     }
 
     /** One-off look at a picture with Claude. null = couldn't. */
-    private fun claudeLook(jpeg: ByteArray, question: String, system: String?, maxTokens: Int, temperature: Double): String? = try {
-        val content = JSONArray().put(claudeImage(jpeg)).put(JSONObject().put("type", "text").put("text", question))
+    private fun claudeLook(jpeg: ByteArray, question: String, system: String?, maxTokens: Int, temperature: Double,
+                           refs: List<Pair<String, ByteArray>> = emptyList()): String? = try {
+        val content = JSONArray()
+        if (refs.isNotEmpty()) {
+            content.put(JSONObject().put("type", "text").put("text", "Reference photos of people you know (each labelled with their name):"))
+            refs.forEach { (name, img) ->
+                content.put(JSONObject().put("type", "text").put("text", "This is ${name.uppercase()}:")).put(claudeImage(img))
+            }
+            content.put(JSONObject().put("type", "text").put("text", "Now the NEW photo, taken just now by your camera:"))
+        }
+        content.put(claudeImage(jpeg)).put(JSONObject().put("type", "text").put("text", question))
         val body = JSONObject().put("model", CLAUDE_MODEL).put("max_tokens", maxTokens)
             .put("temperature", temperature)
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))

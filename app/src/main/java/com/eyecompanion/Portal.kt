@@ -197,6 +197,29 @@ class Portal(private val prefs: SharedPreferences, private val host: Host) {
                 if (form["pin"] != pin) { send("403 Forbidden", "text/plain", "Wrong code."); return }
                 send("200 OK", "text/plain; charset=utf-8", host.action(form["a"].orEmpty()))
             }
+            // ---- Faces: photos Pip took of people she didn't know, to be named here (behind the code, like the camera)
+            method == "GET" && path.startsWith("/face.jpg") -> {
+                val q = query(path)
+                if (q["pin"] != pin) { send("403 Forbidden", "text/plain", "Wrong code."); return }
+                val jpg = Faces.photo(q["w"].orEmpty(), q["id"].orEmpty())
+                if (jpg == null) { send("404 Not Found", "text/plain", "Gone."); return }
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpg.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray())
+                out.write(jpg); out.flush()
+            }
+            method == "POST" && path.startsWith("/faces/") -> {
+                if (form["pin"] != pin) { send("403 Forbidden", "text/plain", "Wrong code."); return }
+                val id = form["id"].orEmpty(); val name = form["name"].orEmpty()
+                flash = when (path) {
+                    "/faces/name" -> Faces.label(id, name)?.let { "Got it, that's $it. Pip will remember." } ?: "Type a name first."
+                    "/faces/drop" -> { Faces.discard(id); "Photo deleted." }
+                    "/faces/del" -> { Faces.removePhoto(name, id); "Photo deleted." }
+                    "/faces/forget" -> { Faces.forget(name); "Pip has forgotten ${Faces.cleanName(name)}." }
+                    "/faces/snap" -> host.snapshot()?.let { Faces.addUnsorted(it); "Photo taken. Name it below." } ?: "Camera busy, try again."
+                    else -> ""
+                }
+                send("303 See Other", "text/plain", "", "Location: /faces?pin=$pin\r\n")
+            }
+            method == "GET" && path.startsWith("/faces") -> send("200 OK", "text/html; charset=utf-8", facesPage(query(path)["pin"].orEmpty()))
             method == "GET" && path.startsWith("/cam") -> send("200 OK", "text/html; charset=utf-8", camPage(query(path)["pin"].orEmpty()))
             method == "GET" && (path == "/" || path.startsWith("/?")) -> send("200 OK", "text/html; charset=utf-8", page())
             else -> send("404 Not Found", "text/plain", "Not here.")
@@ -206,6 +229,62 @@ class Portal(private val prefs: SharedPreferences, private val host: Host) {
     @Volatile private var flash = ""
     private fun query(path: String): Map<String, String> = path.substringAfter('?', "").split("&").mapNotNull { kv ->
         kv.split("=", limit = 2).takeIf { it.size == 2 }?.let { URLDecoder.decode(it[0], "UTF-8") to URLDecoder.decode(it[1], "UTF-8") } }.toMap()
+
+    /** Name the people Pip has photographed; see and remove the photos she knows people by. */
+    private fun facesPage(code: String): String {
+        val head = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pip faces</title><style>
+:root{--bg:#0d1114;--card:#161c21;--ink:#e8f6fb;--mute:#8aa3ad;--cyan:#5ce1ff;--red:#e8433a;--line:#233038}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:820px;margin:0 auto;padding:14px 14px 40px}a{color:var(--cyan)}.top{display:flex;align-items:center;gap:10px}.top h1{flex:1;font-size:22px;margin:4px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;margin:12px 0}
+h2{font-size:14px;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);margin:0 0 8px}.sub{color:var(--mute);margin:0 0 10px;font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.ph{background:#0d1418;border:1px solid #2b3a42;border-radius:12px;overflow:hidden}.ph img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
+.ph form{display:flex;gap:6px;padding:6px}.ph input{flex:1;min-width:0}
+input{font:inherit;color:var(--ink);background:#0d1418;border:1px solid #2b3a42;border-radius:10px;padding:8px}
+button{font:inherit;border:0;border-radius:10px;padding:8px 12px;background:var(--cyan);color:#062028;font-weight:600;cursor:pointer}
+button.x{background:#2a1a1a;color:#ffb4ae;padding:8px 10px}.flash{background:#0f3a46;border-radius:12px;padding:10px 12px;margin:10px 0}
+.person{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line)}.person:first-of-type{border-top:0}
+.person b{min-width:90px}.thumb{position:relative}.thumb img{width:64px;height:84px;object-fit:cover;border-radius:8px;display:block}
+.thumb form{position:absolute;top:-6px;right:-6px}.thumb button{padding:0 7px;border-radius:50%;font-size:14px;line-height:22px}
+</style></head><body><main>"""
+        if (code != pin) return head + """<div class="card" style="max-width:420px;margin:40px auto;text-align:center"><h2>Faces</h2>
+<form method="get" action="/faces"><p class="sub">Enter the code from Pip's menu (Pip's web page).</p>
+<div style="display:flex;gap:8px"><input name="pin" inputmode="numeric" maxlength="4" autofocus placeholder="Code" style="flex:1"><button>Open</button></div></form>
+<p><a href="/">← Back</a></p></div></main></body></html>"""
+        val f = flash; flash = ""
+        val people = Faces.people()
+        val suggest = (listOf("Mark", "Laura", "Brandon", "Sophie", "Amelia", "Chloe") + people.keys).distinct()
+        fun img(w: String, id: String) = "/face.jpg?pin=$pin&w=${java.net.URLEncoder.encode(w, "UTF-8")}&id=$id"
+        val hidden = "<input type=\"hidden\" name=\"pin\" value=\"$pin\">"
+        val unsorted = Faces.unsorted()
+        return head + """<div class="top"><h1>🙂 Faces</h1><a href="/cam?pin=$pin">Pip control</a><a href="/">Main page</a></div>
+${if (f.isNotEmpty()) "<div class=\"flash\">${esc(f)}</div>" else ""}
+<datalist id="names">${suggest.joinToString("") { "<option value=\"${esc(it)}\">" }}</datalist>
+<div class="card"><h2>Who's this?</h2>
+<p class="sub">When Pip sees someone she doesn't know, she keeps a photo here. Type their name and Pip will recognise them next time.</p>
+<form method="post" action="/faces/snap" style="margin:0 0 10px">$hidden<button>📸 Take a photo now</button>
+<span class="sub" style="margin-left:6px">(stand in front of Pip)</span></form>
+${if (unsorted.isEmpty()) "<p class=\"sub\">No new faces right now.</p>" else "<div class=\"grid\">" + unsorted.joinToString("") { id ->
+    "<div class=\"ph\"><img src=\"${img("u", id)}\" loading=\"lazy\" alt=\"\">" +
+    "<form method=\"post\" action=\"/faces/name\">$hidden<input type=\"hidden\" name=\"id\" value=\"$id\">" +
+    "<input type=\"text\" name=\"name\" list=\"names\" maxlength=\"20\" placeholder=\"Name\" required><button>Save</button></form>" +
+    "<form method=\"post\" action=\"/faces/drop\" style=\"padding-top:0\">$hidden<input type=\"hidden\" name=\"id\" value=\"$id\">" +
+    "<button class=\"x\" style=\"width:100%\">Delete photo</button></form></div>" } + "</div>"}
+</div>
+<div class="card"><h2>People Pip knows</h2>
+<p class="sub">Pip compares faces with the newest photo of each person. Name 2 or 3 photos of someone (different days and lighting) for the best results.</p>
+${if (people.isEmpty()) "<p class=\"sub\">Nobody yet.</p>" else people.entries.joinToString("") { (name, ids) ->
+    "<div class=\"person\"><b>${esc(name)}</b>" + ids.joinToString("") { id ->
+        "<div class=\"thumb\"><img src=\"${img(name, id)}\" loading=\"lazy\" alt=\"\"><form method=\"post\" action=\"/faces/del\">$hidden" +
+        "<input type=\"hidden\" name=\"name\" value=\"${esc(name)}\"><input type=\"hidden\" name=\"id\" value=\"$id\"><button class=\"x\" title=\"Delete photo\">×</button></form></div>" } +
+    "<form method=\"post\" action=\"/faces/forget\" style=\"margin-left:auto\" onsubmit=\"return confirm('Forget ${esc(name).replace("'", "")}?')\">$hidden" +
+    "<input type=\"hidden\" name=\"name\" value=\"${esc(name)}\"><button class=\"x\">Forget</button></form></div>" }}
+</div>
+<p class="sub" style="text-align:center">Photos stay on the tablet. Only works on the home Wi-Fi.</p>
+</main></body></html>"""
+    }
 
     /** The control room: camera, what's being said, quick replies, say anything, remote buttons. */
     private fun camPage(code: String): String {
@@ -242,7 +321,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}td{padding:3px 0;vertic
         val quick = listOf("Hello! 👋", "On my way", "Dinner's ready!", "Two minutes", "Be quiet please", "Who's there?",
             "Love you", "Have you fed Honey?", "Put the kettle on", "Bedtime!")
         return head + """
-<div class="top"><span class="dot" id="dot"></span><h1>Pip control</h1><a href="/">Main page</a></div>
+<div class="top"><span class="dot" id="dot"></span><h1>Pip control</h1><a href="/faces?pin=$pin">Faces</a><a href="/">Main page</a></div>
 <div class="grid">
 <div>
  <div class="card"><img id="v" alt="Pip's camera"><div class="st" id="camst">Camera refreshes every 3 seconds. Nothing is saved.</div></div>
@@ -343,6 +422,8 @@ ${if (shop.isEmpty()) "<p class=\"empty\" style=\"margin-top:12px\">Empty.</p>" 
     "</select><button>Save</button></div></form>" }}</div>
 <div class="card"><h2>📷 Pip control</h2><p class="sub" style="margin:0 0 8px">Camera, what's being said, quick replies, remote and face (needs the code from Pip's menu).</p>
 <form method="get" action="/cam" class="add"><input type="text" name="pin" inputmode="numeric" maxlength="4" placeholder="Code"><button>Open</button></form></div>
+<div class="card"><h2>🙂 Faces</h2><p class="sub" style="margin:0 0 8px">Name the people Pip has photographed so she knows who's who (needs the code).</p>
+<form method="get" action="/faces" class="add"><input type="text" name="pin" inputmode="numeric" maxlength="4" placeholder="Code"><button>Open</button></form></div>
 <p class="sub" style="text-align:center">Only works on the home Wi-Fi. Nothing leaves the house.</p>
 </main></body></html>"""
     }

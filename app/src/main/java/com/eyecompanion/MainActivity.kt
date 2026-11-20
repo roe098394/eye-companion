@@ -1203,11 +1203,39 @@ class MainActivity : Activity() {
     /** Who Pip last saw at the bench (MARK, LAURA...), or "" */
     @Volatile private var whoSeen = ""
     private val PEOPLE = listOf("MARK", "LAURA", "BRANDON", "SOPHIE", "AMELIA", "CHLOE")
-    /** How Pip tells the family apart in a photo: by how they look, not by face. */
-    private val WHO_QUESTION = "First write who is in the photo, as one word: " +
-        "MARK (adult man with a beard), LAURA (adult woman with glasses, or in a black or green dressing gown, or a long fluffy brown teddy-bear coat), " +
-        "BRANDON (young man about 20, no beard), SOPHIE (girl with dyed red hair, wears earrings), AMELIA (smaller girl with glasses), " +
-        "CHLOE (small girl about 5), or OTHER if nobody is there or you can't tell. Go by age, size, beard, glasses, hair and clothes; if unsure, OTHER."
+    /** The family, plus anyone named on the web page's Faces page (longest first, so "MARK" can't swallow "MARKUS"). */
+    private fun knownNames() = (PEOPLE + Faces.names().map { it.uppercase() }).distinct().sortedByDescending { it.length }
+    /** Who the brain says is in the photo (a known name), or "" for OTHER / NOBODY / no answer. */
+    private fun whoIn(raw: String?): String = raw?.trimStart()?.uppercase()?.let { r -> knownNames().firstOrNull { r.startsWith(it) } } ?: ""
+    /** The reply with the name (and DISHES / CLOTHES) taken off the front. */
+    private fun afterWho(raw: String?): String? = raw?.replaceFirst(Regex("^\\s*((" +
+        (knownNames() + listOf("OTHER", "NOBODY", "DISHES", "CLOTHES")).joinToString("|") { Regex.escape(it) } +
+        ")\\s*[:,;\\-]?\\s*)+", RegexOption.IGNORE_CASE), "")?.trim()
+    /** Someone's there but Pip doesn't know them (or has no named photo of them yet): keep the photo for the Faces page. */
+    @Volatile private var lastFaceKept = 0L
+    private fun keepIfUnknown(jpeg: ByteArray?, raw: String?) {
+        if (jpeg == null || raw.isNullOrBlank() || raw.trimStart().uppercase().startsWith("NOBODY")) return
+        val who = whoIn(raw)
+        if (who.isNotEmpty() && Faces.names().any { it.uppercase() == who }) return
+        val now = System.currentTimeMillis()
+        if (now - lastFaceKept < 60_000) return             // the hello right after the "who is it?" look: one photo is enough
+        lastFaceKept = now
+        Faces.addUnsorted(jpeg)
+    }
+    /**
+     * How Pip tells people apart: named photos from the Faces page first (comparing faces), then for anyone
+     * without a photo, by how they look (age, beard, glasses...).
+     */
+    private val WHO_QUESTION: String get() {
+        val named = Faces.names()
+        val photos = if (named.isEmpty()) "" else "Compare the NEW photo with the reference photos first: if it's one of " +
+            "those people, write their name exactly as labelled (${named.joinToString(", ") { it.uppercase() }}). "
+        return "First write who is in the NEW photo, as one word. " + photos + "Otherwise: " +
+            "MARK (adult man with a beard), LAURA (adult woman with glasses, or in a black or green dressing gown, or a long fluffy brown teddy-bear coat), " +
+            "BRANDON (young man about 20, no beard), SOPHIE (girl with dyed red hair, wears earrings), AMELIA (smaller girl with glasses), " +
+            "CHLOE (small girl about 5), OTHER if there's a person you don't recognise or you can't tell, or NOBODY if nobody is there. " +
+            "Go by face first, then age, size, beard, glasses, hair and clothes; if unsure, OTHER."
+    }
     private var lastGreetPhoto = 0L
     private fun maybeVisitorPhoto(away: Long) {
         val now = System.currentTimeMillis()
@@ -1219,8 +1247,10 @@ class MainActivity : Activity() {
             if (System.currentTimeMillis() - lastFaceSeen >= 1500 || phase != Phase.LISTENING) return@postDelayed
             val before = whoSeen
             lookThroughCamera { jpeg ->
-                val who = jpeg?.let { online.lookAt(it, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0) }
-                    ?.trim()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } ?: ""
+                val raw = jpeg?.let { online.lookAt(it, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0,
+                    refs = Faces.references()) }
+                keepIfUnknown(jpeg, raw)
+                val who = whoIn(raw)
                 if (who.isNotEmpty()) whoSeen = who
                 val t = System.currentTimeMillis()
                 // a proper hello (with a compliment) for a new face, or when it's been a while
@@ -1243,15 +1273,17 @@ class MainActivity : Activity() {
                     "a few words at most, like a mate would. No compliments, no gushing, don't say you missed them or were lonely. " +
                     "BUT if it's LAURA, greet her as the queen of the kitchen, with a bit of royal respect (e.g. 'Morning, your majesty'), still short. " +
                     "Never mention the dishes or clothes in this line. Start it with the [happy] tag. " +
-                    "If nobody is in the photo, write OTHER and just say hello.",
-                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100)
+                    "If nobody is in the photo, write NOBODY and just say hello.",
+                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 100,
+                    refs = Faces.references())
             }
+            keepIfUnknown(jpeg, raw)
             val isLaura = raw?.trimStart()?.uppercase()?.startsWith("LAURA") == true
-            whoSeen = raw?.trimStart()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } ?: ""
+            whoSeen = whoIn(raw)
             if (isLaura) { lastLauraSeen = System.currentTimeMillis(); main.post { lauraVisuals(carpet = Math.random() < 0.4); lastLauraEffort = System.currentTimeMillis() } }
             val head = raw?.substringBefore("[")?.uppercase() ?: ""
             val dishes = "DISHES" in head; val clothes = "CLOTHES" in head
-            val line = raw?.replaceFirst(Regex("^\\s*((MARK|LAURA|BRANDON|SOPHIE|AMELIA|CHLOE|OTHER|DISHES|CLOTHES)\\s*[:,;\\-]?\\s*)+", RegexOption.IGNORE_CASE), "")?.trim()
+            val line = afterWho(raw)
             main.post {
                 if (phase != Phase.LISTENING) return@post
                 if (line.isNullOrBlank()) thanks() else speakLine(line)
@@ -2158,10 +2190,11 @@ class MainActivity : Activity() {
                     WHO_QUESTION + " Then, on the same line, say a short well done to that person, by name if you know who it is, " +
                     "for just doing this job: \"$what\". A few words, like a mate would. No gushing. Start it with the [happy] tag. " +
                     (if (forWho != null) "If you can't tell who it is, say well done to $forWho." else "If you can't tell who it is, just say well done."),
-                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 60)
+                    system = "You are Pip, a cheeky little robot in an old tablet on a kitchen bench. Child-friendly, short and warm.", maxTokens = 60,
+                    refs = Faces.references())
                     else null
-                raw?.trimStart()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } }?.let { whoSeen = it }
-                val line = raw?.replaceFirst(Regex("^\\s*(MARK|LAURA|BRANDON|SOPHIE|AMELIA|CHLOE|OTHER)\\s*[:,;\\-]?\\s*", RegexOption.IGNORE_CASE), "")?.trim()
+                whoIn(raw).takeIf { it.isNotEmpty() }?.let { whoSeen = it }
+                val line = afterWho(raw)
                 main.post {
                     speakLine(if (line.isNullOrBlank() || !line.contains("[")) fallback else line)
                     sleepAfterTalking(nap = wasNapping)
@@ -2223,7 +2256,7 @@ class MainActivity : Activity() {
         }
         lookThroughCamera { jpeg ->
             val who = if (jpeg != null && online.enabled && !online.allResting)
-                online.lookAt(jpeg, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0)
+                online.lookAt(jpeg, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0, refs = Faces.references())
                     ?.trim()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } else null
             main.post {
                 val name = who?.let { w -> FAMILY.firstOrNull { it.equals(w, true) } }
@@ -2463,6 +2496,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Faces.init(filesDir)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         eyes = EyesView(this)
         eyes.showCaptions = prefs.getBoolean("captions", true)
