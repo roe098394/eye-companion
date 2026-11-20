@@ -1239,6 +1239,10 @@ class EyesView(context: Context) : View(context) {
         val date = java.text.SimpleDateFormat("EEEE d MMMM", java.util.Locale.UK).format(cal.time)
         c.drawText(date, pad, clockBase + h * 0.075f, wxText)
         var noteY = clockBase + h * 0.13f
+        // cuppas made today (kettle boils Pip heard; the day starts at 5am)
+        wxText.typeface = mediumFace; wxText.textSize = h * 0.034f; wxText.alpha = 225
+        c.drawText(when (cuppas) { 0 -> "☕ No cuppas yet today"; 1 -> "☕ 1 cuppa today"; else -> "☕ $cuppas cuppas today" }, pad, noteY, wxText)
+        noteY += h * 0.055f
         wxText.typeface = lightFace; wxText.textSize = h * 0.028f
         if (napNote.isNotEmpty()) { wxText.alpha = 170; c.drawText("😴 $napNote", pad, noteY, wxText); noteY += h * 0.045f }
         if (plugNote.isNotEmpty()) { wxText.alpha = (120 + 90 * sin(secs * 2.5f)).toInt().coerceIn(20, 230); c.drawText(plugNote, pad, noteY, wxText) }
