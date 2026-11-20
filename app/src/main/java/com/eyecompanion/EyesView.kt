@@ -533,6 +533,10 @@ class EyesView(context: Context) : View(context) {
             mugLine.color = col
         } else { zipLeft = 0f; zipRight = 0f }
 
+        // Pip's mouth: a glowing sound wave under the eyes that ripples when she talks and bends with her mood
+        if (!muted && !carMode && mood != Mood.LOADING && mood != Mood.SLEEP && !hatching)
+            drawMouth(canvas, cx, cy + eyeH * 0.5f + eyeW * 0.30f, eyeW, secs, dt, feeling, col)
+
         // round specs while one of the online brains is resting
         if (glasses && !carMode && mood != Mood.LOADING) {
             specLine.color = Color.parseColor("#E8E2D0"); specLine.strokeWidth = eyeW * 0.07f; specLine.alpha = 220
@@ -1691,6 +1695,78 @@ class EyesView(context: Context) : View(context) {
         if (hit) chipTappedAt = now()
         return hit
     }
+
+    // ---- mouth: a glowing sound wave under the eyes. Nearly flat when quiet, it ripples when she talks,
+    // and the whole line bends into a smile or frown with her mood. Everything is smoothed so it melts between shapes.
+    private var wAmp = 0.02f     // how tall the ripples are, in eye widths
+    private var wCurve = 0.03f   // + = smile, - = frown
+    private var wWidth = 1f      // 1 = full width
+    private var wSpeed = 1f
+    private var wSkew = 0f
+    private val wavePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val wavePath = android.graphics.Path()
+
+    private fun drawMouth(c: Canvas, x: Float, y: Float, eyeW: Float, secs: Float, dt: Float, feeling: Emotion, col: Int) {
+        var amp = 0.015f; var curve = 0.03f; var width = 1f; var speed = 1f; var skew = 0f
+        when (feeling) {
+            Emotion.HAPPY, Emotion.LOVE, Emotion.WINK -> curve = 0.1f
+            Emotion.EXCITED -> { curve = 0.1f; amp = 0.07f; speed = 2.2f }
+            Emotion.LAUGHING -> { curve = 0.11f; amp = 0.04f + 0.08f * abs(sin(secs * 14f)); speed = 2.5f }
+            Emotion.SNIGGER, Emotion.STONED -> { curve = 0.06f; skew = 0.06f; width = 0.8f }
+            Emotion.SAD, Emotion.CRYING -> { curve = -0.09f; width = 0.85f; speed = 0.5f }
+            Emotion.ANGRY -> { curve = -0.05f; amp = 0.035f; speed = 3f; width = 0.85f }           // tight, buzzing
+            Emotion.SURPRISED -> { curve = 0f; amp = 0.09f; width = 0.45f; speed = 1.5f }
+            Emotion.SCARED -> { curve = -0.03f; amp = 0.05f; speed = 3.5f; width = 0.7f }          // trembling
+            Emotion.CONFUSED, Emotion.SUSPICIOUS -> { curve = 0f; skew = 0.08f; width = 0.8f }
+            Emotion.DIZZY -> { curve = 0f; skew = 0.08f * sin(secs * 4f); amp = 0.05f; speed = 0.7f }
+            Emotion.THINKING, Emotion.CURIOUS -> { curve = 0f; width = 0.5f; amp = 0.03f; speed = 0.8f }
+            Emotion.BORED, Emotion.SLEEPY -> { curve = -0.01f; width = 0.7f; amp = 0.006f; speed = 0.3f }
+            Emotion.EMBARRASSED -> { curve = 0.05f; width = 0.6f }
+            Emotion.HOT -> { curve = -0.03f; amp = 0.04f; speed = 0.6f; width = 0.8f }
+            Emotion.NEUTRAL -> {}
+        }
+        if (mood == Mood.THINK) { curve = 0f; width = 0.5f; amp = 0.03f; speed = 0.8f }
+        if (mood == Mood.LISTEN) amp = max(amp, 0.012f + level * 0.08f)          // listening: the wave follows the room's sound
+        val talking = mood == Mood.TALK
+        if (talking) {
+            // the mic is off while she speaks, so the loudness is made up: uneven syllables with little gaps between words
+            val syl = abs(sin(secs * 10.5f + 1.8f * sin(secs * 2.3f)))
+            val word = (0.55f + 0.45f * sin(secs * 3.1f + 0.7f * sin(secs * 1.3f))).coerceIn(0f, 1f) *
+                (if (sin(secs * 1.7f) > 0.85f) 0.1f else 1f)
+            amp = max(amp, 0.025f + 0.15f * syl * word)
+            curve = curve.coerceIn(-0.03f, 0.04f); width = max(width, 0.9f); speed = max(speed, 2f)
+        }
+        wAmp += (amp - wAmp) * min(1f, dt * (if (talking) 20f else 6f))
+        wCurve += (curve - wCurve) * min(1f, dt * 6f)
+        wWidth += (width - wWidth) * min(1f, dt * 6f)
+        wSpeed += (speed - wSpeed) * min(1f, dt * 4f)
+        wSkew += (skew - wSkew) * min(1f, dt * 5f)
+        wPhase += dt * wSpeed
+
+        val half = eyeW * 0.55f * wWidth
+        // three waves on top of each other: a bright main one and two fainter ones drifting at different speeds
+        for (layer in 2 downTo 0) {
+            wavePath.reset()
+            val steps = 48
+            for (j in 0..steps) {
+                val u = j / steps.toFloat() * 2f - 1f                // -1..1 across the mouth
+                val env = (1f - u * u).let { it * it }              // pinched to nothing at the ends
+                val ph = wPhase * (6f + layer * 1.7f)
+                val ripple = sin(u * (9f + layer * 3f) + ph) * 0.7f + sin(u * (17f - layer * 4f) - ph * 1.3f) * 0.3f
+                val px = x + u * half
+                val py = y + (-wCurve * u * u + wSkew * u) * eyeW +             // ends lift for a smile, drop for a frown
+                    ripple * env * wAmp * eyeW * (if (layer == 0) 1f else 0.75f - layer * 0.15f) * (if (layer == 1) -1f else 1f)
+                if (j == 0) wavePath.moveTo(px, py) else wavePath.lineTo(px, py)
+            }
+            wavePaint.color = col
+            if (layer == 0) {
+                wavePaint.alpha = 50; wavePaint.strokeWidth = eyeW * 0.13f; c.drawPath(wavePath, wavePaint)      // glow
+                wavePaint.alpha = 240; wavePaint.strokeWidth = eyeW * 0.05f
+            } else { wavePaint.alpha = 90 - layer * 25; wavePaint.strokeWidth = eyeW * 0.028f }
+            c.drawPath(wavePath, wavePaint)
+        }
+    }
+    private var wPhase = 0f
 
     /** An open hand, fingers up, palm towards us, thumb on the inside (nearest the nose). */
     private fun drawHand(c: Canvas, x: Float, y: Float, s: Float, side: Float, color: Int) {
