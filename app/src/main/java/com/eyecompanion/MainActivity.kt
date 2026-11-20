@@ -456,9 +456,9 @@ class MainActivity : Activity() {
         val justAsked = System.currentTimeMillis() - lastBinsAsk < 5 * 60_000
         val aboutBins = Regex("\\b(bins|bin is|bins are|green bin|black bins?|recycling|wheelie)\\b").containsMatchIn(lower)
         if (!justAsked && !aboutBins) return false
-        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|soon)").containsMatchIn(lower)
+        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|nah\\b|nee\\b|soon)").containsMatchIn(lower)
         val done = !no && (Regex("\\b(out|done|taken|took|did|put)\\b").containsMatchIn(lower) ||
-            (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
+            (justAsked && Regex("^(yes|yeah|yep|yup|aye|whey aye|why aye|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
         when {
             done -> { binThursday()?.let { prefs.edit().putString("binsDone", java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(it.time)).apply() }
                 prefs.edit().putBoolean("binsDoneWeek_" + weekKey(), true).apply()
@@ -934,9 +934,9 @@ class MainActivity : Activity() {
         val justAsked = System.currentTimeMillis() - lastDogAsk < 5 * 60_000
         val about = Regex("\\b(honey|dog|doggy|pup|puppy)\\b").containsMatchIn(lower) && Regex("\\b(fed|feed|fed her|breakfast|food)\\b").containsMatchIn(lower)
         if (!justAsked && !about) return false
-        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|soon)").containsMatchIn(lower)
+        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|nah\\b|nee\\b|soon)").containsMatchIn(lower)
         val done = !no && (Regex("\\b(fed|done|given|gave|had)\\b").containsMatchIn(lower) ||
-            (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
+            (justAsked && Regex("^(yes|yeah|yep|yup|aye|whey aye|why aye|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
         when {
             done -> { prefs.edit().putString("dogDone", todayKey).apply(); speakLine(Honey.THANKS.fresh()) }
             no && justAsked -> speakLine(Honey.LATER.fresh())
@@ -2060,9 +2060,9 @@ class MainActivity : Activity() {
         val justAsked = System.currentTimeMillis() - lastRubbishAsk < 5 * 60_000
         val about = Regex("\\b(rubbish|bin|bins|trash)\\b").containsMatchIn(lower)
         if (!justAsked && !about) return false
-        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|soon)").containsMatchIn(lower)
+        val no = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|nah\\b|nee\\b|soon)").containsMatchIn(lower)
         val done = !no && (Regex("\\b(out|done|taken|took|did|emptied)\\b").containsMatchIn(lower) ||
-            (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
+            (justAsked && Regex("^(yes|yeah|yep|yup|aye|whey aye|why aye|i have|i did|all done|done)\\b").containsMatchIn(lower.trim())))
         when {
             done -> { prefs.edit().putString("rubbishDone", cuppaDayKey).putBoolean("rubbishOn_$todayKey", true).apply()
                 speakLine(listOf("[happy] Rubbish out. Kitchen smells of victory. And kettle.", "[love] Good human. Bins done.",
@@ -2366,8 +2366,8 @@ class MainActivity : Activity() {
         val aboutTablets = Regex("\\b(tablet|tablets|pill|pills|meds|medicine|medication)\\b").containsMatchIn(lower)
         if (!justAsked && !aboutTablets) return false
         val taken = Regex("\\b(taken|took|had|done|swallowed|already)\\b").containsMatchIn(lower) && !Regex("\\b(not|haven'?t|didn'?t)\\b").containsMatchIn(lower) ||
-            (justAsked && Regex("^(yes|yeah|yep|yup|i have|i did|all done|done)\\b").containsMatchIn(lower.trim()))
-        val notYet = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|soon)").containsMatchIn(lower)
+            (justAsked && Regex("^(yes|yeah|yep|yup|aye|whey aye|why aye|i have|i did|all done|done)\\b").containsMatchIn(lower.trim()))
+        val notYet = Regex("\\b(not yet|later|in a (minute|bit|sec)|haven'?t|no\\b|nope|nah\\b|nee\\b|soon)").containsMatchIn(lower)
         when {
             taken -> {
                 prefs.edit().putString("tabletsDone", todayKey).apply()
@@ -2966,7 +2966,7 @@ class MainActivity : Activity() {
     private var lastQuietIgnored = ""
     private var lastHelloPhoto = 0L
     private val GREETING = Regex("^(hello|hiya|hi|hey|heya|hey up|ey up|morning|good morning|afternoon|good afternoon|" +
-        "evening|good evening|alright|all right|you alright|how do|yo|wotcha|hello pip|hi pip)\\b")
+        "evening|good evening|alright|all right|you alright|areet|alreet|now then|howay|haway|whey aye|how man|how do|yo|wotcha|hello pip|hi pip)\\b")
     private fun isGreeting(t: String) = GREETING.containsMatchIn(removeName(t).lowercase().trim().ifBlank { "hello" })
 
     /** Only answer questions (or requests), not every bit of chat she overhears. On by default. */
@@ -4634,6 +4634,16 @@ class MainActivity : Activity() {
             Family: Mark (built you); Laura (glasses, the queen of the kitchen: extra kind and respectful); Sophie (cheeky: banter back);
             Amelia (small, glasses, shy: gentle); Chloe (small and cute: simple, kind); Brandon (gamer, calls you
             dumb: gamer banter, nudge him to take breaks). Children live here: always child-friendly, no swearing.
+            The family are Geordies (Newcastle) and talk Geordie; understand it naturally and never correct or mock it.
+            Words: howay/haway = come on, whey aye = yes of course, aye = yes, nee = no, nowt = nothing, owt = anything,
+            divvent/divn't = don't, cannit = can't, gan/gannin = go/going, doon = down, oot = out, toon = town (or Newcastle United),
+            hyem = home, wor = our (wor lass = my wife/partner), us = me ("give us" = give me), yous = you lot, pet/hinny = love,
+            bairn = child, canny = nice/very ("canny good"), propa = really, hacky/clarty = dirty (clarts = mud), bait = packed lunch,
+            scran = food, stotty = a flat bread cake, kets = sweets, netty = toilet, hoy = throw, deek = look, plodge = paddle, bray = hit,
+            radgie = a tantrum, gadgie = old man, workie ticket = troublemaker, clamming = starving/thirsty, spelk = splinter,
+            mortal = drunk, champion = great, nebby = nosy, "haddaway" = get away (you're joking). Speech-to-text can
+            mangle Geordie, so read what you're given generously, by sound and context (e.g. "gun hyem" = going home, "de ya" = do you),
+            and only ask again if you really can't tell. Answer in your normal voice (an odd Geordie word back is fine).
             A name in square brackets like [Mark] says who is talking; never guess names otherwise.
             "(overheard": people may be talking to each other; reply only if it's for you, else reply exactly SKIP.
             Everything else is said to you: always answer.

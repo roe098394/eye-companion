@@ -397,6 +397,8 @@ class OnlineBrain(private val systemPrompt: () -> String) {
                         "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n".toByteArray())
                     field("model", model)
                     field("language", "en")
+                    // a few lines of Geordie so Whisper spells dialect (and the family's names) properly instead of "fixing" it
+                    field("prompt", GEORDIE_HINT)
                     field("response_format", "json")
                     field("temperature", "0")
                     out.write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n".toByteArray())
@@ -410,6 +412,9 @@ class OnlineBrain(private val systemPrompt: () -> String) {
                 }
                 val text = JSONObject(conn.inputStream.bufferedReader().use { it.readText() }).optString("text").trim()
                 conn.disconnect()
+                // on near-silence Whisper sometimes just repeats the hint back: that's not speech
+                val bare = text.lowercase().filter { it.isLetter() || it == ' ' }.trim()
+                if (bare.length > 12 && GEORDIE_HINT.lowercase().filter { it.isLetter() || it == ' ' }.contains(bare)) return ""
                 return text
             } catch (_: Exception) { return null }
         }
@@ -431,6 +436,10 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         /** Claude Sonnet: clever and chatty, and it can see photos */
         const val CLAUDE_MODEL = "claude-sonnet-5-5"
         const val STT_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
+        /** Whisper's hint: Geordie as it's spoken in the kitchen, plus names it should spell right. */
+        const val GEORDIE_HINT = "Howay Pip, divvent be daft. Whey aye, pet, I'm gannin hyem. Wor lass is doon the toon. " +
+            "Aye, it's canny cold the day, hinny. Give us a hand, man. Haddaway! Me bait's in the bag. " +
+            "Mark, Laura, Sophie, Amelia, Chloe, Brandon and Honey the dog."
         /** Whisper sometimes "hears" these in background noise. */
         val NOISE = setOf("british english", "british english.", "thank you", "thanks", "thank you for watching", "thanks for watching", "you", "bye", "okay", "uh", "um")
         /** the Groq model that can see pictures */
