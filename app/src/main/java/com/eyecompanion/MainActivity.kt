@@ -2139,7 +2139,6 @@ class MainActivity : Activity() {
     private fun refreshChores() {
         eyes.chores = jobs().map { EyesView.Chore(it.text, it.done) }
         eyes.tabletsCard = if (tabletsDue()) "$tabletPerson's tablets" else ""
-        eyes.teethRow = FAMILY.map { it to teethToday(it) }
         eyes.todoHidden = prefs.getBoolean("todoHidden", false)
     }
     private fun choreTapped(hit: Int) {
@@ -2147,7 +2146,6 @@ class MainActivity : Activity() {
             EyesView.CHORE_ADD -> showAddChore()
             EyesView.CHORE_HIDE -> { prefs.edit().putBoolean("todoHidden", true).apply(); refreshChores() }
             EyesView.CHORE_SHOW -> { prefs.edit().putBoolean("todoHidden", false).apply(); refreshChores() }
-            EyesView.CHORE_TEETH -> teethTapped()
             EyesView.CHORE_MORE -> eyes.nextChorePage()
             EyesView.CHORE_NONE -> {}                                   // a tap on the list itself: stay asleep
             EyesView.CHORE_TABLETS -> {
@@ -2238,61 +2236,6 @@ class MainActivity : Activity() {
                 else saveTyped(loadTyped().filterIndexed { k, _ -> k != j.typed })
             }
             .setNegativeButton("Cancel", null).showOwn()
-    }
-
-    // ---- teeth: tap the teeth row, Pip works out who you are (or you tap your name), and your score goes up.
-    //      Scores never reset. Up to two a day (morning and night), streaks for both done days in a row, badges.
-    private fun teethToday(n: String): Int = if (prefs.getString("teethDay_$n", "") == todayKey) prefs.getInt("teethN_$n", 0) else 0
-    private var teethAsking = 0L
-    /** Quiet on purpose: no talking, just a soft ping and the celebration on screen. Pip stays asleep. */
-    private fun teethTapped() {
-        if (System.currentTimeMillis() - teethAsking < 30_000) return
-        teethAsking = System.currentTimeMillis()
-        fun ask() {
-            android.widget.Toast.makeText(this, "Who's brushed their teeth? Tap your name.", android.widget.Toast.LENGTH_LONG).show()
-            var picked = false
-            showChoices(FAMILY, big = true) { pick -> picked = true; hideChoices(); awardTeeth(pick) }
-            main.postDelayed({ if (!picked) { hideChoices(); teethAsking = 0L } }, 30_000)
-        }
-        lookThroughCamera { jpeg ->
-            val who = if (jpeg != null && online.enabled && !online.allResting)
-                online.lookAt(jpeg, WHO_QUESTION + " Write only that one word.", maxTokens = 10, temperature = 0.0, refs = Faces.references())
-                    ?.trim()?.uppercase()?.let { r -> PEOPLE.firstOrNull { r.startsWith(it) } } else null
-            main.post {
-                val name = who?.let { w -> FAMILY.firstOrNull { it.equals(w, true) } }
-                if (name != null) { whoSeen = who ?: ""; awardTeeth(name) } else ask()
-            }
-        }
-    }
-    private fun awardTeeth(name: String) {
-        teethAsking = 0L
-        val now = System.currentTimeMillis()
-        val n = teethToday(name)
-        fun note(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
-        if (n >= 2) { note("$name, both done already today ✓"); return }
-        if (n == 1 && now - prefs.getLong("teethLast_$name", 0) < 3 * 3_600_000L) { note("$name, you only brushed a little while ago. The next one counts later."); return }
-        val from = prefs.getInt("teeth_$name", 0); val to = from + 1
-        val e = prefs.edit().putInt("teeth_$name", to).putString("teethDay_$name", todayKey).putInt("teethN_$name", n + 1).putLong("teethLast_$name", now)
-        val yesterday = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK)
-            .format(java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }.time)
-        val lastFull = prefs.getString("teethFull_$name", "") ?: ""
-        var streak = prefs.getInt("teethStreak_$name", 0)
-        if (n + 1 == 2) {                                      // both done today: the streak grows
-            streak = if (lastFull == yesterday) streak + 1 else 1
-            e.putString("teethFull_$name", todayKey).putInt("teethStreak_$name", streak)
-        } else if (lastFull != yesterday && lastFull != todayKey) streak = 0
-        e.apply()
-        val badge = when {
-            to == 10 -> "🥉 Bronze tooth!"; to == 50 -> "🥈 Silver tooth!"; to == 100 -> "🥇 Gold tooth!"
-            to == 365 -> "💎 Diamond tooth!"; to > 365 && to % 100 == 0 -> "💎 $to brushes!"; else -> ""
-        }
-        eyes.celebrateTeeth(name, from, to, streak, badge)
-        refreshChores()
-        try {                                                  // one soft ping as the score ticks up
-            val tg = android.media.ToneGenerator(AudioManager.STREAM_MUSIC, 30)
-            main.postDelayed({ tg.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 120) }, 1300)
-            main.postDelayed({ tg.release() }, 2500)
-        } catch (_: Exception) {}
     }
 
     // ---- weather for the sleep screen (free forecast, no key): checked every half hour
