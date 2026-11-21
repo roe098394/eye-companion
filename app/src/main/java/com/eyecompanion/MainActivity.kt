@@ -2548,6 +2548,7 @@ class MainActivity : Activity() {
         eyes.voiceLevel = { voice?.levelNow() ?: -1f }
         eyes.showCaptions = prefs.getBoolean("captions", true)
         eyes.faceStyle = prefs.getInt("faceStyle", if (prefs.getBoolean("robotFace", false)) 1 else 0)
+        main.postDelayed(printerCamLoop, 5000)
         val rootView = android.widget.FrameLayout(this)
         rootView.addView(eyes)
         choiceBar = android.widget.LinearLayout(this).apply {
@@ -3155,6 +3156,19 @@ class MainActivity : Activity() {
             .containsMatchIn(q.lowercase())
 
     /** Every minute: say when a print finishes or fails (only while printing was seen). */
+    /** With the AI core face on, a fresh printer camera picture every 8 seconds for the screen behind her. */
+    private var camBusy = false
+    private val printerCamLoop = object : Runnable { override fun run() {
+        main.postDelayed(this, 8000)
+        if (eyes.faceStyle != 3 || camBusy || phase == Phase.ASLEEP || printer.host == null) return
+        camBusy = true
+        thread(name = "printer-cam") {
+            val bytes = try { printer.snapshot() } catch (_: Exception) { null }
+            val bmp = bytes?.let { try { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }) } catch (_: Throwable) { null } }
+            main.post { if (bmp != null) eyes.setPrinterCam(bmp); camBusy = false }
+        }
+    } }
+
     private fun watchPrinter() {
         val now = System.currentTimeMillis()
         if (now - printerChecked < 60_000 || prefs.getString("printerHost", null) == null) return
@@ -4721,7 +4735,7 @@ class MainActivity : Activity() {
         private val SLEEP_CMD = Regex("\\b(go(es)? (to |back to )?sleep|(have|take|go for|time for) a (nap|sleep|snooze)|nap time|go to bed|bed ?time|sleep (now|mode)|night night|shut down for a (bit|while))\\b")
         private val WAKE_CMD = Regex("\\b(wake up|wakey|wake wake|rise and shine|good morning|morning pip|wake)\\b")
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")
-        val FACE_NAMES = arrayOf("Cartoon eyes", "Robot (calm)", "Robot (scary)")
+        val FACE_NAMES = arrayOf("Cartoon eyes", "Robot (calm)", "Robot (scary)", "AI core")
         private val FORGET = setOf("forget everything", "start over", "new conversation")
     }
 }

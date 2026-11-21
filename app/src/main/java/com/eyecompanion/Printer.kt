@@ -104,6 +104,26 @@ class Printer(initialHost: String?) {
         return found.get()
     }
 
+    /** A still picture from the printer's webcam (as Fluidd shows it), or null. */
+    fun snapshot(): ByteArray? {
+        val h = host ?: return null
+        val urls = mutableListOf<String>()
+        try {
+            get(h, "/server/webcams/list", 2000)?.optJSONObject("result")?.optJSONArray("webcams")?.let { cams ->
+                for (i in 0 until cams.length()) cams.optJSONObject(i)?.optString("snapshot_url")?.takeIf { it.isNotBlank() }?.let {
+                    urls += if (it.startsWith("http")) it else "http://$h" + (if (it.startsWith("/")) it else "/$it")
+                }
+            }
+        } catch (_: Exception) {}
+        urls += "http://$h/webcam/?action=snapshot"
+        for (u in urls.distinct()) try {
+            val c = (URL(u).openConnection() as HttpURLConnection).apply { connectTimeout = 2500; readTimeout = 4000 }
+            if (c.responseCode == 200) { val b = c.inputStream.use { it.readBytes() }; c.disconnect(); if (b.size > 500) return b }
+            else c.disconnect()
+        } catch (_: Exception) {}
+        return null
+    }
+
     private fun get(h: String, path: String, timeout: Int = 3000): JSONObject? = try {
         val base = if (h.contains(":")) h else h          // Fluidd's web server passes the API through on port 80
         val c = (URL("http://$base$path").openConnection() as HttpURLConnection).apply {

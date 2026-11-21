@@ -61,6 +61,10 @@ class EyesView(context: Context) : View(context) {
             turn = 3f, shift = 6.0f, nod = 9.0f, gears = arrayOf(floatArrayOf(541.5f, 894.0f, 106.5f, 1.0f), floatArrayOf(656.2f, 780.0f, 49.5f, -2.1f), floatArrayOf(693.8f, 909.8f, 49.5f, -2.1f), floatArrayOf(378.8f, 896.2f, 45.0f, -2.3f), floatArrayOf(375.0f, 772.5f, 51.0f, 1.5f))),
     )
     private val photoBmps = HashMap<Int, android.graphics.Bitmap>()
+    /** 3 = the glowing "AI core" face. */
+    private val coreFace by lazy { CoreFace(resources) }
+    /** The 3D printer's latest camera picture, shown on a screen behind the AI core face. */
+    fun setPrinterCam(b: android.graphics.Bitmap?) { coreFace.printerCam = b }
     private val robotPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val robotFill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val redGlow = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -414,7 +418,9 @@ class EyesView(context: Context) : View(context) {
         if (robotNow) {
             val vl = voiceLevel()
             val talk = if (mood == Mood.TALK) (if (vl >= 0f) vl else level) else 0f
-            drawRobot(canvas, w, h, lookX, lookY, max(0.04f, open * blink),
+            if (faceStyle == 3) coreFace.draw(canvas, w, h, lookX, lookY, max(0.04f, open * blink), talk, red,
+                mood == Mood.THINK || feeling == Emotion.THINKING, dt, t)
+            else drawRobot(canvas, w, h, lookX, lookY, max(0.04f, open * blink),
                 talk, feeling == Emotion.SURPRISED, dt, red)
         } else for (side in arrayOf(-1f, 1f)) {
             val ex = cx + side * (gap / 2 + eyeW / 2)
