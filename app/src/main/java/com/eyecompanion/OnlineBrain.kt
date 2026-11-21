@@ -383,7 +383,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         val (pcm, outRate) = if (rate == 48000) ShortArray(audio.size / 3) { i ->
             ((audio[i * 3] + audio[i * 3 + 1] + audio[i * 3 + 2]) / 3).toShort() } to 16000 else audio to rate
         val wav = wav(pcm, outRate)
-        for (model in listOf("whisper-large-v3-turbo", "whisper-large-v3")) {
+        for (model in listOf("whisper-large-v3", "whisper-large-v3-turbo")   // full model hears accents better; turbo is the backup) {
             try {
                 val boundary = "----pip" + System.nanoTime()
                 val conn = (URL(STT_ENDPOINT).openConnection() as HttpURLConnection).apply {
@@ -439,7 +439,7 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         /** Whisper's hint: Geordie as it's spoken in the kitchen, plus names it should spell right. */
         const val GEORDIE_HINT = "Howay Pip, divvent be daft. Whey aye, pet, I'm gannin hyem. Wor lass is doon the toon. " +
             "Aye, it's canny cold the day, hinny. Give us a hand, man. Haddaway! Me bait's in the bag. " +
-            "Mark, Laura, Sophie, Amelia, Chloe, Brandon and Honey the dog."
+            "Pip, Mark, Laura, Sophie, Amelia, Chloe, Brandon and Honey the dog. Kettle, Tassimo, Alexa, hoovering, the bins."
         /** Whisper sometimes "hears" these in background noise. */
         val NOISE = setOf("british english", "british english.", "thank you", "thanks", "thank you for watching", "thanks for watching", "you", "bye", "okay", "uh", "um")
         /** the Groq model that can see pictures */

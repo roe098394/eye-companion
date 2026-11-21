@@ -146,7 +146,7 @@ class Ears(
         var buf = ShortArray(mic.rate / 10) // 100 ms
         var lastPartial = ""
         var partialSince = 0L
-        // the sound of the current sentence (plus half a second before it), for the online ears
+        // the sound of the current sentence (plus 0.7 s before it, so the first word isn't clipped), for the online ears
         val preRoll = ArrayDeque<ShortArray>()
         val sentence = ArrayList<ShortArray>()
         var capturing = false
@@ -217,7 +217,7 @@ class Ears(
 
                 val chunk = buf.copyOf(n)
                 if (capturing) { if (sentence.size < 300) sentence.add(chunk) }
-                else { preRoll.addLast(chunk); while (preRoll.size > 5) preRoll.removeFirst() }
+                else { preRoll.addLast(chunk); while (preRoll.size > 7) preRoll.removeFirst() }
 
                 val finished = recognizer.acceptWaveForm(buf, n)
                 var resultJson: String? = if (finished) recognizer.result else null
@@ -272,7 +272,7 @@ class Ears(
 
     companion object {
         /** how long the words must stay unchanged before Pip decides you've finished */
-        const val SETTLE_MS = 700L
+        const val SETTLE_MS = 1000L   // a full second of no new words, so people aren't cut off mid-sentence
         private val NOISE_WORDS = setOf("the", "a", "huh", "uh", "um", "hmm", "oh", "ah", "and", "but", "i", "it", "yeah")
     }
 }
