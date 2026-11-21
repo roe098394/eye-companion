@@ -4721,7 +4721,7 @@ class MainActivity : Activity() {
         private val SLEEP_CMD = Regex("\\b(go(es)? (to |back to )?sleep|(have|take|go for|time for) a (nap|sleep|snooze)|nap time|go to bed|bed ?time|sleep (now|mode)|night night|shut down for a (bit|while))\\b")
         private val WAKE_CMD = Regex("\\b(wake up|wakey|wake wake|rise and shine|good morning|morning pip|wake)\\b")
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")
-        val FACE_NAMES = arrayOf("Cartoon eyes", "Robot (calm)", "Robot (red eyes)")
+        val FACE_NAMES = arrayOf("Cartoon eyes", "Robot (calm)", "Robot (scary)")
         private val FORGET = setOf("forget everything", "start over", "new conversation")
     }
 }

@@ -54,7 +54,7 @@ class EyesView(context: Context) : View(context) {
             lipA = 0f, lipB = 0f, x0 = 138f, x1 = 304f, mid = 452f, bot = 500f, jawMax = 11f,
             head = floatArrayOf(0.0f, 0.0f, 410.0f, 0.0f, 410.0f, 390.0f, 312.0f, 445.0f, 304.0f, 500.0f, 138.0f, 500.0f, 128.0f, 445.0f, 0.0f, 390.0f), fill = floatArrayOf(0.0f, 0.0f, 410.0f, 0.0f, 410.0f, 380.0f, 0.0f, 380.0f), pivotX = 221f, pivotY = 500f,
             turn = 2.5f, shift = 6f, nod = 8f, gears = arrayOf()),
-        PhotoFace(R.drawable.robot_red, eyes = arrayOf(floatArrayOf(426.0f, 387.0f, 43.5f, 19.5f), floatArrayOf(666.0f, 387.0f, 43.5f, 19.5f)), gaze = 7.5f,
+        PhotoFace(R.drawable.robot_red, eyes = arrayOf(floatArrayOf(426.0f, 387.0f, 38f, 16f), floatArrayOf(666.0f, 387.0f, 38f, 16f)), gaze = 9f,
             lid = Color.rgb(30, 26, 28), lipCx = 555.0f, lipY = 622.5f, hw = 75.0f,
             lipA = -15.0f, lipB = -3.75f, x0 = 442.5f, x1 = 667.5f, mid = 678.75f, bot = 726.0f, jawMax = 13.5f,
             head = floatArrayOf(150.0f, 0.0f, 960.0f, 0.0f, 960.0f, 570.0f, 810.0f, 630.0f, 750.0f, 697.5f, 667.5f, 731.2f, 442.5f, 731.2f, 360.0f, 697.5f, 315.0f, 630.0f, 150.0f, 570.0f), fill = floatArrayOf(150.0f, 0.0f, 960.0f, 0.0f, 960.0f, 585.0f, 150.0f, 585.0f), pivotX = 555.0f, pivotY = 731.2f,
