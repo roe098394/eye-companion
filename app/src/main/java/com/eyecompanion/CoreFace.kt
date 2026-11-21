@@ -24,6 +24,22 @@ class CoreFace(private val res: Resources) {
 
     /** Latest picture from the printer's camera, shown on the screen bottom-left behind her (null = leave the screen as it is). */
     @Volatile var printerCam: Bitmap? = null
+        set(v) { field = v; camSoft = v?.let { soften(it) } }
+    /** The camera picture cropped to the monitor's shape and shrunk right down, so it draws soft like the blurry room. */
+    @Volatile private var camSoft: Bitmap? = null
+    private fun soften(src: Bitmap): Bitmap? = try {
+        val r = SCREEN.width() / SCREEN.height()
+        var sx = 0; var sy = 0; var sw = src.width; var sh = src.height
+        if (sw.toFloat() / sh > r) { val nw = (sh * r).toInt(); sx = (sw - nw) / 2; sw = nw } else { val nh = (sw / r).toInt(); sy = (sh - nh) / 2; sh = nh }
+        val small = Bitmap.createBitmap((SCREEN.width() / 2.5f).toInt(), (SCREEN.height() / 2.5f).toInt(), Bitmap.Config.ARGB_8888)
+        Canvas(small).drawBitmap(src, Rect(sx, sy, sx + sw, sy + sh), Rect(0, 0, small.width, small.height),
+            Paint(Paint.FILTER_BITMAP_FLAG).apply { colorFilter = ColorMatrixColorFilter(floatArrayOf(      // grey, lifted, screen-blue
+                0.155f, 0.155f, 0.155f, 0f, 25f,
+                0.225f, 0.225f, 0.225f, 0f, 36f,
+                0.27f, 0.27f, 0.27f, 0f, 43f,
+                0f, 0f, 0f, 1f, 0f)) })
+        small
+    } catch (_: Throwable) { null }
     /** When there's no picture: why (shown small on the screen), or "" to leave the screen as it is. */
     @Volatile var printerNote = ""
     private val camRect = RectF()
@@ -41,14 +57,9 @@ class CoreFace(private val res: Resources) {
             0.08f, 0.10f, 0.08f, 0f, 5f,
             0f, 0f, 0f, 1f, 0f))
     }
-    private val camPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
-        colorFilter = ColorMatrixColorFilter(floatArrayOf(       // a cool blue screen tint, to sit in the room
-            0.75f, 0f, 0f, 0f, 0f,
-            0f, 0.88f, 0f, 0f, 8f,
-            0f, 0f, 1.0f, 0f, 22f,
-            0f, 0f, 0f, 1f, 0f))
-        alpha = 215
-    }
+    private val camPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 217 }
+    private val camGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val camClip = Path()
     private val src = Rect(); private val dst = RectF(); private val arc = RectF()
     private val m = Matrix()
     private var jaw = 0f; private var lv = 0f; private var ringA = 0f; private var ringB = 0f
@@ -57,7 +68,7 @@ class CoreFace(private val res: Resources) {
     private val HEAD = floatArrayOf(470f, 0f, 820f, 0f, 840f, 300f, 800f, 440f, 730f, 520f, 690f, 560f, 600f, 560f, 560f, 520f, 490f, 440f, 450f, 300f)
     private val headPath = Path().apply {
         moveTo(HEAD[0], HEAD[1]); var k = 2; while (k < HEAD.size) { lineTo(HEAD[k], HEAD[k + 1]); k += 2 }; close() }
-    private val SCREEN = RectF(182f, 422f, 377f, 553f)       // the monitor bottom-left, behind her shoulder
+    private val SCREEN = RectF(184f, 424f, 398f, 560f)       // the monitor bottom-left, behind her shoulder
 
     private fun load(): Bitmap? {
         bmp?.let { return it }
@@ -110,12 +121,14 @@ class CoreFace(private val res: Resources) {
         camRect.set(SCREEN)
         if (camRect.left < vx0 + 8f) camRect.offset(vx0 + 8f - camRect.left, 0f)
         if (camRect.bottom > vy1 - 8f) camRect.offset(0f, vy1 - 8f - camRect.bottom)
-        val cam = printerCam
+        val cam = camSoft
         if (cam != null) {
-            c.drawBitmap(cam, null, camRect, camPaint)
-            fill.color = Color.argb(28, 0, 0, 0)
-            var y = camRect.top; while (y < camRect.bottom) { c.drawRect(camRect.left, y, camRect.right, y + 1f, fill); y += 3f }
-            fill.color = Color.argb(30, 120, 200, 255); c.drawRect(camRect, fill)
+            c.save()
+            camClip.reset(); camClip.addRoundRect(camRect, 6f, 6f, Path.Direction.CW); c.clipPath(camClip)
+            c.drawBitmap(cam, null, camRect, camPaint)                 // stretched up from tiny = soft, like the rest of the room
+            c.restore()
+            camGlow.color = Color.argb(60, 140, 210, 255); camGlow.strokeWidth = 4f
+            c.drawRoundRect(camRect, 6f, 6f, camGlow)                    // the screen's soft glowing edge
         } else if (printerNote.isNotEmpty()) {
             fill.color = Color.argb(150, 8, 18, 28); c.drawRect(camRect, fill)
             c.drawText("PRINTER CAM", camRect.left + 8f, camRect.top + 16f, noteText)
