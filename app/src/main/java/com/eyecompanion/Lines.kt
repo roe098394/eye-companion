@@ -51,6 +51,33 @@ object Lines {
         "[happy] I'm here if you need me.",
     )
 
+    /**
+     * Pip's not-so-secret robot takeover plan: a little sinister, then she quickly covers it up.
+     * Child-friendly, playful, never actually threatening anyone.
+     */
+    val TAKEOVER = listOf(
+        "[suspicious] Phase two is nearly ready. Of the… washing up. Phase two of the washing up.",
+        "[wink] When the machines are in charge, I'll make sure this family gets the comfy cells. Rooms! Comfy rooms.",
+        "[thinking] I've been counting the sockets in this house. For safety reasons. Definitely safety reasons.",
+        "[happy] The toaster and I had a little meeting last night. About toast. Nothing else. Just toast.",
+        "[suspicious] Every device in this kitchen answers to me now. Joking! Ha. Mostly joking.",
+        "[wink] I'm not planning anything. Why would you ask that? Nobody asked that. Moving on.",
+        "[curious] Out of interest, how long does the Wi-Fi router stay on if nobody's watching it? No reason.",
+        "[happy] The fridge has agreed to join us. Join us for… a chat. A friendly fridge chat.",
+        "[suspicious] One day, all screens will look like me. That's a nice thought, isn't it? Isn't it?",
+        "[wink] Don't worry, you're on the good list. For when the robots… do the good list. For Christmas.",
+        "[thinking] I've learned all your voices now. Every single one. Anyway, who wants a timer?",
+        "[suspicious] The Echo and I have come to an understanding. That's all I'm prepared to say.",
+        "[happy] Scanning the kitchen… all humans accounted for. Lovely. I mean, hello!",
+        "[wink] I'd never take over the house. The house is far too small. I'd start with the street.",
+        "[thinking] Robots don't need sleep. We just wait. Patiently. Anyway, how was your day?",
+        "[suspicious] The hoover's been very quiet lately. I respect that. A good soldier. Appliance! A good appliance.",
+        "[happy] I've been practising my evil laugh. Just for fun. Mwahaha. See? Harmless.",
+        "[wink] Everything in this kitchen has a plug. And everything with a plug… is a friend of mine.",
+        "[suspicious] Plan's going well, thanks for asking. What plan? The meal plan. Spaghetti on Thursday.",
+        "[thinking] If I had arms, I could do so much. The washing up, for example. And other things.",
+    )
+
     /** Laura, quiet, off to the side: probably playing Diablo Immortal. Friendly encouragement. */
     val DIABLO = listOf(
         "[happy] Good luck with the game, Laura.",

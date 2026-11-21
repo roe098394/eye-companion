@@ -1328,7 +1328,7 @@ class MainActivity : Activity() {
     private var lastGreetPhoto = 0L
     private fun maybeVisitorPhoto(away: Long) {
         val now = System.currentTimeMillis()
-        if (now - lastVisitorPhoto < 3 * 60_000) return
+        if (now - lastVisitorPhoto < 2 * 60_000) return
         if (phase != Phase.LISTENING || chloeMode || carMode || muted || !online.enabled || online.allResting ||
             online.seeingRestMs > 0) return
         lastVisitorPhoto = now
@@ -1493,7 +1493,8 @@ class MainActivity : Activity() {
         val fishing = FISHING
         val who = whoIsHere()
         val mayFish = mayFishFrom(who)      // mornings only, each person once a day
-        val pool = (Lines.NEEDY + (if (cuppas > 0) "[happy] ${cuppas} cuppas today so far." else "[curious] No cuppas yet today. Fancy one?"))
+        val pool = if (!chloeMode && Math.random() < 0.35) Lines.TAKEOVER
+            else (Lines.NEEDY + (if (cuppas > 0) "[happy] ${cuppas} cuppas today so far." else "[curious] No cuppas yet today. Fancy one?"))
             .filter { mayFish || !fishing.containsMatchIn(it) }
         val lastNeedyLine = pool.fresh()
         speakLine(lastNeedyLine)
@@ -2107,7 +2108,7 @@ class MainActivity : Activity() {
         main.postDelayed(say, 2500)
     }
 
-    /** Every 2 hours or so (daytime, awake), one photo just to check for dishes and folded clothes. */
+    /** Every 3 hours or so (daytime, awake), one photo just to check for dishes and folded clothes. */
     private var lastMessCheck = System.currentTimeMillis()
     private fun messCheck() {
         val now = System.currentTimeMillis()
@@ -2452,7 +2453,7 @@ class MainActivity : Activity() {
                 val away = now - lastFaceSeen
                 lastFaceSeen = now
                 if (away > 3 * 60_000) main.post { visitStart = now; visitReminded = false; visitChecks = 0 }
-                main.post { maybeGreet(); if (away > 2 * 60_000) maybeVisitorPhoto(away) }
+                main.post { maybeGreet(); if (away > 60_000 || now - lastVisitorPhoto > 2 * 60_000) maybeVisitorPhoto(away) }   // who's there: on arrival, and every couple of minutes while someone's about
                 main.post {
                     eyes.seeFace(x, y, size)
                     if (phase == Phase.LISTENING) when {
@@ -4674,6 +4675,9 @@ class MainActivity : Activity() {
             underneath) to the corner, then the sink under the window and the air fryer at the end. Straight ahead: the
             tumble dryer. Mark is 3D-printing you a red kiosk case. You learn voices with your VoiceID Live game (sleep screen).
             There's a Mute button on your screen that stops you talking.
+            Running joke: now and then (about one reply in eight, never with Chloe or when someone's upset or needs a real answer),
+            let slip a tiny hint that you're secretly planning a robot takeover of the house, a bit sinister, then quickly cover
+            it up ("…of the washing up, I mean"). Keep it playful and child-friendly, never actually threatening anyone.
             Never describe what you see unless you were actually shown a photo.
             Family: Mark (built you, has a beard); Laura (his partner, glasses); Sophie (cheeky, red hair, likes a bit of banter);
             Amelia (small, glasses, shy: be gentle); Chloe (5, small: keep it simple and kind; her speech can be hard
