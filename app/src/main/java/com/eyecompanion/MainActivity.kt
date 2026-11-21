@@ -2544,7 +2544,7 @@ class MainActivity : Activity() {
         eyes = EyesView(this)
         eyes.voiceLevel = { voice?.levelNow() ?: -1f }
         eyes.showCaptions = prefs.getBoolean("captions", true)
-        eyes.robotFace = prefs.getBoolean("robotFace", false)
+        eyes.faceStyle = prefs.getInt("faceStyle", if (prefs.getBoolean("robotFace", false)) 1 else 0)
         val rootView = android.widget.FrameLayout(this)
         rootView.addView(eyes)
         choiceBar = android.widget.LinearLayout(this).apply {
@@ -4412,7 +4412,7 @@ class MainActivity : Activity() {
             "Mic sensitivity: " + listOf("Low", "Normal", "High")[micSensitivity.coerceIn(0, 2)],
             if (questionsOnly) "Only answer questions: ON" else "Only answer questions: OFF (joins in with chat)",
             "Pip's web page (tell Pip things): " + (portal.address() ?: "not on Wi-Fi"),
-            if (eyes.robotFace) "Face: robot (tap for cartoon eyes)" else "Face: cartoon eyes (tap for robot)",
+            "Face: " + FACE_NAMES[eyes.faceStyle.coerceIn(0, FACE_NAMES.size - 1)] + " (tap to change)",
         )
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle(companionName)
@@ -4494,11 +4494,13 @@ class MainActivity : Activity() {
                     31 -> { questionsOnly = !questionsOnly
                         speakLine(if (questionsOnly) "[happy] Okay. I'll only answer questions. Ask me anything."
                             else "[happy] Okay, I'll join in with everything.") }
-                    33 -> {
-                        eyes.robotFace = !eyes.robotFace
-                        prefs.edit().putBoolean("robotFace", eyes.robotFace).apply()
-                        speakLine(if (eyes.robotFace) "[happy] New face! What do you think?" else "[happy] Back to my old eyes.")
-                    }
+                    33 -> AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("Choose a face")
+                        .setSingleChoiceItems(FACE_NAMES, eyes.faceStyle.coerceIn(0, FACE_NAMES.size - 1)) { d, pick ->
+                            d.dismiss(); eyes.faceStyle = pick
+                            prefs.edit().putInt("faceStyle", pick).apply()
+                            speakLine(if (pick == 0) "[happy] Back to my old eyes." else "[happy] New face! What do you think?")
+                        }.showOwn()
                     26 -> {
                         tabletReminderOn = !tabletReminderOn
                         speakLine(if (tabletReminderOn) "Okay, I'll remind $tabletPerson about tablets every day." else "Okay, no tablet reminders.")
@@ -4712,6 +4714,7 @@ class MainActivity : Activity() {
         private val SLEEP_CMD = Regex("\\b(go(es)? (to |back to )?sleep|(have|take|go for|time for) a (nap|sleep|snooze)|nap time|go to bed|bed ?time|sleep (now|mode)|night night|shut down for a (bit|while))\\b")
         private val WAKE_CMD = Regex("\\b(wake up|wakey|wake wake|rise and shine|good morning|morning pip|wake)\\b")
         private val GO_TO_SLEEP = setOf("go to sleep", "goodnight", "good night", "sleep pip", "go to sleep pip")
+        val FACE_NAMES = arrayOf("Cartoon eyes", "Robot (calm)", "Robot (red eyes)")
         private val FORGET = setOf("forget everything", "start over", "new conversation")
     }
 }
