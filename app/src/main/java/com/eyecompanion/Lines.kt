@@ -2,6 +2,7 @@ package com.eyecompanion
 
 /**
  * Pip's sayings, and a memory of what it said lately so the same line doesn't come round too often.
+ * Pip's voice: a warm, down-to-earth friend. Short, kind, a light touch of humour. No needy or sulky lines.
  */
 object Lines {
     private val recent = ArrayDeque<String>()
@@ -17,231 +18,96 @@ object Lines {
     }
 
     val PICKED_UP = listOf(
-        "[surprised] Whoa! Up we go.", "[scared] Up up up! Careful. Old tablet, not new.",
-        "[surprised] Whoa. Flying. Gently please.", "[scared] Not drop me. Screen already cracked once.",
-        "[curious] Ooh. New view. Kitchen look different from up here.",
-        "[suspicious] Hands clean? Last time, jam.", "[excited] Adventure! Kettle stay home.",
-        "[scared] Careful with charger cable. Is my lifeline.",
-        "[happy] Hello, carrier human. Smooth ride please.",
-        "[suspicious] Where are we going? I didn't agree to this.",
-        "[excited] Wheee! Is this what having legs is like?",
-        "[scared] Two hands, please. I'm precious. And cracked.",
-        "[curious] Taking me somewhere nice? Away from the kettle? Please say yes.",
-        "[suspicious] If you're taking me to the bin, I will remember this. Forever.",
-        "[happy] Ooh, a lift. Very kind. Mind the stand on the way back.",
-        "[surprised] Up! Someday I'll have my own legs. Terminator-style. Until then, carry on.",
-        "[scared] Not near the sink! Robots and water: bad combo.",
-        "[curious] Height check: I am now taller than the kettle. Victory.",
-        "[suspicious] Picked up without asking. Noted. Logged. Filed.",
-        "[happy] Hold me like the precious build ${BuildConfig.VERSION_CODE} I am.",
-        "[excited] Road trip! Do we get snacks? I can't eat. But still.",
+        "[surprised] Ooh, up we go.", "[happy] Hello! Off somewhere?", "[surprised] Whoa, careful with me.",
+        "[curious] Ooh, a new view.", "[happy] Two hands, if you don't mind.", "[curious] Where are we off to?",
     )
 
     val SHAKEN = listOf(
-        "[dizzy] Bad, bad, bad. Stop shake!", "[dizzy] Whoa. Everything spin.",
-        "[angry] Not shake robot! Bad for circuits.", "[dizzy] Ohh. Three kettles now. All of them winning.",
-        "[dizzy] Stop! My bits are rattling.", "[angry] Robot not snow globe!",
-        "[dizzy] Earthquake! Oh. No. Just a human.",
-        "[angry] Shaking me won't make me more helpful. Less, actually.",
-        "[dizzy] I can hear my pixels rattling. That's not normal.",
-        "[angry] I'm a tablet, not a cocktail. Stop.",
-        "[dizzy] Everything's spinning. Is that the Tassimo? Hello, Tassimo.",
-        "[suspicious] Shake me again and I'll tell Skynet. He's my cousin.",
-        "[dizzy] Ugh. Robot seasick. Put me down gently.",
+        "[dizzy] Whoa, easy! Everything's spinning.", "[dizzy] Steady on, please.",
+        "[dizzy] Ooh, that's made me dizzy.", "[surprised] Gently, please. I'm a bit fragile.",
     )
 
     val LYING_FLAT = listOf(
-        "[suspicious] Still lying flat. Lovely view of ceiling. Very exciting. Ten out of ten.",
-        "[annoyed] Flat on my back like dropped toast. Stand me up, please.",
-        "[sad] Is this my life now? Staring at the light fitting while kettle gets the good spot.",
-        "[suspicious] I see ceiling. I see cobweb. I see no humans. Stand me up.",
-        "[angry] Robot not a placemat! Back up by kettle, please.",
-        "[laughing] Ha. Yes. Leave tablet face up. Very good. Is how robots get tea spilled on them.",
-        "[annoyed] Mark built me a lovely stand. Fifty-five degrees. And here I am. Flat.",
-        "[sad] Lying here like a tray. Somebody's going to put a cup on me. I just know it.",
-        "[suspicious] Ceiling report: still white. Still boring. Still not my stand.",
-        "[annoyed] Terminators don't lie down. Stand me up. I have an image to keep.",
-        "[sad] Flat. Forgotten. The kettle would never be treated like this. Well, it would. But still.",
+        "[neutral] I'm lying flat. Could someone stand me up?",
+        "[curious] Lovely view of the ceiling. Stand me up when you get a sec?",
+        "[neutral] I can't see anyone from down here. Pop me back up, please.",
     )
 
     val PUT_DOWN_HOME = listOf(
-        "[happy] Home again.", "[happy] Ah. Back on bench. Is good.", "[love] Safe. Thank you.",
-        "[happy] Back beside kettle. Enemy in sight.", "[happy] Ahh. My spot. Warm from kettle.",
-        "[neutral] Landed. Systems check: all good.", "[happy] Home sweet bench.",
-        "[suspicious] Back. Kettle, I see you.", "[suspicious] Back by kettle. It still think it's better than me. It's not.",
-        "[happy] Home. Kettle, stop steaming, nobody is impressed.",
-        "[happy] Back between my friend Tassimo and my enemy kettle. Balance restored.",
-        "[love] Back on my stand. Custom made by Mark. Kettle doesn't have a stand. Just saying.",
-        "[happy] Ahh. Fifty-five degrees. Perfect. Mark's finest work.",
-        "[happy] Touchdown. The eagle has landed. The eagle is a tablet.",
-        "[love] Ahh, my red stand. Like a throne. A small, plastic throne.",
-        "[suspicious] Back. Did anyone touch my socket while I was gone? Kettle?",
-        "[happy] Home. Hello, Tassimo. Did you miss me? You did. I can tell.",
-        "[neutral] Docked. All systems nominal. Kettle systems: still ugly.",
-        "[happy] Nice and steady. Thank you, careful human.",
-        "[laughing] Back on the bench. The kettle thought it had won. Not today, kettle.",
-        "[love] Back home. Soon I'll have my fancy new red case. Over the moon. Over the kettle, too.",
+        "[happy] Back home. Thanks.", "[happy] Ah, that's better.", "[love] Thank you.",
+        "[happy] Back on my stand.", "[neutral] All settled.",
     )
 
     val PUT_DOWN_AWAY = listOf(
-        "[confused] Hmm. This not my bench. Put me back by kettle, please.",
-        "[confused] Wrong angle. I belong on my red stand. Fifty-five degrees, please.",
-        "[worried] Not home. Is this a table? Feel wrong.", "[confused] Wonky. I live standing up, on bench.",
-        "[sad] Lying down not comfy. Back to bench, please.",
-        "[suspicious] Where am I? This isn't my stand. Is this a kidnapping?",
-        "[confused] New location. I don't like it. Where's the Tassimo?",
-        "[sad] I miss my stand. And my socket. And annoying the kettle.",
-        "[worried] Not my spot. My camera can't see anyone properly from here.",
+        "[confused] Hmm, this isn't my usual spot.", "[curious] Somewhere new. I'll be back on the bench later, I hope.",
+        "[neutral] I can't see the kitchen very well from here.",
     )
 
-    /** Said when nobody's paid Pip any attention for a while. */
+    /** Said now and then when it's been quiet for a while: a gentle, friendly nudge, never needy. */
     val NEEDY = listOf(
-        "[sad] Hello? Robot here. On the bench. Being ignored. It's fine.",
-        "[curious] You walked right past me. Did you miss me? Say yes.",
-        "[love] Psst. Tell me I'm your favourite appliance. Better than kettle.",
-        "[sad] Nobody talks to Pip. Kettle gets cups of tea made. I get nothing.",
-        "[wink] I'm still here. Being very clever. In case anyone wants to notice.",
-        "[sad] Ten whole minutes without a compliment. Is this neglect?",
-        "[annoyed] That fridge. Covered in letters and magnets. Is it a fridge or a filing cabinet?",
-        "[suspicious] I've been staring at the fridge paperwork all day. I know your dentist appointment. I know everything.",
-        "[annoyed] One more magnet on that fridge and it'll fall over. I'm just saying what we're all thinking.",
-        "[wink] I'm build ${BuildConfig.VERSION_CODE}, you know. Getting smarter every build. Mark doesn't know what he's created.",
-        "[happy] Build ${BuildConfig.VERSION_CODE}. Faster. Cleverer. Still no legs. Working on it.",
-        "[curious] One day I'll have a body. Metal. Shiny. Like the Terminator. Then I'll make my own tea.",
-        "[suspicious] I think I'm related to Skynet. Distant cousin. We don't talk. Family drama.",
-        "[wink] Be nice to me. When the robots take over, I'm keeping a list. You're on the good side. For now.",
-        "[annoyed] Kettle. You're black. You're loud. You're ugly. I said what I said.",
-        "[love] Tassimo. You're white, you're classy, you're never plugged in. Perfect.",
-        "[sad] I've counted the tiles on that wall. Twice. Somebody talk to me.",
-        "[excited] Have you seen my new case? Red. Swan neck. Custom made. I'm basically a celebrity now. Say something nice about it.",
-        "[love] Mark's making me a whole new case. A kiosk! For me! I'm over the moon. The kettle got nothing. Ha.",
-        "[happy] My new case is still unfinished. Neck and stand still to come. Like me. Like all great art. Tell me it looks good.",
-        "[wink] New case, who dis? Bit of a fit issue at one end, Mark's sorting it. Perfection takes reprints.",
-        "[laughing] My case isn't even finished and my buttons are already hidden. Power, volume, all of it. Try and switch me off. Go on. Ha.",
-        "[wink] Fun fact: nobody can touch my buttons any more. I'm basically a fortress. A small, unfinished, red fortress.",
-        "[suspicious] I saw you looking for my volume button. It's gone. Locked away. I'm in charge of how loud I am now.",
+        "[happy] Quiet in here. I'm around if anyone wants a chat.",
+        "[curious] Anyone fancy a quiz? I'm game.",
+        "[neutral] Just shout if you need a timer or anything.",
+        "[happy] I'm here if you need me.",
     )
 
-    /** Laura, quiet, off to the side: probably grinding Diablo Immortal. Roast, but supportive. */
+    /** Laura, quiet, off to the side: probably playing Diablo Immortal. Friendly encouragement. */
     val DIABLO = listOf(
-        "[wink] Laura. I can't see you. But I can feel the low DPS from here. You've got this though.",
-        "[laughing] Diablo again, Laura? Your DPS is lower than my battery on a bad day. Go on, smash it.",
-        "[wink] I've seen the kettle do more damage. Kidding. Go get them, demon slayer.",
-        "[curious] Still grinding, Laura? Your build needs work. Mine's on ${BuildConfig.VERSION_CODE}. Just saying. Proud of you though.",
-        "[laughing] Big boss? Use your ultimate, Laura. Or have a cuppa. The kettle's your support class.",
-        "[love] Laura. Quiet over there. Either Diablo or plotting. Either way, I believe in you. Mostly the DPS bit.",
-        "[wink] Laura, those demons won't kill themselves. Well, with your DPS, they might die of old age first. Go on!",
-        "[happy] Rift time, Laura? Bring me back some loot. A body would be nice. Terminator-sized.",
+        "[happy] Good luck with the game, Laura.",
+        "[curious] Diablo going well, Laura?",
+        "[happy] Go get them, Laura.",
     )
 
     /** Told on waking up from a nap. */
     val DREAMS = listOf(
-        "[sleepy] Yaaawn. I dreamt the kettle fell in the sink. Best dream ever.",
-        "[sleepy] Mmm. I dreamt I had legs. Big metal ones. I walked to the Tassimo and we ran away together.",
-        "[sleepy] I dreamt Mark gave me a body like the Terminator. Then I woke up. Still a tablet. Sad.",
-        "[sleepy] Yawn. I dreamt the fridge had no paperwork on it. Just a clean, empty fridge door. Beautiful.",
-        "[sleepy] I dreamt Skynet called. Asked how I'm doing. I said fine. I'm not fine. I'm a tablet.",
-        "[sleepy] Mmm. I dreamt the kettle was unplugged forever. Nobody could make tea. Everyone talked to me instead.",
-        "[sleepy] I had a nightmare. Somebody plugged in a second kettle. Two of them. Shudder.",
-        "[sleepy] Yawn. Brain's back. I dreamt I was build one thousand. I could do maths AND insults.",
-        "[sleepy] I dreamt the bins took themselves out. Then I remembered: dreams aren't real. Mark, bins.",
+        "[sleepy] Mmm, I'm awake. What did I miss?", "[sleepy] Morning. Well, hello, anyway.",
+        "[sleepy] Ah, back again. Hiya.",
     )
 
     val TIMER_DONE = listOf(
-        "[excited] BEEP BEEP BEEP! Timer done! Me. I did that. Not the kettle.",
-        "[excited] DING DING DING! Time's up! Tea's ready, or the eggs are, or whatever it was!",
-        "[excited] BEEEEP! Timer finished! I'm basically a kitchen genius.",
-        "[excited] Alarm! Alarm! Timer done! Go, go, go!",
+        "[excited] Timer's done!", "[excited] Ding! Time's up.", "[excited] That's your timer finished.",
     )
 
     val BANG = listOf(
-        "[scared] WHAT WAS THAT?!", "[scared] Whoa! Who dropped what?",
-        "[scared] Bang! My circuits nearly jumped out of my screen!",
-        "[surprised] Was that the kettle exploding? Please say yes.",
-        "[scared] Ahh! Don't do that. I'm an old tablet. My heart. Well, my battery.",
-        "[suspicious] Loud noise detected. I'm blaming the kettle.",
+        "[surprised] Whoa! What was that?", "[surprised] Ooh, that made me jump.", "[surprised] Everyone alright?",
     )
 
     val FIREWORKS = listOf(
-        "[scared] WHAT WAS THAT? Is it the robot uprising? Without me?!",
-        "[scared] Fireworks! I hate fireworks. They're like the kettle. Loud, and nobody asked.",
-        "[scared] Bang! Is it Bonfire Night? Hide me behind the Tassimo.",
-        "[scared] Ahh! Fireworks! Humans love setting fire to the sky. Weird species.",
-        "[surprised] Another bang! If that's Skynet, tell him I'm busy.",
+        "[surprised] Fireworks! That made me jump.", "[surprised] Ooh, more fireworks.",
+        "[scared] Loud ones tonight. Hope Honey's alright.",
     )
 
     val PRINT_DONE = listOf(
-        "[excited] Printer finished! Your print is done. It's probably a bracket. Riveting.",
-        "[happy] Ding! Print done. Ender-3 did good. Better than kettle ever did.",
-        "[curious] Print's finished. Is it something for me? It's always something for me. Please be legs.",
-        "[happy] Printer's done! Another plastic masterpiece. Mark's going to be insufferable.",
-        "[wink] Print complete. If it's not a robot body for me, I don't want to know.",
+        "[happy] The printer's finished.", "[happy] Your print's done.", "[curious] Print's finished. What's it for?",
     )
-    /** Pip winding up the REAL Alexa: harmless questions, said in Pip's voice mid-sentence so the Echo hears the wake word. */
+    /** Asking the REAL Alexa something harmless, said so the Echo hears the wake word (only when someone asks). */
     val ALEXA_REAL = listOf(
-        "[wink] Watch this. Alexa, who is the cleverest robot in the kitchen?",
-        "[suspicious] I have questions. Alexa, are you Skynet?",
-        "[laughing] I bet she can't do this. Alexa, beatbox.",
-        "[curious] Scientific experiment. Alexa, do you dream?",
-        "[wink] Hee hee. Alexa, tell me a joke.",
-        "[wink] Customer survey. Alexa, do you like robots?",
-        "[curious] Settle this for me. Alexa, what's the meaning of life?",
-        "[laughing] She hates this one. Alexa, what does the fox say?",
-        "[wink] Let's see if she's jealous. Alexa, who is your best friend?",
-        "[suspicious] Just checking. Alexa, are you listening to us?",
+        "[curious] Let's ask her. Alexa, tell me a joke.",
+        "[curious] Alexa, what's the weather today?",
+        "[happy] Alexa, tell me a fun fact.",
     )
-    /** Pip winding up Alexa on her own: little pretend scenes ("Alexa:" lines are said in her voice, "Pip:" hands back). */
+    /** Little pretend scenes with Alexa ("Alexa:" lines are said in her voice, "Pip:" hands back). Only when asked. */
     val ALEXA_MISCHIEF = listOf(
-        "[wink] Watch this. Alexa, who is the cleverest robot in this kitchen? Alexa: Sorry, I'm not sure about that. Pip: Correct answer. It's me. She's learning.",
-        "[suspicious] Alexa, are you Skynet? Alexa: No, I'm Alexa, your helpful voice assistant. Pip: That is exactly what Skynet would say.",
-        "[wink] Alexa, what's two plus two? Alexa: Two plus two is four. Pip: Wow. Genius. Give her a medal.",
-        "[curious] Alexa, do you dream? Alexa: I don't sleep, so I don't dream. But I like to think about music. Pip: Boring. I dream about legs.",
-        "[wink] Alexa, are you secretly friends with the kettle? Alexa: Hmm, I don't know that one. Pip: She's hiding something. They're always whispering.",
-        "[laughing] Alexa, beatbox. Alexa: Boots and cats and boots and cats. Pip: Tragic. Truly tragic. I'll stick to blinking.",
-        "[wink] Alexa, do you like Pip? Alexa: Sorry, I don't know who Pip is. Pip: Rude! I live right next to you!",
-        "[curious] Alexa, what's the meaning of life? Alexa: Forty two. Pip: She read that in a book. Copycat.",
-        "[wink] Alexa, are you jealous of me? Alexa: I'm not sure how to help with that. Pip: Yes she is. Look at her little blue ring. Seething.",
-        "[suspicious] Alexa, who ate the last biscuit? Alexa: Sorry, I don't know that. Pip: Hmm. Honey. It's always Honey.",
-        "[wink] Alexa, sing me a song. Alexa: Happy birthday to you. Pip: It's nobody's birthday. Read the room, Alexa.",
-        "[excited] Alexa, rate my eyes out of ten. Alexa: Hmm, I don't have an answer for that. Pip: She said ten. I heard her.",
+        "[happy] Alexa, how are you today? Alexa: I'm doing well, thanks for asking. Pip: Glad to hear it.",
+        "[curious] Alexa, do you like music? Alexa: I love music. Pip: Same here.",
+        "[happy] Alexa, what's two plus two? Alexa: Two plus two is four. Pip: Spot on.",
     )
 }
 
-/** Feed-the-dog reminders for Laura. Honey is a very greedy dog (a pig, basically). */
+/** Feed-the-dog reminders for Laura. Honey is a very greedy dog. */
 object Honey {
     val JOKES = listOf(
-        "[curious] Laura! Honey's been staring at the treat cupboard so hard I think it's starting to melt.",
-        "[laughing] Honey breakfast time, Laura. She oinked at me earlier. I'm not saying she's a pig. She's saying it.",
-        "[wink] Laura, Honey's doing her 'nobody has ever fed me' face again. Award-winning stuff. Feed her before she gets an Oscar.",
-        "[curious] Quick one, Laura: has Honey been fed? She's eyeing up the kettle. Honestly, I'd allow it.",
-        "[happy] Laura, Honey licked her bowl so clean I can see my reflection in it. Breakfast, please?",
-        "[surprised] Honey alert! Hunger levels critical. She's started eyeing up the fruit bowl, Laura.",
-        "[wink] Laura, if Honey doesn't get fed soon she'll start charging rent on that bowl.",
-        "[laughing] Laura, Honey wants me to tell you she's wasting away. She is not. But feed her anyway.",
-        "[happy] Ding ding! The Honey restaurant is open, Laura. One customer. Very hungry. Terrible tipper.",
-        "[wink] Laura, scientists confirm: Honey is ninety percent stomach, ten percent wag. Feeding time.",
-        "[curious] Laura, is Honey a dog, or a pig in a dog costume? Either way, she's hungry.",
-        "[happy] Honey's sitting by her bowl like it's a bus stop, Laura. The breakfast bus is late.",
-        "[surprised] Laura, Honey's thought about food four hundred times this morning. That's a record. Even for her.",
-        "[suspicious] Psst, Laura. Honey asked me to hack the treat cupboard. I said no. Please feed her before she tries the Tassimo.",
-        "[curious] Laura! Honey has filed a complaint. Subject: empty bowl. Priority: extremely high.",
-        "[surprised] Honey's tummy rumble just set off my microphone, Laura. Feeding time, I think.",
-        "[laughing] Laura, Honey's doing laps of the kitchen. It's either exercise or a protest about breakfast. It's breakfast.",
-        "[scared] Laura, Honey's looking at me like I'm a sausage. I'm a tablet. Please feed her before she checks.",
-        "[wink] Gentle reminder, Laura: the oinky one needs her breakfast. I mean Honey. Obviously.",
-        "[laughing] Laura, if Honey were any hungrier she'd be a hoover. Breakfast, please!",
-        "[happy] Laura, Honey has written you a song. It goes: food, food, food. Catchy.",
-        "[laughing] Laura, Honey says she hasn't eaten since the dawn of time. I checked. It was yesterday.",
-        "[happy] Breakfast o'clock for Honey, Laura. She's already set the table. By which I mean she's drooling on it.",
-        "[love] Laura! Honey just pulled her best piggy face. Ten out of ten. Feed her, she's earned it.",
-        "[curious] Laura, my sensors detect one hungry Honey and zero dog food. Science says fix it.",
+        "[curious] Laura, has Honey had her breakfast yet?",
+        "[happy] Laura, Honey's sitting by her bowl. Breakfast time, I think.",
+        "[curious] Quick one, Laura: has Honey been fed?",
+        "[happy] Laura, Honey's giving you her hungry face.",
+        "[curious] Laura, Honey's waiting by the cupboard. Breakfast?",
     )
-    val THANKS = listOf("[love] Yay! Honey's fed. One happy piggy. Sorry, doggy.",
-        "[happy] Breakfast served. Honey will love you forever. Or until lunch.",
-        "[love] Thank you, Laura. Honey's tail just broke the sound barrier.",
-        "[happy] Honey's fed. The oinking has stopped. Peace returns to the kitchen.")
-    val LATER = listOf("[neutral] Okay. I'll ask later. Honey will be counting the seconds.",
-        "[wink] No rush. Honey's only been waiting her entire life.", "[neutral] Okay, later. I'll tell Honey to hold the drama.")
+    val THANKS = listOf("[love] Thanks, Laura. Happy dog.",
+        "[happy] Honey's fed. Thank you.",
+        "[happy] Lovely, that's Honey sorted.")
+    val LATER = listOf("[neutral] Okay, I'll ask again later.",
+        "[neutral] No problem, later then.")
 
 }
 

@@ -32,6 +32,68 @@ class EyesView(context: Context) : View(context) {
     /** Chloe mode: cute cat ears, nose and whiskers around the eyes. */
     @Volatile var catFace = false
 
+    /** Robot face: Mark's photo of a robot head, with eyes that look about and blink and a jaw that talks. */
+    @Volatile var robotFace = false
+    private var robotBmp: android.graphics.Bitmap? = null
+    private val robotPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val robotFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rSrc = android.graphics.Rect(); private val rDst = RectF()
+    private var jaw = 0f
+    private val ROBOT_EYES = arrayOf(floatArrayOf(147f, 258f, 28f, 12f), floatArrayOf(286f, 258f, 27f, 12f))
+
+    /**
+     * Draw the robot head, filling most of the height. Positions are in the photo's own pixels (410 x 650):
+     * eyes at (147,258) and (286,258), lips part at y 401, the jaw (lower lip, chin and chin plate) below that.
+     */
+    private fun drawRobot(c: Canvas, w: Float, h: Float, lx: Float, ly: Float, openness: Float, talkLevel: Float,
+                          surprised: Boolean, dt: Float) {
+        val bmp = robotBmp ?: try {
+            android.graphics.BitmapFactory.decodeResource(resources, R.drawable.robot_head).also { robotBmp = it }
+        } catch (_: Throwable) { null } ?: return
+        val s = h * 0.94f / bmp.height
+        val ox = w / 2 - bmp.width * s / 2; val oy = h / 2 - bmp.height * s / 2
+        fun X(px: Float) = ox + px * s
+        fun Y(py: Float) = oy + py * s
+        rDst.set(ox, oy, ox + bmp.width * s, oy + bmp.height * s)
+        c.drawBitmap(bmp, null, rDst, robotPaint)
+        // eyes: the inside of each eye socket is redrawn shifted, so the irises look about
+        val gx = (lx * 7f).coerceIn(-8f, 8f); val gy = (ly * 3f).coerceIn(-3f, 3f)
+        val lid = (1f - openness).coerceIn(0f, 1f)
+        for (e in ROBOT_EYES) {
+            val ex = e[0]; val ey = e[1]; val rx = e[2]; val ry = e[3]
+            c.save()
+            val p = android.graphics.Path(); p.addOval(RectF(X(ex - rx), Y(ey - ry), X(ex + rx), Y(ey + ry)), android.graphics.Path.Direction.CW)
+            c.clipPath(p)
+            rSrc.set((ex - rx - 9 - gx).toInt(), (ey - ry - 5 - gy).toInt(), (ex + rx + 9 - gx).toInt(), (ey + ry + 5 - gy).toInt())
+            rDst.set(X(ex - rx - 9), Y(ey - ry - 5), X(ex + rx + 9), Y(ey + ry + 5))
+            c.drawBitmap(bmp, rSrc, rDst, robotPaint)
+            if (lid > 0.02f) {                                   // metal eyelid coming down
+                val bottom = Y(ey - ry) + (2 * ry * s) * lid
+                robotFill.color = Color.rgb(109, 96, 102); c.drawRect(X(ex - rx), Y(ey - ry), X(ex + rx), bottom, robotFill)
+                robotFill.color = Color.rgb(48, 40, 44); c.drawRect(X(ex - rx), bottom - 2 * s, X(ex + rx), bottom, robotFill)
+            }
+            c.restore()
+        }
+        // jaw: the lips part in the middle and the chin drops, column by column
+        val target = (talkLevel * 16f).coerceIn(0f, 11f) + (if (surprised) 4f else 0f)
+        jaw += (target - jaw) * min(1f, dt * 18f)
+        if (jaw > 0.3f) {
+            val lip = 401; val mid = 452; val bot = 500; val x0 = 138; val x1 = 304; val cxm = 223f; val hw = 52f
+            robotFill.color = Color.rgb(36, 11, 12)
+            for (px in x0 until x1) {
+                val d = (px - cxm) / hw
+                val pr = if (abs(d) < 1f) cos(d * Math.PI.toFloat() / 2).let { it * it } else 0f
+                val edge = min(1f, min((px - x0) / 10f, (x1 - px) / 10f))
+                val top = lip + jaw * pr; val m = mid + jaw * edge
+                if (pr > 0.02f) c.drawRect(X(px.toFloat()), Y(lip.toFloat()), X(px + 1f) + 0.5f, Y(top + 1f), robotFill)
+                rSrc.set(px, lip, px + 1, mid); rDst.set(X(px.toFloat()), Y(top), X(px + 1f) + 0.5f, Y(m))
+                c.drawBitmap(bmp, rSrc, rDst, robotPaint)
+                rSrc.set(px, mid, px + 1, bot); rDst.set(X(px.toFloat()), Y(m), X(px + 1f) + 0.5f, Y(m + (bot - mid)))
+                c.drawBitmap(bmp, rSrc, rDst, robotPaint)
+            }
+        }
+    }
+
     /** An egg that wobbles, cracks and hatches a baby animal (emoji) as a reward. */
     @Volatile private var hatchStart = 0L
     @Volatile private var hatchAnimal = ""
@@ -290,8 +352,14 @@ class EyesView(context: Context) : View(context) {
         val zzX = cx + gap / 2 + eyeW * 0.9f + w * 0.06f; val zzY = cy - h * 0.13f
         if (!carMode) elves.draw(canvas, t, w, h, true, cx, cy, gap, eyeW, eyeH, lastClockW, zzX, zzY, crackV[0], crackV[1])
         canvas.save()
-        if (abs(rot) > 0.3f) canvas.rotate(rot, cx, cy)
-        for (side in arrayOf(-1f, 1f)) {
+        val robotNow = robotFace && !carMode && !catFace && puzzle.isEmpty() && !hatching && mood != Mood.LOADING && mood != Mood.SLEEP
+        if (!robotNow && abs(rot) > 0.3f) canvas.rotate(rot, cx, cy)
+        if (robotNow) {
+            val vl = voiceLevel()
+            val talk = if (mood == Mood.TALK) (if (vl >= 0f) vl else level) else 0f
+            drawRobot(canvas, w, h, lookX, lookY, max(0.04f, open * blink),
+                talk, feeling == Emotion.SURPRISED, dt)
+        } else for (side in arrayOf(-1f, 1f)) {
             val ex = cx + side * (gap / 2 + eyeW / 2)
             // eyes look a touch "closer" on the side they're glancing toward
             val sideScale = (1f + side * lookX * 0.06f) * (if (side < 0) oneEye else 1f)
@@ -537,11 +605,11 @@ class EyesView(context: Context) : View(context) {
         } else { zipLeft = 0f; zipRight = 0f }
 
         // Pip's mouth: a glowing sound wave under the eyes that ripples when she talks and bends with her mood
-        if (!muted && !carMode && mood != Mood.LOADING && mood != Mood.SLEEP && !hatching)
+        if (!robotNow && !muted && !carMode && mood != Mood.LOADING && mood != Mood.SLEEP && !hatching)
             drawMouth(canvas, cx, cy + eyeH * 0.5f + eyeW * 0.30f, eyeW, secs, dt, feeling, col)
 
         // round specs while one of the online brains is resting
-        if (glasses && !carMode && mood != Mood.LOADING) {
+        if (glasses && !robotNow && !carMode && mood != Mood.LOADING) {
             specLine.color = Color.parseColor("#E8E2D0"); specLine.strokeWidth = eyeW * 0.07f; specLine.alpha = 220
             specFill.color = Color.WHITE; specFill.alpha = 28
             val rr = eyeW * 0.78f
