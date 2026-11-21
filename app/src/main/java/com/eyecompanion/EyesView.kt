@@ -20,6 +20,9 @@ class EyesView(context: Context) : View(context) {
 
     /** How Pip feels about what it's saying; shown on top of the mood for a while. */
     companion object {
+        /** Sinister moment: the eyes glow red until this time (set by a [sinister] feeling tag). */
+        @Volatile var redUntil = 0L
+        fun goRed(ms: Long = 4500) { redUntil = System.currentTimeMillis() + ms }
         const val KS_STEAM = 1; const val KS_RACE = 2; const val KS_HANDS = 3; const val KS_SHIFTY = 4
         const val KS_HEARTBREAK = 5; const val KS_TALLY = 6; const val KS_BUBBLES = 7
         const val CHORE_ADD = -10; const val CHORE_TABLETS = -11; const val CHORE_TEETH = -12; const val CHORE_HIDE = -13; const val CHORE_SHOW = -14; const val CHORE_MORE = -15; const val CHORE_NONE = -16
@@ -60,6 +63,7 @@ class EyesView(context: Context) : View(context) {
     private val photoBmps = HashMap<Int, android.graphics.Bitmap>()
     private val robotPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val robotFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val redGlow = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rSrc = android.graphics.Rect(); private val rDst = RectF()
     private var jaw = 0f; private var gearAng = 0f; private var lastTurn = 0f
 
@@ -68,7 +72,7 @@ class EyesView(context: Context) : View(context) {
     }
 
     private fun drawRobot(c: Canvas, w: Float, h: Float, lx: Float, ly: Float, openness: Float, talkLevel: Float,
-                          surprised: Boolean, dt: Float) {
+                          surprised: Boolean, dt: Float, red: Float = 0f) {
         val f = photoFaces.getOrNull(faceStyle - 1) ?: return
         val bmp = photoBmps[f.res] ?: try {
             android.graphics.BitmapFactory.decodeResource(resources, f.res).also { photoBmps[f.res] = it }
@@ -107,6 +111,14 @@ class EyesView(context: Context) : View(context) {
             rSrc.set((ex - rx - mx - gx).toInt(), (ey - ry - my - gy).toInt(), (ex + rx + mx - gx).toInt(), (ey + ry + my - gy).toInt())
             rDst.set(X(ex - rx - mx), Y(ey - ry - my), X(ex + rx + mx), Y(ey + ry + my))
             c.drawBitmap(bmp, rSrc, rDst, robotPaint)
+            if (red > 0.01f) {                                   // sinister: the iris glows red
+                val ix = X(ex + gx); val iy = Y(ey + gy); val ir = ry * s * 1.1f
+                redGlow.shader = android.graphics.RadialGradient(ix, iy, ir * 2.2f,
+                    intArrayOf(Color.argb((255 * red).toInt(), 255, 235, 225), Color.argb((235 * red).toInt(), 255, 30, 20),
+                        Color.argb((120 * red).toInt(), 200, 0, 0), Color.TRANSPARENT), floatArrayOf(0f, 0.22f, 0.5f, 1f),
+                    android.graphics.Shader.TileMode.CLAMP)
+                c.drawCircle(ix, iy, ir * 2.2f, redGlow)
+            }
             if (lid > 0.02f) {
                 robotFill.color = f.lid
                 c.drawRect(X(ex - rx), Y(ey - ry), X(ex + rx), Y(ey - ry) + 2 * ry * s * lid, robotFill)
@@ -385,7 +397,10 @@ class EyesView(context: Context) : View(context) {
             else -> eyeColor
         }
         val takeover = t < takeoverUntil
-        val col = if (takeover) Color.parseColor("#FF2A1E") else blend(eyeColor, emoColor, tint)
+        // sinister moment: fade to red, hold, fade back
+        val redLeft = redUntil - t
+        val red = if (redLeft <= 0) 0f else min(1f, min(redLeft / 600f, (4500f - redLeft).coerceAtLeast(0f) / 350f + 0.05f))
+        val col = if (takeover) Color.parseColor("#FF2A1E") else blend(blend(eyeColor, emoColor, tint), Color.parseColor("#FF2A1E"), red)
         eyePaint.color = col
         glowPaint.color = col; glowPaint.alpha = 40
         // Christmas elves (the peeking ones hide behind the eyes, so they're drawn first)
@@ -400,7 +415,7 @@ class EyesView(context: Context) : View(context) {
             val vl = voiceLevel()
             val talk = if (mood == Mood.TALK) (if (vl >= 0f) vl else level) else 0f
             drawRobot(canvas, w, h, lookX, lookY, max(0.04f, open * blink),
-                talk, feeling == Emotion.SURPRISED, dt)
+                talk, feeling == Emotion.SURPRISED, dt, red)
         } else for (side in arrayOf(-1f, 1f)) {
             val ex = cx + side * (gap / 2 + eyeW / 2)
             // eyes look a touch "closer" on the side they're glancing toward

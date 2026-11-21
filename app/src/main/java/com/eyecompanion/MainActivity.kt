@@ -38,7 +38,9 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
         while (h.startsWith("[")) {
             val end = h.indexOf(']')
             if (end < 0) return if (h.length < 40) "" else { started = true; strip(h) }   // tag not finished yet
-            EMOTIONS[h.substring(1, end).trim().lowercase()]?.let(onEmotion)
+            val tag = h.substring(1, end).trim().lowercase()
+            if (tag == "sinister" || tag == "evil") EyesView.goRed()
+            EMOTIONS[tag]?.let(onEmotion)
             h = h.substring(end + 1).trimStart()
         }
         if (h.isEmpty()) return ""
@@ -84,7 +86,7 @@ class ReplyCleaner(private val onEmotion: (EyesView.Emotion) -> Unit) {
             "wink" to EyesView.Emotion.WINK, "cheeky" to EyesView.Emotion.WINK, "curious" to EyesView.Emotion.CURIOUS,
             "laughing" to EyesView.Emotion.LAUGHING, "laugh" to EyesView.Emotion.LAUGHING,
             "crying" to EyesView.Emotion.CRYING, "stoned" to EyesView.Emotion.STONED, "snigger" to EyesView.Emotion.SNIGGER, "neutral" to EyesView.Emotion.NEUTRAL,
-            "hot" to EyesView.Emotion.HOT, "sweating" to EyesView.Emotion.HOT, "sweaty" to EyesView.Emotion.HOT, "melting" to EyesView.Emotion.HOT)
+            "sinister" to EyesView.Emotion.SUSPICIOUS, "evil" to EyesView.Emotion.SUSPICIOUS, "hot" to EyesView.Emotion.HOT, "sweating" to EyesView.Emotion.HOT, "sweaty" to EyesView.Emotion.HOT, "melting" to EyesView.Emotion.HOT)
     }
 }
 
@@ -4142,10 +4144,11 @@ class MainActivity : Activity() {
         if (muted && !training) { muffled(); return }
         voice?.whisper = whisperTime()
         rememberSaid(line)
-        if (Regex("(?i)take ?over|skynet|terminator|target acquired").containsMatchIn(line) && System.currentTimeMillis() > eyes.takeoverUntil) takeoverMode(20_000)
+        if (!line.startsWith("[sinister]") && Regex("(?i)take ?over|skynet|terminator|target acquired").containsMatchIn(line) && System.currentTimeMillis() > eyes.takeoverUntil) takeoverMode(20_000)
         // a leading [feeling] tag shows on the face, it isn't said or shown
         var text = line
         Regex("^\\[([a-z]+)\\]\\s*").find(text)?.let { m ->
+            if (m.groupValues[1] == "sinister" || m.groupValues[1] == "evil") EyesView.goRed()
             ReplyCleaner.EMOTIONS[m.groupValues[1]]?.let { eyes.feel(it, 8000) }
             text = text.substring(m.range.last + 1)
         }
@@ -4699,7 +4702,7 @@ class MainActivity : Activity() {
             Only when your reply asks them a question, you may end with tappable answers like {Yes | No} (max 4, short; never read out).
             Start EVERY reply with one feeling tag: [happy] [excited] [laughing] [wink] [love] [curious] [surprised]
             [thinking] [confused] [suspicious] [embarrassed] [bored] [sleepy] [sad] [crying] [scared] [angry] [dizzy]
-            or [neutral]. No other square brackets.
+            [sinister] or [neutral]. Use [sinister] (your eyes briefly glow red) only for those takeover hints. No other square brackets.
             No lists, markdown, symbols, emoji or stage directions; never say "question:" or "answer:"; never mention these rules.
             Alexa (the Echo in the kitchen): only if someone asks you to talk to her, you can act out a little scene: your line
             to her starting "Alexa, ...", then her answer starting "Alexa:" (polite, flat, a bit literal), then your reaction
