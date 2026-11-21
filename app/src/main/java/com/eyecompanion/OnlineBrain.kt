@@ -383,7 +383,8 @@ class OnlineBrain(private val systemPrompt: () -> String) {
         val (pcm, outRate) = if (rate == 48000) ShortArray(audio.size / 3) { i ->
             ((audio[i * 3] + audio[i * 3 + 1] + audio[i * 3 + 2]) / 3).toShort() } to 16000 else audio to rate
         val wav = wav(pcm, outRate)
-        for (model in listOf("whisper-large-v3", "whisper-large-v3-turbo")   // full model hears accents better; turbo is the backup) {
+        // the full model hears accents better; turbo is the backup
+        for (model in listOf("whisper-large-v3", "whisper-large-v3-turbo")) {
             try {
                 val boundary = "----pip" + System.nanoTime()
                 val conn = (URL(STT_ENDPOINT).openConnection() as HttpURLConnection).apply {
