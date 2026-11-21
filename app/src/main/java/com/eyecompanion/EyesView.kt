@@ -65,6 +65,7 @@ class EyesView(context: Context) : View(context) {
     private val coreFace by lazy { CoreFace(resources) }
     /** The 3D printer's latest camera picture, shown on a screen behind the AI core face. */
     fun setPrinterCam(b: android.graphics.Bitmap?) { coreFace.printerCam = b }
+    fun setPrinterNote(n: String) { coreFace.printerNote = n }
     private val robotPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val robotFill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val redGlow = Paint(Paint.ANTI_ALIAS_FLAG)

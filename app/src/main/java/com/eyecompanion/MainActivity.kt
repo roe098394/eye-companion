@@ -3158,14 +3158,26 @@ class MainActivity : Activity() {
     /** Every minute: say when a print finishes or fails (only while printing was seen). */
     /** With the AI core face on, a fresh printer camera picture every 8 seconds for the screen behind her. */
     private var camBusy = false
+    private var lastCamFind = 0L
     private val printerCamLoop = object : Runnable { override fun run() {
         main.postDelayed(this, 8000)
-        if (eyes.faceStyle != 3 || camBusy || phase == Phase.ASLEEP || printer.host == null) return
+        if (eyes.faceStyle != 3 || camBusy || phase == Phase.ASLEEP) return
         camBusy = true
         thread(name = "printer-cam") {
+            // not found yet (or it was off when Pip started): look for it again, at most once a minute
+            if (printer.host == null) {
+                val now = System.currentTimeMillis()
+                if (now - lastCamFind < 60_000) { main.post { camBusy = false }; return@thread }
+                lastCamFind = now
+                main.post { eyes.setPrinterNote("Looking for the printer…") }
+                val h = try { printer.find() } catch (_: Exception) { null }
+                if (h == null) { main.post { eyes.setPrinterNote("Printer not found on the Wi-Fi"); camBusy = false }; return@thread }
+                prefs.edit().putString("printerHost", h).apply()
+            }
             val bytes = try { printer.snapshot() } catch (_: Exception) { null }
+            if (bytes == null) main.post { eyes.setPrinterNote("No picture from ${printer.host}") }
             val bmp = bytes?.let { try { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = 2 }) } catch (_: Throwable) { null } }
-            main.post { if (bmp != null) eyes.setPrinterCam(bmp); camBusy = false }
+            main.post { if (bmp != null) { eyes.setPrinterCam(bmp); eyes.setPrinterNote("") }; camBusy = false }
         }
     } }
 

@@ -24,6 +24,10 @@ class CoreFace(private val res: Resources) {
 
     /** Latest picture from the printer's camera, shown on the screen bottom-left behind her (null = leave the screen as it is). */
     @Volatile var printerCam: Bitmap? = null
+    /** When there's no picture: why (shown small on the screen), or "" to leave the screen as it is. */
+    @Volatile var printerNote = ""
+    private val camRect = RectF()
+    private val noteText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(200, 190, 225, 255); textSize = 11f }
 
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val add = Paint(Paint.ANTI_ALIAS_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD) }
@@ -100,11 +104,22 @@ class CoreFace(private val res: Resources) {
         c.drawBitmap(b, 0f, 0f, p)
 
         // the printer's camera on the screen behind her, with faint scanlines
-        printerCam?.let { cam ->
-            c.drawBitmap(cam, null, SCREEN, camPaint)
+        // (if the tablet's shape crops that monitor off the edge, the picture floats just inside the edge instead)
+        val vw = w / (s * breathe); val vh = h / (s * breathe)
+        val vx0 = b.width / 2f - vw / 2; val vy1 = b.height / 2f + vh / 2
+        camRect.set(SCREEN)
+        if (camRect.left < vx0 + 8f) camRect.offset(vx0 + 8f - camRect.left, 0f)
+        if (camRect.bottom > vy1 - 8f) camRect.offset(0f, vy1 - 8f - camRect.bottom)
+        val cam = printerCam
+        if (cam != null) {
+            c.drawBitmap(cam, null, camRect, camPaint)
             fill.color = Color.argb(28, 0, 0, 0)
-            var y = SCREEN.top; while (y < SCREEN.bottom) { c.drawRect(SCREEN.left, y, SCREEN.right, y + 1f, fill); y += 3f }
-            fill.color = Color.argb(30, 120, 200, 255); c.drawRect(SCREEN, fill)
+            var y = camRect.top; while (y < camRect.bottom) { c.drawRect(camRect.left, y, camRect.right, y + 1f, fill); y += 3f }
+            fill.color = Color.argb(30, 120, 200, 255); c.drawRect(camRect, fill)
+        } else if (printerNote.isNotEmpty()) {
+            fill.color = Color.argb(150, 8, 18, 28); c.drawRect(camRect, fill)
+            c.drawText("PRINTER CAM", camRect.left + 8f, camRect.top + 16f, noteText)
+            c.drawText(printerNote, camRect.left + 8f, camRect.top + 32f, noteText)
         }
         // the screens behind her flicker a little
         fill.color = Color.argb((10 + Random.nextInt(10)), 0, 0, 0)
