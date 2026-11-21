@@ -17,9 +17,7 @@ class Elves {
         /** Where the real crack in Pip's glass is, as a fraction of the physical screen (from Mark's photos). */
         const val CRACK_X = 0.36f; const val CRACK_Y = 0.45f
         fun season(): Boolean {
-            val c = java.util.Calendar.getInstance()
-            val m = c.get(java.util.Calendar.MONTH); val d = c.get(java.util.Calendar.DAY_OF_MONTH)
-            return (m == java.util.Calendar.NOVEMBER && d >= 6) || (m == java.util.Calendar.DECEMBER && d <= 25)
+            return false        // elves removed (Mark, Nov 2026)
         }
     }
 
